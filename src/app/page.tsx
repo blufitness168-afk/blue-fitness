@@ -2,7 +2,8 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { CreditCard, User, LogOut } from "lucide-react";
 import { getPackagesBySlot, type TimeSlot } from "@/lib/mock-data";
 
 function formatPrice(price: number) {
@@ -16,6 +17,8 @@ export default function Home() {
     avatarUrl?: string;
     phone?: string;
   } | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     try {
@@ -25,6 +28,23 @@ export default function Home() {
       }
     } catch (e) {}
   }, []);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem("blu_member");
+    setMember(null);
+    setMenuOpen(false);
+  };
 
   const packages = getPackagesBySlot(activeSlot);
 
@@ -51,42 +71,93 @@ export default function Home() {
 
           <div className="flex items-center gap-3">
             {member ? (
-              <Link
-                href="/member"
-                className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/15 border border-[#ffd700]/30 transition-all group"
-              >
-                <div className="relative w-8 h-8 rounded-full overflow-hidden border border-[#ffd700] shrink-0 bg-[#003087] flex items-center justify-center text-xs font-bold text-[#ffd700]">
+              <div className="relative" ref={menuRef}>
+                {/* Circular Avatar Only */}
+                <button
+                  onClick={() => setMenuOpen(!menuOpen)}
+                  className="relative w-10 h-10 rounded-full overflow-hidden border-2 border-[#ffd700] bg-[#003087] flex items-center justify-center text-sm font-bold text-[#ffd700] hover:scale-105 transition-transform shadow-md focus:outline-none cursor-pointer"
+                  aria-label="User Menu"
+                >
                   {member.avatarUrl ? (
                     <Image
                       src={member.avatarUrl}
                       alt={member.fullName || "Member"}
                       fill
-                      sizes="32px"
+                      sizes="40px"
                       className="object-cover"
                     />
                   ) : (
                     <span>{member.fullName ? member.fullName.slice(0, 1) : "👤"}</span>
                   )}
-                </div>
-                <span className="text-white text-xs sm:text-sm font-semibold max-w-[120px] truncate hidden xs:inline group-hover:text-[#ffd700] transition-colors">
-                  {member.fullName}
-                </span>
-              </Link>
+                </button>
+
+                {/* Dropdown Menu */}
+                {menuOpen && (
+                  <div className="absolute right-0 mt-2.5 w-60 rounded-2xl bg-[#0d1b3e] border border-[#ffd700]/30 shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                    {/* Member Info Header */}
+                    <div className="px-4 py-3 bg-[#003087]/50 border-b border-white/10">
+                      <div className="text-[11px] text-[#ffd700] font-bold uppercase tracking-wider">
+                        สมาชิก BLU FITNESS
+                      </div>
+                      <div className="text-sm font-bold text-white truncate mt-0.5">
+                        {member.fullName || "สมาชิก"}
+                      </div>
+                      {member.phone && (
+                        <div className="text-xs text-slate-300 font-mono mt-0.5">
+                          {member.phone}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Menu Links */}
+                    <div className="p-1.5 space-y-1">
+                      <Link
+                        href="/member"
+                        onClick={() => setMenuOpen(false)}
+                        className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 hover:text-white hover:bg-white/10 transition-colors"
+                      >
+                        <CreditCard className="w-4 h-4 text-[#ffd700]" />
+                        <span>บัตรสมาชิกดิจิทัล & คูปอง</span>
+                      </Link>
+
+                      <Link
+                        href="/member"
+                        onClick={() => setMenuOpen(false)}
+                        className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 hover:text-white hover:bg-white/10 transition-colors"
+                      >
+                        <User className="w-4 h-4 text-sky-400" />
+                        <span>ข้อมูลสมาชิก (Profile)</span>
+                      </Link>
+                    </div>
+
+                    {/* Logout */}
+                    <div className="p-1.5 border-t border-white/10">
+                      <button
+                        onClick={handleLogout}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition-colors text-left cursor-pointer"
+                      >
+                        <LogOut className="w-4 h-4" />
+                        <span>ออกจากระบบ</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             ) : (
-              <>
+              <div className="flex items-center gap-1.5 sm:gap-3">
                 <Link
                   href="/member/login"
-                  className="text-white/70 hover:text-white text-sm font-medium transition-colors hidden sm:block"
+                  className="text-white/80 hover:text-white text-xs sm:text-sm font-semibold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg hover:bg-white/5 transition-colors"
                 >
                   เข้าสู่ระบบ
                 </Link>
                 <Link
-                  href="/member/login"
-                  className="btn-gold px-5 py-2 rounded-lg text-sm"
+                  href="/member/register"
+                  className="btn-gold px-3.5 py-1.5 sm:px-5 sm:py-2 rounded-lg text-xs sm:text-sm font-bold shadow-sm"
                 >
                   สมัครสมาชิก
                 </Link>
-              </>
+              </div>
             )}
           </div>
         </div>
@@ -129,7 +200,7 @@ export default function Home() {
 
             <div className="flex flex-row items-center gap-3.5 sm:gap-4 pt-2 w-full max-w-md">
               <Link
-                href="/member/login"
+                href="/member/register"
                 className="btn-gold flex-1 sm:flex-initial px-6 py-3.5 sm:px-8 rounded-xl text-center text-sm sm:text-base font-bold shadow-md whitespace-nowrap flex items-center justify-center"
               >
                 สมัครสมาชิก
@@ -183,8 +254,8 @@ export default function Home() {
               <button
                 onClick={() => setActiveSlot("07:00-14:00")}
                 className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all ${activeSlot === "07:00-14:00"
-                    ? "bg-[#003087] text-white shadow-md"
-                    : "text-[#64748b] hover:text-[#0a1628]"
+                  ? "bg-[#003087] text-white shadow-md"
+                  : "text-[#64748b] hover:text-[#0a1628]"
                   }`}
               >
                 07:00 - 14:00
@@ -192,8 +263,8 @@ export default function Home() {
               <button
                 onClick={() => setActiveSlot("07:00-22:00")}
                 className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all ${activeSlot === "07:00-22:00"
-                    ? "bg-[#003087] text-white shadow-md"
-                    : "text-[#64748b] hover:text-[#0a1628]"
+                  ? "bg-[#003087] text-white shadow-md"
+                  : "text-[#64748b] hover:text-[#0a1628]"
                   }`}
               >
                 07:00 - 22:00
@@ -214,19 +285,19 @@ export default function Home() {
                 <div
                   key={pkg.id}
                   className={`relative bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-lg transition-shadow flex flex-col ${isLast
-                      ? "ring-2 ring-[#ffd700]"
-                      : isDaily
-                        ? "ring-1 ring-slate-300 border border-slate-200"
-                        : "ring-2 ring-[#003087]"
+                    ? "ring-2 ring-[#ffd700]"
+                    : isDaily
+                      ? "ring-1 ring-slate-300 border border-slate-200"
+                      : "ring-2 ring-[#003087]"
                     }`}
                 >
                   {/* Badge */}
                   <div
                     className={`text-center py-1.5 text-xs font-bold tracking-wider uppercase ${isLast
-                        ? "bg-[#ffd700] text-[#0a1628]"
-                        : isDaily
-                          ? "bg-slate-500 text-white"
-                          : "bg-[#003087] text-white"
+                      ? "bg-[#ffd700] text-[#0a1628]"
+                      : isDaily
+                        ? "bg-slate-500 text-white"
+                        : "bg-[#003087] text-white"
                       }`}
                   >
                     {isLast ? "คุ้มที่สุด" : isDaily ? "ทั่วไป" : "ยอดนิยม"}
@@ -283,10 +354,10 @@ export default function Home() {
                     {/* CTA */}
                     <button
                       className={`w-full py-2.5 rounded-lg text-sm font-bold transition-all ${isLast
-                          ? "btn-gold"
-                          : isDaily
-                            ? "bg-slate-700 hover:bg-slate-800 text-white"
-                            : "btn-blue"
+                        ? "btn-gold"
+                        : isDaily
+                          ? "bg-slate-700 hover:bg-slate-800 text-white"
+                          : "btn-blue"
                         }`}
                     >
                       เลือกแพ็กเกจนี้
@@ -359,7 +430,7 @@ export default function Home() {
             </p>
           </div>
           <Link
-            href="/member/login"
+            href="/member/register"
             className="btn-gold px-8 py-3.5 rounded-lg text-base shrink-0"
           >
             สมัครสมาชิกเลย
