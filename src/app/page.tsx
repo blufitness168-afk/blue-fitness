@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import {
   CreditCard,
   QrCode,
@@ -20,8 +21,15 @@ export default function Home() {
       {/* Header */}
       <header className="max-w-6xl w-full mx-auto flex items-center justify-between z-10">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#003087] to-[#001845] border border-[#ffd700]/40 flex items-center justify-center font-black text-[#ffd700] text-xl shadow-[0_0_15px_rgba(0,48,135,0.8)]">
-            BLU
+          <div className="relative w-11 h-11 rounded-xl overflow-hidden border border-[#ffd700]/40 shadow-[0_0_15px_rgba(0,48,135,0.8)] shrink-0">
+            <Image
+              src="/logo.jpg"
+              alt="Blu Fitness Logo"
+              width={44}
+              height={44}
+              className="w-full h-full object-cover"
+              priority
+            />
           </div>
           <div>
             <div className="font-extrabold tracking-wider text-lg leading-tight">BLU FITNESS</div>

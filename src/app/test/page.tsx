@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import React, { useState, useEffect } from "react";
 import {
   Database,
@@ -123,8 +124,17 @@ export default function TestServicesPage() {
               </span>
               <span className="text-xs text-slate-400">Environment: Staging / Dev</span>
             </div>
-            <h1 className="text-3xl font-extrabold tracking-tight text-white flex items-center gap-2">
-              🏋️‍♂️ Blu Fitness <span className="text-[#ffd700] text-xl font-normal">| ตรวจสอบสถานะ API & Database</span>
+            <h1 className="text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
+              <div className="relative w-9 h-9 rounded-lg overflow-hidden border border-[#ffd700]/40 shadow-sm shrink-0">
+                <Image
+                  src="/logo.jpg"
+                  alt="Blu Fitness Logo"
+                  width={36}
+                  height={36}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <span>Blu Fitness</span> <span className="text-[#ffd700] text-xl font-normal hidden sm:inline">| ตรวจสอบสถานะ API & Database</span>
             </h1>
           </div>
 
