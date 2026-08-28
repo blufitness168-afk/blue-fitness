@@ -19,6 +19,7 @@ import {
   LogOut,
   ArrowRight,
   ShieldCheck,
+  Gift,
 } from "lucide-react";
 
 export default function MemberDashboardPage() {
@@ -65,7 +66,7 @@ export default function MemberDashboardPage() {
 
   if (!member) {
     return (
-      <div className="min-h-screen bg-[#0a1628] flex items-center justify-center text-white">
+      <div className="min-h-screen bg-[#f1f5f9] flex items-center justify-center text-slate-800">
         <div className="w-8 h-8 border-3 border-[#0047ba] border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -83,15 +84,15 @@ export default function MemberDashboardPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#0a1628] text-white pb-16">
+    <main className="min-h-screen bg-[#f1f5f9] text-slate-800 pb-16">
       {/* ═══════════════════════════════════════════════
-          NAVBAR
+          NAVBAR (Light Glass on Gray Background)
       ═══════════════════════════════════════════════ */}
-      <header className="sticky top-0 z-40 bg-[#0a1628]/95 backdrop-blur-md border-b border-white/10">
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
         <div className="max-w-2xl mx-auto px-4 h-15 flex items-center justify-between">
           <Link
             href="/"
-            className="flex items-center gap-1.5 text-xs text-white/70 hover:text-white transition-colors"
+            className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-900 transition-colors font-medium"
           >
             <ChevronLeft className="w-4 h-4" />
             <span>หน้าหลัก</span>
@@ -106,7 +107,7 @@ export default function MemberDashboardPage() {
               className="w-[38px] h-[38px] rounded-lg object-cover"
               priority
             />
-            <span className="font-extrabold tracking-wider text-sm text-white">
+            <span className="font-extrabold tracking-wider text-sm text-[#0a1628]">
               BLU FITNESS
             </span>
           </div>
@@ -114,7 +115,7 @@ export default function MemberDashboardPage() {
           <button
             onClick={handleLogout}
             title="ออกจากระบบ"
-            className="text-xs text-white/50 hover:text-rose-400 flex items-center gap-1 transition-colors cursor-pointer"
+            className="text-xs text-slate-500 hover:text-rose-600 flex items-center gap-1 transition-colors cursor-pointer font-medium"
           >
             <LogOut className="w-3.5 h-3.5" />
             <span className="hidden xs:inline">ออก</span>
@@ -131,36 +132,39 @@ export default function MemberDashboardPage() {
             1. REALISTIC BLU FITNESS PHYSICAL CARD REPLICA
         ═══════════════════════════════════════════════ */}
         <section className="relative">
-          {/* Card Body (Rounded-2xl, Direct White Card, Zero outer shadow) */}
-          <div className="relative aspect-[1.58/1] w-full bg-white rounded-2xl overflow-hidden border border-slate-300 flex select-none">
+          {/* Card Body (Rounded-2xl, Clean White Card on Gray Background with Natural Drop Shadow) */}
+          <div className="relative aspect-[1.58/1] w-full bg-white rounded-2xl overflow-hidden border border-slate-200/80 shadow-lg flex select-none">
             
+            {/* ── Left Edge Blue Accent (Full Height with Center-to-Edge Gradient) ── */}
+            <div className="absolute inset-y-0 left-0 w-2.5 sm:w-3 bg-gradient-to-b from-[#001f5c] via-[#0052cc] to-[#001f5c] rounded-l-2xl z-20" />
+
             {/* ── Left 58%: White & Stacked Large Logo & Clean Single-Line Fields ── */}
-            <div className="flex-1 p-4 sm:p-6 flex flex-col justify-between relative bg-white">
+            <div className="flex-1 pl-6 pr-3 py-3.5 sm:pl-8 sm:pr-4 sm:py-4 flex flex-col justify-between relative bg-white">
               
-              {/* Stacked Large Brand Logo (Icon on top, BLU, FITNESS) */}
-              <div className="flex flex-col items-start">
-                <div className="relative w-32 h-32">
+              {/* Stacked Large Brand Logo (Big Icon with BLU pulled tight underneath) */}
+              <div className="flex flex-col items-start z-10">
+                <div className="relative w-[136px] h-[136px] sm:w-[154px] sm:h-[154px] -ml-2 -mt-3">
                   <Image
                     src="/logo.jpg"
                     alt="Blu Fitness Logo"
                     fill
-                    sizes="320px"
+                    sizes="350px"
                     className="object-contain"
                     priority
                   />
                 </div>
-                <div className="mt-1">
-                  <div className="text-2xl sm:text-3xl font-black tracking-tight text-[#0047ba] leading-none">
+                <div className="-mt-4 sm:-mt-5 relative z-20">
+                  <div className="text-4xl sm:text-5xl font-black tracking-tight text-[#0047ba] leading-none drop-shadow-xs">
                     BLU
                   </div>
-                  <div className="text-[11px] sm:text-xs font-black tracking-[0.25em] text-[#0a1628] uppercase mt-0.5">
+                  <div className="text-sm sm:text-base font-black tracking-[0.24em] text-[#0a1628] uppercase mt-0.5">
                     FITNESS
                   </div>
                 </div>
               </div>
 
-              {/* Member & Date Underlined Fields (Strictly 1 Line Each) */}
-              <div className="space-y-2.5 z-10">
+              {/* Member & Date Underlined Fields (Strictly 1 Line Each with clean underlines) */}
+              <div className="space-y-2 sm:space-y-2.5 z-10">
                 {/* Member Name (1 Line) */}
                 <div>
                   <div className="flex items-baseline gap-1.5 text-xs sm:text-sm whitespace-nowrap">
@@ -169,7 +173,7 @@ export default function MemberDashboardPage() {
                       {member.fullName}
                     </span>
                   </div>
-                  <div className="h-[1.5px] bg-[#0047ba] w-full mt-0.5" />
+                  <div className="h-[1.5px] bg-[#0047ba] w-full mt-0.5 opacity-80" />
                 </div>
 
                 {/* Date (1 Line) */}
@@ -185,36 +189,28 @@ export default function MemberDashboardPage() {
                       (เหลือ {activePackage.daysLeft} วัน)
                     </span>
                   </div>
-                  <div className="h-[1.5px] bg-[#0047ba] w-full mt-0.5" />
+                  <div className="h-[1.5px] bg-[#0047ba] w-full mt-0.5 opacity-80" />
                 </div>
               </div>
             </div>
 
-            {/* ── Right 42%: Deep Metallic Blue Tab with Large QR ── */}
+            {/* ── Right 40%: Metallic Deep Blue Tab (Subtle Diagonal Metallic Sheen & Pure QR) ── */}
             <div
               onClick={() => setQrModalOpen(true)}
-              className="w-[42%] bg-gradient-to-b from-[#0047ba] via-[#003087] to-[#001f5c] p-3 sm:p-4 flex flex-col items-center justify-center text-center text-white relative cursor-pointer hover:brightness-110 transition-all border-l border-[#003087]"
+              className="w-[40%] bg-[linear-gradient(135deg,_#001844_0%,_#00318c_25%,_#006eff_50%,_#00318c_75%,_#001844_100%)] p-3 sm:p-4 flex flex-col items-center justify-center text-center text-white relative cursor-pointer hover:brightness-110 transition-all border-l border-[#003087]"
               title="แตะเพื่อขยาย QR Code"
             >
-              {/* Large QR Code Container */}
-              <div className="p-2 sm:p-2.5 bg-white rounded-lg shadow-sm transition-transform hover:scale-105 z-10">
+              {/* Direct QR Code with Transparent Background (Printed on Blue Metal) */}
+              <div className="transition-transform hover:scale-105 z-10">
                 <QRCodeSVG
                   value={member.memberCode || "BLU-1001"}
-                  size={140}
+                  size={150}
                   level="H"
+                  bgColor="transparent"
+                  fgColor="#051329"
                   marginSize={0}
-                  className="w-22 h-22 sm:w-28 sm:h-28"
+                  className="w-24 h-24 sm:w-30 sm:h-30 drop-shadow-xs"
                 />
-              </div>
-
-              {/* Member Code Below QR */}
-              <div className="mt-2.5 z-10">
-                <div className="font-mono font-black text-xs sm:text-sm tracking-wider text-[#ffd700]">
-                  {member.memberCode || "BLU-1001"}
-                </div>
-                <span className="inline-flex items-center gap-1 text-[9px] sm:text-[10px] text-white/90 font-bold mt-0.5 whitespace-nowrap">
-                  <Maximize2 className="w-2.5 h-2.5" /> แตะเพื่อขยาย
-                </span>
               </div>
             </div>
 
@@ -222,66 +218,162 @@ export default function MemberDashboardPage() {
         </section>
 
         {/* ═══════════════════════════════════════════════
-            2. PRIVILEGES DASHBOARD (2 BOXES)
+            2. BLU POINT 10-SLOT STAMP CARD (Luxury Navy & Gold Theme - Sharp Corners)
         ═══════════════════════════════════════════════ */}
-        <section className="grid grid-cols-2 gap-3.5">
-          {/* Box 1: Points */}
-          <div className="bg-[#0f2240] p-4 border border-white/10 flex flex-col justify-between shadow-md">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="w-8 h-8 bg-[#ffd700]/15 flex items-center justify-center text-[#ffd700] border border-[#ffd700]/30">
-                  <Sparkles className="w-4 h-4" />
-                </div>
-                <span className="text-[10px] text-white/50 font-bold uppercase tracking-wider">
-                  คะแนน
-                </span>
-              </div>
-              <div className="text-2xl font-black text-white">
-                {member.points ?? 25}
-                <span className="text-xs text-white/60 font-normal ml-1">แต้ม</span>
-              </div>
-              <p className="text-[11px] text-white/50 mt-0.5">
-                +1 แต้มทุกครั้งที่เช็คอิน
-              </p>
+        <section className="bg-gradient-to-br from-[#003087] via-[#0a1838] to-[#050e24] text-white rounded-none p-5 border-2 border-[#ffd700]/50 shadow-xl space-y-4 relative overflow-hidden">
+          {/* Header Row: BLU POINT (Gold) & Total Points Summary (Right) */}
+          <div className="flex items-center justify-between pb-3.5 border-b border-white/15">
+            <h3 className="text-base sm:text-lg font-black tracking-wider text-[#ffd700] uppercase">
+              BLU POINT
+            </h3>
+            <div className="font-mono font-black text-sm sm:text-base">
+              <span className="text-[#ffd700] text-xl sm:text-2xl font-black">{member.points ?? 35}</span>
+              <span className="text-white/60 font-bold ml-1">/ 100</span>
             </div>
+          </div>
 
+          {/* 10-Slot Stamp Grid (5 columns x 2 rows) */}
+          <div className="grid grid-cols-5 gap-2 sm:gap-3">
+            {Array.from({ length: 10 }).map((_, i) => {
+              const slotNum = i + 1;
+              const slotStart = i * 10;
+              const slotEnd = slotNum * 10;
+              const currentPts = member.points ?? 35;
+              let fill = 0;
+              if (currentPts >= slotEnd) {
+                fill = 100;
+              } else if (currentPts > slotStart) {
+                fill = Math.round(((currentPts - slotStart) / 10) * 100);
+              }
+              const gradId = `db-stamp-gold-${slotNum}`;
+              return (
+                <div
+                  key={i}
+                  className={`aspect-square rounded-none flex flex-col items-center justify-center p-1 relative transition-all ${
+                    fill === 100
+                      ? "bg-[#ffd700]/15 border-2 border-[#ffd700] shadow-[0_0_12px_rgba(255,215,0,0.25)]"
+                      : fill > 0
+                      ? "bg-white/10 border border-[#ffd700]/70"
+                      : "bg-white/5 border border-white/10"
+                  }`}
+                >
+                  <span className={`absolute top-1 left-1.5 text-[8px] sm:text-[9px] font-mono font-bold ${
+                    fill > 0 ? "text-[#ffd700]" : "text-white/30"
+                  }`}>
+                    {slotNum * 10}
+                  </span>
+                  <svg
+                    viewBox="0 0 44 44"
+                    className="w-full h-full p-0.5 sm:p-1 max-w-[58px] max-h-[58px] drop-shadow-xs"
+                  >
+                    <defs>
+                      <linearGradient id={gradId} gradientUnits="userSpaceOnUse" x1="0" y1="22" x2="44" y2="22">
+                        <stop offset={`${fill}%`} stopColor="#ffd700" />
+                        <stop offset={`${fill}%`} stopColor="#334155" />
+                      </linearGradient>
+                    </defs>
+                    {/* 45-Degree Diagonal Large Dumbbell with Separated Plate Gaps */}
+                    <g transform="rotate(-45 22 22)" fill={`url(#${gradId})`}>
+                      {/* Central Grip Bar */}
+                      <rect x="12.5" y="18" width="19" height="8" rx="4" />
+                      {/* Left Inner Plate */}
+                      <rect x="5.5" y="10" width="5.5" height="24" rx="2.5" />
+                      {/* Left Outer Plate (with 1.5px gap) */}
+                      <rect x="0" y="13" width="4" height="18" rx="2" />
+                      {/* Right Inner Plate */}
+                      <rect x="33" y="10" width="5.5" height="24" rx="2.5" />
+                      {/* Right Outer Plate (with 1.5px gap) */}
+                      <rect x="40" y="13" width="4" height="18" rx="2" />
+                    </g>
+                  </svg>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Bottom Action: Redeem Rewards with Underline */}
+          <div className="pt-1 text-center">
             <Link
               href="/member/rewards"
-              className="mt-3 py-2 px-3 bg-white/10 hover:bg-white/15 text-xs font-semibold text-[#ffd700] flex items-center justify-between transition-colors border border-white/10"
+              className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-[#ffd700] hover:text-[#ffe55b] transition-colors underline underline-offset-4 decoration-[#ffd700]/70 hover:decoration-[#ffd700] cursor-pointer"
             >
-              <span>แลกของรางวัล</span>
-              <ArrowRight className="w-3 h-3" />
+              <span>แลกรางวัล</span>
+              <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </div>
+        </section>
 
-          {/* Box 2: Friend Pass Coupons */}
-          <div className="bg-[#0f2240] p-4 border border-white/10 flex flex-col justify-between shadow-md">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="w-8 h-8 bg-sky-500/15 flex items-center justify-center text-sky-400 border border-sky-500/30">
-                  <Ticket className="w-4 h-4" />
-                </div>
-                <span className="text-[10px] text-white/50 font-bold uppercase tracking-wider">
-                  คูปอง
+        {/* ═══════════════════════════════════════════════
+            3. LUXURY NAVY & GOLD FRIEND PASS TICKET (100% True Transparent Vector SVG)
+        ═══════════════════════════════════════════════ */}
+        <section>
+          <Link
+            href="/member/coupons"
+            className="block relative w-full max-w-md mx-auto hover:scale-[1.02] transition-transform group cursor-pointer select-none"
+          >
+            {/* 100% True Transparent Vector Ticket Graphic */}
+            <svg
+              viewBox="0 0 460 230"
+              className="w-full h-auto drop-shadow-xl"
+            >
+              <defs>
+                {/* Deep Royal Navy Gradient */}
+                <linearGradient id="navyTicketGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#0d235c" />
+                  <stop offset="50%" stopColor="#08173d" />
+                  <stop offset="100%" stopColor="#050e26" />
+                </linearGradient>
+
+                {/* Metallic Gold Sheen Gradient */}
+                <linearGradient id="goldTicketGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#f59e0b" />
+                  <stop offset="25%" stopColor="#ffd700" />
+                  <stop offset="50%" stopColor="#fff3b0" />
+                  <stop offset="75%" stopColor="#ffd700" />
+                  <stop offset="100%" stopColor="#d97706" />
+                </linearGradient>
+              </defs>
+
+              {/* Main Ticket Base with Sharp 90° Corners & Side Notches */}
+              <path
+                d="M 16 12 L 444 12 L 444 32 A 5 5 0 0 0 444 44 L 444 54 A 5 5 0 0 0 444 66 L 444 90 A 25 25 0 0 0 444 140 L 444 164 A 5 5 0 0 0 444 176 L 444 186 A 5 5 0 0 0 444 198 L 444 218 L 16 218 L 16 198 A 5 5 0 0 0 16 186 L 16 176 A 5 5 0 0 0 16 164 L 16 140 A 25 25 0 0 0 16 90 L 16 66 A 5 5 0 0 0 16 54 L 16 44 A 5 5 0 0 0 16 32 L 16 12 Z"
+                fill="url(#navyTicketGrad)"
+              />
+
+              {/* Inner Luxury Gold Border with Sharp 90° Corners (Curves only Around Notches) */}
+              <path
+                d="M 34 26 L 426 26 L 426 84 A 26 26 0 0 0 426 146 L 426 204 L 34 204 L 34 146 A 26 26 0 0 0 34 84 L 34 26 Z"
+                fill="none"
+                stroke="url(#goldTicketGrad)"
+                strokeWidth="3.5"
+              />
+            </svg>
+
+            {/* Centered Golden & White Typography Inside Ticket Frame */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-center z-10 px-8 sm:px-12 py-3">
+              <div className="space-y-1">
+                <span className="inline-block text-[10px] sm:text-[11px] font-black tracking-widest text-[#ffd700] uppercase drop-shadow-sm">
+                  ✦ BLU FITNESS VIP PASS ✦
                 </span>
-              </div>
-              <div className="text-2xl font-black text-white">
-                {activePackage.friendCouponsLeft}
-                <span className="text-xs text-white/60 font-normal ml-1">สิทธิ์</span>
-              </div>
-              <p className="text-[11px] text-white/50 mt-0.5">
-                พาเพื่อนมาเล่นฟรี
-              </p>
-            </div>
+                
+                <h4 className="text-2xl sm:text-3xl font-black text-white tracking-tight uppercase leading-none drop-shadow-md">
+                  FRIEND PASS
+                </h4>
 
-            <Link
-              href="/member/coupons"
-              className="mt-3 py-2 px-3 bg-white/10 hover:bg-white/15 text-xs font-semibold text-sky-300 flex items-center justify-between transition-colors border border-white/10"
-            >
-              <span>เปิดคูปอง</span>
-              <ArrowRight className="w-3 h-3" />
-            </Link>
-          </div>
+                <p className="text-xs sm:text-sm font-bold text-slate-200 mt-1">
+                  คูปองชวนเพื่อนเล่นฟรี · คงเหลือ{" "}
+                  <span className="text-[#ffd700] text-base sm:text-lg font-black">{activePackage.friendCouponsLeft}</span> สิทธิ์
+                </p>
+
+                <div className="pt-1">
+                  <span className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-black text-[#ffd700] underline underline-offset-4 decoration-[#ffd700]/70 group-hover:text-[#ffe55b]">
+                    <span>เปิดใช้งานคูปอง</span>
+                    <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                  </span>
+                </div>
+              </div>
+            </div>
+          </Link>
         </section>
 
         {/* ═══════════════════════════════════════════════
@@ -290,7 +382,7 @@ export default function MemberDashboardPage() {
         <section>
           <Link
             href="/member/packages"
-            className="w-full btn-gold py-4 px-6 text-center font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all cursor-pointer border-2 border-[#ffd700]"
+            className="w-full btn-gold py-4 px-6 rounded-2xl text-center font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer"
           >
             <CreditCard className="w-5 h-5" />
             <span>ซื้อแพ็กเกจ / ต่ออายุสมาชิก</span>
@@ -298,52 +390,79 @@ export default function MemberDashboardPage() {
         </section>
 
         {/* ═══════════════════════════════════════════════
-            4. MEMBER PERSONAL DETAILS
+            4. MEMBER PERSONAL DETAILS (White Card on Gray with Profile Photo)
         ═══════════════════════════════════════════════ */}
-        <section className="bg-[#0d1b3e]/80 p-5 border border-white/10 space-y-3 text-xs shadow-md">
-          <div className="flex items-center justify-between pb-2.5 border-b border-white/10">
-            <h3 className="font-bold text-sm text-white flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-[#ffd700]" />
-              ข้อมูลสมาชิก
-            </h3>
-            <span className="text-[11px] text-emerald-400 flex items-center gap-1 font-semibold">
-              <CheckCircle2 className="w-3.5 h-3.5" /> ยืนยันตัวตนแล้ว
+        <section className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4 text-xs">
+          {/* Header Row: Member Avatar Profile Image + Name & Verified Badge */}
+          <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
+            <div className="flex items-center gap-3">
+              {/* Member Avatar Photo */}
+              <div className="relative w-13 h-13 rounded-full overflow-hidden bg-gradient-to-br from-[#003087] via-[#0052cc] to-[#001f5c] border-2 border-white shadow-sm ring-2 ring-slate-100 flex items-center justify-center shrink-0">
+                {member.avatarUrl ? (
+                  <Image
+                    src={member.avatarUrl}
+                    alt={member.fullName}
+                    fill
+                    className="object-cover"
+                  />
+                ) : (
+                  <span className="text-base font-black text-white">
+                    {member.fullName ? member.fullName.charAt(0) : "ส"}
+                  </span>
+                )}
+              </div>
+
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <h3 className="font-extrabold text-sm sm:text-base text-slate-900 leading-tight">
+                    {member.fullName}
+                  </h3>
+                  <ShieldCheck className="w-4 h-4 text-[#003087] shrink-0" />
+                </div>
+                <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                  รหัสสมาชิก: <span className="font-bold text-slate-700">{member.memberCode}</span>
+                </p>
+              </div>
+            </div>
+
+            <span className="text-[11px] text-emerald-600 flex items-center gap-1 font-bold bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 shrink-0">
+              <CheckCircle2 className="w-3.5 h-3.5" /> ยืนยันแล้ว
             </span>
           </div>
 
-          <div className="space-y-2.5 text-slate-300">
+          <div className="space-y-2.5 text-slate-600">
             <div className="flex items-center justify-between">
-              <span className="text-white/50 flex items-center gap-1.5">
-                <CreditCard className="w-3.5 h-3.5" /> แพ็กเกจปัจจุบัน
+              <span className="text-slate-500 flex items-center gap-1.5">
+                <CreditCard className="w-3.5 h-3.5 text-slate-400" /> แพ็กเกจปัจจุบัน
               </span>
-              <span className="font-bold text-white text-right">
+              <span className="font-bold text-slate-900 text-right">
                 {activePackage.name}
               </span>
             </div>
 
             <div className="flex items-center justify-between">
-              <span className="text-white/50 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5" /> วันหมดอายุ
+              <span className="text-slate-500 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-slate-400" /> วันหมดอายุ
               </span>
-              <span className="font-semibold text-[#ffd700]">
+              <span className="font-bold text-[#003087]">
                 {activePackage.expireDate}
               </span>
             </div>
 
             <div className="flex items-center justify-between">
-              <span className="text-white/50 flex items-center gap-1.5">
-                <Phone className="w-3.5 h-3.5" /> เบอร์โทรศัพท์
+              <span className="text-slate-500 flex items-center gap-1.5">
+                <Phone className="w-3.5 h-3.5 text-slate-400" /> เบอร์โทรศัพท์
               </span>
-              <span className="font-mono font-bold text-white">
+              <span className="font-mono font-bold text-slate-900">
                 {member.phone}
               </span>
             </div>
 
             <div className="flex items-center justify-between">
-              <span className="text-white/50 flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5" /> วันเกิด
+              <span className="text-slate-500 flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-slate-400" /> วันเกิด
               </span>
-              <span className="font-semibold text-white">
+              <span className="font-semibold text-slate-900">
                 {member.birthDay && member.birthMonth
                   ? `${member.birthDay} ${member.birthMonth}`
                   : "15 สิงหาคม"}
@@ -364,23 +483,23 @@ export default function MemberDashboardPage() {
         >
           <button
             onClick={() => setQrModalOpen(false)}
-            className="absolute top-6 right-6 w-10 h-10 bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer border border-white/20"
+            className="absolute top-6 right-6 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
 
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white p-8 text-center max-w-xs w-full shadow-2xl border-4 border-[#0047ba]"
+            className="bg-white rounded-3xl p-8 text-center max-w-xs w-full shadow-2xl animate-in zoom-in-95 duration-150"
           >
-            <div className="text-xs font-black text-[#0047ba] uppercase tracking-wider mb-1">
+            <div className="text-xs font-bold text-[#003087] uppercase tracking-wider mb-1">
               BLU FITNESS CHECK-IN
             </div>
             <div className="text-base font-bold text-[#0a1628] mb-4 truncate">
               {member.fullName}
             </div>
 
-            <div className="inline-block p-4 bg-[#f8fafc] border-2 border-slate-200 shadow-inner">
+            <div className="inline-block p-4 bg-[#f8fafc] rounded-2xl border border-slate-200 shadow-inner">
               <QRCodeSVG
                 value={member.memberCode || "BLU-1001"}
                 size={230}
@@ -389,11 +508,11 @@ export default function MemberDashboardPage() {
               />
             </div>
 
-            <div className="mt-4 font-mono font-black text-2xl text-[#0047ba] tracking-widest">
+            <div className="mt-4 font-mono font-black text-2xl text-[#003087] tracking-widest">
               {member.memberCode || "BLU-1001"}
             </div>
 
-            <p className="text-xs text-slate-500 mt-2 font-medium">
+            <p className="text-xs text-slate-500 mt-2">
               ยื่นหน้าจอนี้ให้พนักงานสแกนเช็คอิน
             </p>
           </div>
