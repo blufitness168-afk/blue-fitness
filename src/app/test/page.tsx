@@ -1,0 +1,366 @@
+"use client";
+
+import React, { useState, useEffect } from "react";
+import {
+  Database,
+  Cloud,
+  Receipt,
+  MessageSquare,
+  Smartphone,
+  CheckCircle2,
+  XCircle,
+  RefreshCw,
+  Send,
+  Zap,
+  ShieldCheck,
+  Activity,
+  ArrowRight,
+} from "lucide-react";
+
+interface ServiceResult {
+  status: "SUCCESS" | "ERROR" | "IDLE" | "TESTING";
+  latencyMs?: number;
+  data?: any;
+  error?: string;
+}
+
+export default function TestServicesPage() {
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState<{
+    database?: ServiceResult;
+    cloudinary?: ServiceResult;
+    easyslip?: ServiceResult;
+    thaibulksms?: ServiceResult;
+    line?: ServiceResult;
+  }>({});
+
+  // SMS Test Box state
+  const [testPhone, setTestPhone] = useState("0973355322");
+  const [smsSending, setSmsSending] = useState(false);
+  const [smsResult, setSmsResult] = useState<any>(null);
+
+  const runAllTests = async () => {
+    setLoading(true);
+    setResults({
+      database: { status: "TESTING" },
+      cloudinary: { status: "TESTING" },
+      easyslip: { status: "TESTING" },
+      thaibulksms: { status: "TESTING" },
+      line: { status: "TESTING" },
+    });
+
+    try {
+      const res = await fetch("/api/test-services", { cache: "no-store" });
+      const data = await res.json();
+      setResults(data.results || {});
+    } catch (err: any) {
+      console.error("Test fetch error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    runAllTests();
+  }, []);
+
+  const sendTestSms = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!testPhone) return;
+    setSmsSending(true);
+    setSmsResult(null);
+
+    try {
+      const res = await fetch("/api/test-services", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "send-test-sms",
+          phone: testPhone,
+          message: `[Blu Fitness] รหัส OTP ทดสอบระบบคือ ${Math.floor(100000 + Math.random() * 900000)} (Ref: BLU)`,
+        }),
+      });
+      const data = await res.json();
+      setSmsResult(data);
+    } catch (err: any) {
+      setSmsResult({ success: false, error: err.message });
+    } finally {
+      setSmsSending(false);
+    }
+  };
+
+  const getStatusBadge = (res?: ServiceResult) => {
+    if (!res || res.status === "TESTING") {
+      return (
+        <span className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-500/20 text-blue-400 animate-pulse border border-blue-500/30">
+          <RefreshCw className="w-3 h-3 animate-spin" /> กำลังทดสอบ...
+        </span>
+      );
+    }
+    if (res.status === "SUCCESS") {
+      return (
+        <span className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+          <CheckCircle2 className="w-3.5 h-3.5" /> ใช้งานได้ปกติ ({res.latencyMs}ms)
+        </span>
+      );
+    }
+    return (
+      <span className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30">
+        <XCircle className="w-3.5 h-3.5" /> มีข้อผิดพลาด
+      </span>
+    );
+  };
+
+  return (
+    <main className="min-h-screen bg-[#060b19] text-slate-100 py-10 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-5xl mx-auto space-y-8">
+        {/* Header Section */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-amber-500/20">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="px-2.5 py-0.5 rounded text-xs font-extrabold bg-[#003087] text-[#ffd700] border border-[#ffd700]/30 tracking-wider">
+                DIAGNOSTICS & HEALTH CHECK
+              </span>
+              <span className="text-xs text-slate-400">Environment: Staging / Dev</span>
+            </div>
+            <h1 className="text-3xl font-extrabold tracking-tight text-white flex items-center gap-2">
+              🏋️‍♂️ Blu Fitness <span className="text-[#ffd700] text-xl font-normal">| ตรวจสอบสถานะ API & Database</span>
+            </h1>
+          </div>
+
+          <button
+            onClick={runAllTests}
+            disabled={loading}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm bg-gradient-to-r from-[#ffd700] to-[#e6c200] text-[#060b19] hover:shadow-[0_0_20px_rgba(255,215,0,0.4)] transition-all disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            {loading ? "กำลังวิเคราะห์..." : "ทดสอบระบบทั้งหมดอีกครั้ง"}
+          </button>
+        </div>
+
+        {/* 5 Core Services Status Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* 1. Neon Database */}
+          <div className="bg-[#0d1b3e]/80 backdrop-blur-md rounded-2xl p-5 border border-amber-500/15 hover:border-amber-500/40 transition-all flex flex-col justify-between">
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                  <Database className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg text-white">Neon PostgreSQL</h3>
+                  <p className="text-xs text-slate-400">Serverless Pooling Database</p>
+                </div>
+              </div>
+              {getStatusBadge(results.database)}
+            </div>
+
+            <div className="bg-[#060b19]/60 rounded-xl p-3 text-xs font-mono text-slate-300 space-y-1">
+              {results.database?.status === "SUCCESS" ? (
+                <>
+                  <div className="text-emerald-400 font-semibold">✓ Connected successfully</div>
+                  <div className="text-slate-400 truncate">Time: {results.database.data?.serverTime}</div>
+                  <div className="text-slate-400">Engine: {results.database.data?.version}</div>
+                </>
+              ) : (
+                <div className="text-rose-400 break-words">{results.database?.error || "ยังไม่ได้ทดสอบ"}</div>
+              )}
+            </div>
+          </div>
+
+          {/* 2. Cloudinary */}
+          <div className="bg-[#0d1b3e]/80 backdrop-blur-md rounded-2xl p-5 border border-amber-500/15 hover:border-amber-500/40 transition-all flex flex-col justify-between">
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                  <Cloud className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg text-white">Cloudinary Storage</h3>
+                  <p className="text-xs text-slate-400">Media CDN & Image Optimization</p>
+                </div>
+              </div>
+              {getStatusBadge(results.cloudinary)}
+            </div>
+
+            <div className="bg-[#060b19]/60 rounded-xl p-3 text-xs font-mono text-slate-300 space-y-1">
+              {results.cloudinary?.status === "SUCCESS" ? (
+                <>
+                  <div className="text-emerald-400 font-semibold">✓ Cloudinary ping: OK</div>
+                  <div className="text-slate-400">Cloud Name: {results.cloudinary.data?.cloudName}</div>
+                </>
+              ) : (
+                <div className="text-rose-400 break-words">{results.cloudinary?.error || "ยังไม่ได้ทดสอบ"}</div>
+              )}
+            </div>
+          </div>
+
+          {/* 3. EasySlip API */}
+          <div className="bg-[#0d1b3e]/80 backdrop-blur-md rounded-2xl p-5 border border-amber-500/15 hover:border-amber-500/40 transition-all flex flex-col justify-between">
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <Receipt className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg text-white">EasySlip API</h3>
+                  <p className="text-xs text-slate-400">ระบบตรวจสลิปโอนเงิน PromptPay</p>
+                </div>
+              </div>
+              {getStatusBadge(results.easyslip)}
+            </div>
+
+            <div className="bg-[#060b19]/60 rounded-xl p-3 text-xs font-mono text-slate-300 space-y-1">
+              {results.easyslip?.status === "SUCCESS" ? (
+                <>
+                  <div className="text-emerald-400 font-semibold">✓ {results.easyslip.data?.message || "Connected"}</div>
+                  <div className="text-slate-400">
+                    Status: {results.easyslip.data?.statusText || "Ready"}
+                  </div>
+                </>
+              ) : (
+                <div className="text-rose-400 break-words">
+                  {results.easyslip?.data?.message || results.easyslip?.error || "ยังไม่ได้ทดสอบ"}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 4. ThaiBulkSMS */}
+          <div className="bg-[#0d1b3e]/80 backdrop-blur-md rounded-2xl p-5 border border-amber-500/15 hover:border-amber-500/40 transition-all flex flex-col justify-between">
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  <Smartphone className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg text-white">ThaiBulkSMS Gateway</h3>
+                  <p className="text-xs text-slate-400">ระบบส่ง SMS OTP สมัครสมาชิก</p>
+                </div>
+              </div>
+              {getStatusBadge(results.thaibulksms)}
+            </div>
+
+            <div className="bg-[#060b19]/60 rounded-xl p-3 text-xs font-mono text-slate-300 space-y-1">
+              {results.thaibulksms?.status === "SUCCESS" ? (
+                <>
+                  <div className="text-emerald-400 font-semibold">✓ Authentication Valid</div>
+                  <div className="text-slate-400">
+                    Remaining Credit: {results.thaibulksms.data?.credit ?? "OK"}
+                  </div>
+                </>
+              ) : (
+                <div className="text-rose-400 break-words">
+                  {results.thaibulksms?.data?.message || results.thaibulksms?.error || "ยังไม่ได้ทดสอบ"}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 5. LINE Messaging API (Full width) */}
+          <div className="md:col-span-2 bg-[#0d1b3e]/80 backdrop-blur-md rounded-2xl p-5 border border-amber-500/15 hover:border-amber-500/40 transition-all">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-green-500/10 text-green-400 border border-green-500/20">
+                  <MessageSquare className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg text-white">LINE Official Account (Messaging API)</h3>
+                  <p className="text-xs text-slate-400">ระบบแจ้งเตือนต่ออายุสมาชิกอัตโนมัติ</p>
+                </div>
+              </div>
+              {getStatusBadge(results.line)}
+            </div>
+
+            <div className="bg-[#060b19]/60 rounded-xl p-3 text-xs font-mono text-slate-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              {results.line?.status === "SUCCESS" ? (
+                <>
+                  <div className="flex items-center gap-3">
+                    {results.line.data?.pictureUrl && (
+                      <img
+                        src={results.line.data.pictureUrl}
+                        alt="Bot Profile"
+                        className="w-10 h-10 rounded-full border border-emerald-500/50"
+                      />
+                    )}
+                    <div>
+                      <div className="text-emerald-400 font-bold text-sm">{results.line.data?.botName}</div>
+                      <div className="text-slate-400">LINE Basic ID: {results.line.data?.basicId}</div>
+                    </div>
+                  </div>
+                  <div className="text-emerald-400 text-right">
+                    ✓ Bot Active & Ready to Push Notifications
+                  </div>
+                </>
+              ) : (
+                <div className="text-rose-400 break-words">
+                  {results.line?.data?.message || results.line?.error || "ยังไม่ได้ทดสอบ"}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Interactive SMS OTP Test Box */}
+        <div className="bg-[#0d1b3e]/60 rounded-2xl p-6 border border-amber-500/20">
+          <div className="flex items-center gap-2 mb-2 text-[#ffd700] font-bold text-lg">
+            <Zap className="w-5 h-5" />
+            ทดสอบการส่ง SMS OTP จริงเข้าเบอร์มือถือ
+          </div>
+          <p className="text-xs text-slate-400 mb-4">
+            ทดสอบว่าระบบสามารถยิง SMS ผ่าน ThaiBulkSMS เข้ามือถือได้จริงหรือไม่
+          </p>
+
+          <form onSubmit={sendTestSms} className="flex flex-col sm:flex-row gap-3">
+            <input
+              type="tel"
+              value={testPhone}
+              onChange={(e) => setTestPhone(e.target.value)}
+              placeholder="กรอกเบอร์มือถือ เช่น 0973355322"
+              className="flex-1 px-4 py-2.5 rounded-xl bg-[#060b19] border border-slate-700 text-white focus:outline-none focus:border-[#ffd700] text-sm"
+              required
+            />
+            <button
+              type="submit"
+              disabled={smsSending}
+              className="px-6 py-2.5 rounded-xl font-bold text-sm bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+            >
+              <Send className={`w-4 h-4 ${smsSending ? "animate-pulse" : ""}`} />
+              {smsSending ? "กำลังส่ง SMS..." : "ส่ง SMS ทดสอบ"}
+            </button>
+          </form>
+
+          {smsResult && (
+            <div className="mt-4 p-4 rounded-xl bg-[#060b19] border border-slate-700 text-xs font-mono">
+              <div className="flex items-center gap-2 mb-2 font-bold">
+                {smsResult.success ? (
+                  <span className="text-emerald-400 flex items-center gap-1">
+                    <CheckCircle2 className="w-4 h-4" /> ส่ง SMS สำเร็จ! (วิธี: {smsResult.method})
+                  </span>
+                ) : (
+                  <span className="text-rose-400 flex items-center gap-1">
+                    <XCircle className="w-4 h-4" /> ส่งไม่สำเร็จ
+                  </span>
+                )}
+              </div>
+              <pre className={smsResult.success ? "text-emerald-300" : "text-rose-300"}>
+                {JSON.stringify(smsResult, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+
+        {/* Footer Note */}
+        <div className="flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 pt-4 border-t border-slate-800">
+          <div className="flex items-center gap-1.5 text-slate-400">
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            เชื่อมต่อผ่าน Next.js App Router Server Actions & Route Handlers
+          </div>
+          <div className="mt-2 sm:mt-0 text-slate-400">
+            URL: <span className="text-white">https://blue-fitness-chi.vercel.app/test</span>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
