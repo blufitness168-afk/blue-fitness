@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useState, useEffect, useRef } from "react";
-import { CreditCard, User, LogOut } from "lucide-react";
+import { User, LogOut } from "lucide-react";
 import { getPackagesBySlot, type TimeSlot } from "@/lib/mock-data";
 
 function formatPrice(price: number) {
@@ -91,53 +91,41 @@ export default function Home() {
                   )}
                 </button>
 
-                {/* Dropdown Menu */}
+                {/* Dropdown Menu (White Background, Clean 3-Item Layout) */}
                 {menuOpen && (
-                  <div className="absolute right-0 mt-2.5 w-60 rounded-2xl bg-[#0d1b3e] border border-[#ffd700]/30 shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-                    {/* Member Info Header */}
-                    <div className="px-4 py-3 bg-[#003087]/50 border-b border-white/10">
-                      <div className="text-[11px] text-[#ffd700] font-bold uppercase tracking-wider">
-                        สมาชิก BLU FITNESS
-                      </div>
-                      <div className="text-sm font-bold text-white truncate mt-0.5">
+                  <div className="absolute right-0 mt-2.5 w-56 rounded-2xl bg-white border border-slate-100 shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150 ring-1 ring-black/5">
+                    {/* 1. Name */}
+                    <div className="px-4 py-3 bg-slate-50 border-b border-slate-100">
+                      <div className="text-sm font-bold text-slate-800 truncate">
                         {member.fullName || "สมาชิก"}
                       </div>
                       {member.phone && (
-                        <div className="text-xs text-slate-300 font-mono mt-0.5">
+                        <div className="text-xs text-slate-400 font-mono mt-0.5">
                           {member.phone}
                         </div>
                       )}
                     </div>
 
-                    {/* Menu Links */}
-                    <div className="p-1.5 space-y-1">
+                    {/* 2. My Account */}
+                    <div className="p-1.5">
                       <Link
                         href="/member"
                         onClick={() => setMenuOpen(false)}
-                        className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 hover:text-white hover:bg-white/10 transition-colors"
+                        className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-700 hover:text-[#003087] hover:bg-slate-50 transition-colors"
                       >
-                        <CreditCard className="w-4 h-4 text-[#ffd700]" />
-                        <span>บัตรสมาชิกดิจิทัล & คูปอง</span>
-                      </Link>
-
-                      <Link
-                        href="/member"
-                        onClick={() => setMenuOpen(false)}
-                        className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 hover:text-white hover:bg-white/10 transition-colors"
-                      >
-                        <User className="w-4 h-4 text-sky-400" />
-                        <span>ข้อมูลสมาชิก (Profile)</span>
+                        <User className="w-4 h-4 text-[#003087]" />
+                        <span>My Account</span>
                       </Link>
                     </div>
 
-                    {/* Logout */}
-                    <div className="p-1.5 border-t border-white/10">
+                    {/* 3. Logout */}
+                    <div className="p-1.5 border-t border-slate-100">
                       <button
                         onClick={handleLogout}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition-colors text-left cursor-pointer"
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors text-left cursor-pointer"
                       >
                         <LogOut className="w-4 h-4" />
-                        <span>ออกจากระบบ</span>
+                        <span>Logout</span>
                       </button>
                     </div>
                   </div>
@@ -459,12 +447,8 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="flex items-center gap-5 text-xs">
-              <span>เปิดบริการ 07:00 - 22:00 น.</span>
-              <span>·</span>
-              <Link href="/test" className="hover:text-white transition-colors">
-                API Diagnostics
-              </Link>
+            <div className="text-xs text-white/60">
+              <span>เปิดบริการทุกวัน 07:00 - 22:00 น.</span>
             </div>
           </div>
 
