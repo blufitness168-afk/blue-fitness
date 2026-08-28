@@ -21,8 +21,11 @@ import {
   ShieldCheck,
   Gift,
 } from "lucide-react";
+import LanguageToggle from "@/components/LanguageToggle";
+import { useLanguage } from "@/context/LanguageContext";
 
 export default function MemberDashboardPage() {
+  const { t, lang } = useLanguage();
   const router = useRouter();
   const [member, setMember] = useState<{
     fullName: string;
@@ -95,7 +98,7 @@ export default function MemberDashboardPage() {
             className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-900 transition-colors font-medium"
           >
             <ChevronLeft className="w-4 h-4" />
-            <span>หน้าหลัก</span>
+            <span>{t("member.back")}</span>
           </Link>
 
           <div className="flex items-center gap-2">
@@ -112,14 +115,16 @@ export default function MemberDashboardPage() {
             </span>
           </div>
 
-          <button
-            onClick={handleLogout}
-            title="ออกจากระบบ"
-            className="text-xs text-slate-500 hover:text-rose-600 flex items-center gap-1 transition-colors cursor-pointer font-medium"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span className="hidden xs:inline">ออก</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <LanguageToggle variant="light" />
+            <button
+              onClick={handleLogout}
+              title={t("nav.logout")}
+              className="text-xs text-slate-500 hover:text-rose-600 flex items-center gap-1 transition-colors cursor-pointer font-medium p-1"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -168,7 +173,7 @@ export default function MemberDashboardPage() {
                 {/* Member Name (1 Line) */}
                 <div>
                   <div className="flex items-baseline gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                    <span className="font-extrabold text-[#0a1628] shrink-0">Member:</span>
+                    <span className="font-extrabold text-[#0a1628] shrink-0">{t("member.member_label")}:</span>
                     <span className="font-black text-[#0047ba] truncate">
                       {member.fullName}
                     </span>
@@ -180,13 +185,13 @@ export default function MemberDashboardPage() {
                 <div>
                   <div className="flex items-baseline justify-between text-xs sm:text-sm whitespace-nowrap gap-1">
                     <div className="flex items-baseline gap-1">
-                      <span className="font-extrabold text-[#0a1628] shrink-0">Date:</span>
+                      <span className="font-extrabold text-[#0a1628] shrink-0">{t("member.date_label")}:</span>
                       <span className="font-black text-[#0047ba] font-mono">
-                        {activePackage.usedDays}/{activePackage.totalDays} วัน
+                        {activePackage.usedDays}/{activePackage.totalDays} {t("member.days_unit")}
                       </span>
                     </div>
                     <span className="text-[10px] sm:text-[11px] text-emerald-600 font-extrabold shrink-0">
-                      (เหลือ {activePackage.daysLeft} วัน)
+                      ({lang === "en" ? `${activePackage.daysLeft} left` : `เหลือ ${activePackage.daysLeft} วัน`})
                     </span>
                   </div>
                   <div className="h-[1.5px] bg-[#0047ba] w-full mt-0.5 opacity-80" />
@@ -224,11 +229,11 @@ export default function MemberDashboardPage() {
           {/* Header Row: BLU POINT (Gold) & Total Points Summary (Right) */}
           <div className="flex items-center justify-between pb-3.5 border-b border-white/15">
             <h3 className="text-base sm:text-lg font-black tracking-wider text-[#ffd700] uppercase">
-              BLU POINT
+              {t("points.title")}
             </h3>
             <div className="font-mono font-black text-sm sm:text-base">
               <span className="text-[#ffd700] text-xl sm:text-2xl font-black">{member.points ?? 35}</span>
-              <span className="text-white/60 font-bold ml-1">/ 100</span>
+              <span className="text-white/60 font-bold ml-1">{t("points.of_100")}</span>
             </div>
           </div>
 
@@ -292,7 +297,7 @@ export default function MemberDashboardPage() {
           {/* Bottom Action: Redeem Rewards (No Redirect) */}
           <div className="pt-1 text-center">
             <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-[#ffd700] hover:text-[#ffe55b] transition-colors underline underline-offset-4 decoration-[#ffd700]/70 cursor-pointer select-none">
-              <span>แลกรางวัล</span>
+              <span>{t("points.redeem")}</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </span>
           </div>
@@ -345,21 +350,21 @@ export default function MemberDashboardPage() {
             <div className="absolute inset-0 flex flex-col items-center justify-center text-center z-10 px-8 sm:px-12 py-3">
               <div className="space-y-1">
                 <span className="inline-block text-[10px] sm:text-[11px] font-black tracking-widest text-[#ffd700] uppercase drop-shadow-sm">
-                  ✦ BLU FITNESS VIP PASS ✦
+                  {t("coupon.vip_pass")}
                 </span>
 
                 <h4 className="text-2xl sm:text-3xl font-black text-white tracking-tight uppercase leading-none drop-shadow-md">
-                  FRIEND PASS
+                  {t("coupon.title")}
                 </h4>
 
                 <p className="text-xs sm:text-sm font-bold text-slate-200 mt-1">
-                  คูปองชวนเพื่อนเล่นฟรี · คงเหลือ{" "}
-                  <span className="text-[#ffd700] text-base sm:text-lg font-black">{activePackage.friendCouponsLeft}</span> สิทธิ์
+                  {t("coupon.subtitle")}{" "}
+                  <span className="text-[#ffd700] text-base sm:text-lg font-black">{activePackage.friendCouponsLeft}</span> {t("coupon.passes")}
                 </p>
 
                 <div className="pt-1">
                   <span className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-black text-[#ffd700] underline underline-offset-4 decoration-[#ffd700]/70 hover:text-[#ffe55b]">
-                    <span>เปิดใช้งานคูปอง</span>
+                    <span>{t("coupon.open")}</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </span>
                 </div>
@@ -377,7 +382,7 @@ export default function MemberDashboardPage() {
             className="w-full btn-gold py-4 px-6 rounded-2xl text-center font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer"
           >
             <CreditCard className="w-5 h-5" />
-            <span>ซื้อแพ็กเกจ / ต่ออายุสมาชิก</span>
+            <span>{t("action.renew")}</span>
           </Link>
         </section>
 
@@ -412,38 +417,38 @@ export default function MemberDashboardPage() {
                   <ShieldCheck className="w-4 h-4 text-[#003087] shrink-0" />
                 </div>
                 <p className="text-[11px] text-slate-500 font-mono mt-0.5">
-                  รหัสสมาชิก: <span className="font-bold text-slate-700">{member.memberCode}</span>
+                  {t("details.code")} <span className="font-bold text-slate-700">{member.memberCode}</span>
                 </p>
               </div>
             </div>
 
             <span className="text-[11px] text-emerald-600 flex items-center gap-1 font-bold bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 shrink-0">
-              <CheckCircle2 className="w-3.5 h-3.5" /> ยืนยันแล้ว
+              <CheckCircle2 className="w-3.5 h-3.5" /> {t("details.verified")}
             </span>
           </div>
 
           <div className="space-y-2.5 text-slate-600">
             <div className="flex items-center justify-between">
               <span className="text-slate-500 flex items-center gap-1.5">
-                <CreditCard className="w-3.5 h-3.5 text-slate-400" /> แพ็กเกจปัจจุบัน
+                <CreditCard className="w-3.5 h-3.5 text-slate-400" /> {t("details.pkg_current")}
               </span>
               <span className="font-bold text-slate-900 text-right">
-                {activePackage.name}
+                {lang === "en" ? "BLU 07:00-22:00 (90 Days Pass)" : activePackage.name}
               </span>
             </div>
 
             <div className="flex items-center justify-between">
               <span className="text-slate-500 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-slate-400" /> วันหมดอายุ
+                <Clock className="w-3.5 h-3.5 text-slate-400" /> {t("details.expire_date")}
               </span>
               <span className="font-bold text-[#003087]">
-                {activePackage.expireDate}
+                {lang === "en" ? "12 Oct 2026" : activePackage.expireDate}
               </span>
             </div>
 
             <div className="flex items-center justify-between">
               <span className="text-slate-500 flex items-center gap-1.5">
-                <Phone className="w-3.5 h-3.5 text-slate-400" /> เบอร์โทรศัพท์
+                <Phone className="w-3.5 h-3.5 text-slate-400" /> {t("details.phone")}
               </span>
               <span className="font-mono font-bold text-slate-900">
                 {member.phone}
@@ -452,12 +457,20 @@ export default function MemberDashboardPage() {
 
             <div className="flex items-center justify-between">
               <span className="text-slate-500 flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-slate-400" /> วันเกิด
+                <Calendar className="w-3.5 h-3.5 text-slate-400" /> {t("details.birthday")}
               </span>
               <span className="font-semibold text-slate-900">
-                {member.birthDay && member.birthMonth
-                  ? `${member.birthDay} ${member.birthMonth}`
-                  : "15 สิงหาคม"}
+                {(() => {
+                  const day = member.birthDay || "15";
+                  const month = member.birthMonth || "สิงหาคม";
+                  const monthMapEn: Record<string, string> = {
+                    "มกราคม": "January", "กุมภาพันธ์": "February", "มีนาคม": "March",
+                    "เมษายน": "April", "พฤษภาคม": "May", "มิถุนายน": "June",
+                    "กรกฎาคม": "July", "สิงหาคม": "August", "กันยายน": "September",
+                    "ตุลาคม": "October", "พฤศจิกายน": "November", "ธันวาคม": "December"
+                  };
+                  return lang === "en" ? `${day} ${monthMapEn[month] || month}` : `${day} ${month}`;
+                })()}
               </span>
             </div>
           </div>
@@ -505,7 +518,7 @@ export default function MemberDashboardPage() {
             </div>
 
             <p className="text-xs text-slate-500 mt-2">
-              ยื่นหน้าจอนี้ให้พนักงานสแกนเช็คอิน
+              {t("member.qr_instruction")}
             </p>
           </div>
         </div>

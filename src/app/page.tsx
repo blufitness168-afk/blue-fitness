@@ -6,12 +6,15 @@ import { useState, useEffect, useRef } from "react";
 import { User, LogOut } from "lucide-react";
 import { getPackagesBySlot, type TimeSlot, type MockPackage } from "@/lib/mock-data";
 import PaymentModal from "@/components/PaymentModal";
+import LanguageToggle from "@/components/LanguageToggle";
+import { useLanguage } from "@/context/LanguageContext";
 
 function formatPrice(price: number) {
   return price.toLocaleString("th-TH");
 }
 
 export default function Home() {
+  const { t, lang } = useLanguage();
   const [activeSlot, setActiveSlot] = useState<TimeSlot>("07:00-22:00");
   const [selectedPackage, setSelectedPackage] = useState<MockPackage | null>(null);
   const [member, setMember] = useState<{
@@ -71,7 +74,9 @@ export default function Home() {
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-4">
+            <LanguageToggle variant="dark" />
+
             {member ? (
               <div className="relative" ref={menuRef}>
                 {/* Circular Avatar Only */}
@@ -116,7 +121,7 @@ export default function Home() {
                         className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-700 hover:text-[#003087] hover:bg-slate-50 transition-colors"
                       >
                         <User className="w-4 h-4 text-[#003087]" />
-                        <span>My Account</span>
+                        <span>{t("nav.my_account")}</span>
                       </Link>
                     </div>
 
@@ -127,7 +132,7 @@ export default function Home() {
                         className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors text-left cursor-pointer"
                       >
                         <LogOut className="w-4 h-4" />
-                        <span>Logout</span>
+                        <span>{t("nav.logout")}</span>
                       </button>
                     </div>
                   </div>
@@ -139,13 +144,13 @@ export default function Home() {
                   href="/member/login"
                   className="text-white/80 hover:text-white text-xs sm:text-sm font-semibold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg hover:bg-white/5 transition-colors"
                 >
-                  เข้าสู่ระบบ
+                  {t("nav.login")}
                 </Link>
                 <Link
                   href="/member/register"
                   className="btn-gold px-3.5 py-1.5 sm:px-5 sm:py-2 rounded-lg text-xs sm:text-sm font-bold shadow-sm"
                 >
-                  สมัครสมาชิก
+                  {t("nav.register")}
                 </Link>
               </div>
             )}
@@ -172,20 +177,20 @@ export default function Home() {
         <div className="relative z-10 max-w-7xl mx-auto px-5 sm:px-6 w-full">
           <div className="max-w-xl space-y-5 sm:space-y-6">
             <div className="inline-block px-3.5 py-1.5 bg-[#ffd700] text-[#0a1628] text-xs font-extrabold rounded tracking-wider uppercase shadow-sm">
-              Blu Fitness — ชะอำ
+              {t("hero.badge")}
             </div>
 
             <h1 className="text-[2.5rem] leading-[1.15] sm:text-5xl lg:text-6xl font-black text-white tracking-tight">
-              เริ่มต้น
+              {t("hero.title1")}
               <br />
-              <span className="text-[#ffd700]">ชีวิตที่แข็งแกร่ง</span>
+              <span className="text-[#ffd700]">{t("hero.title2")}</span>
               <br />
-              วันนี้
+              {t("hero.title3")}
             </h1>
 
             <p className="text-white/80 text-base sm:text-lg leading-relaxed max-w-md">
-              ฟิตเนสครบวงจร อุปกรณ์ครบครัน สมัครออนไลน์ เริ่มต้นเพียง{" "}
-              <span className="text-[#ffd700] font-bold">฿90/วัน</span>
+              {t("hero.subtitle")}{" "}
+              <span className="text-[#ffd700] font-bold">{t("hero.price_start")}</span>
             </p>
 
             <div className="flex flex-row items-center gap-3.5 sm:gap-4 pt-2 w-full max-w-md">
@@ -193,13 +198,13 @@ export default function Home() {
                 href="/member/register"
                 className="btn-gold flex-1 sm:flex-initial px-6 py-3.5 sm:px-8 rounded-xl text-center text-sm sm:text-base font-bold shadow-md whitespace-nowrap flex items-center justify-center"
               >
-                สมัครสมาชิก
+                {t("hero.btn_register")}
               </Link>
               <a
                 href="#packages"
                 className="flex-1 sm:flex-initial px-6 py-3.5 sm:px-8 rounded-xl text-center text-sm sm:text-base font-semibold text-white border border-white/30 hover:bg-white/10 transition-all backdrop-blur-xs whitespace-nowrap flex items-center justify-center"
               >
-                ดูแพ็กเกจ
+                {t("hero.btn_packages")}
               </a>
             </div>
           </div>
@@ -212,16 +217,16 @@ export default function Home() {
       <section className="bg-[#0a1628] text-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-7 sm:py-12 grid grid-cols-3 text-center">
           <div className="border-r border-white/10 px-2">
-            <div className="text-xl sm:text-3xl font-black text-[#ffd700] mb-1">07:00-22:00</div>
-            <div className="text-[11px] sm:text-sm text-white/50 font-medium">เปิดทุกวัน</div>
+            <div className="text-xl sm:text-3xl font-black text-[#ffd700] mb-1">{t("highlight.hours")}</div>
+            <div className="text-[11px] sm:text-sm text-white/50 font-medium">{t("highlight.hours_sub")}</div>
           </div>
           <div className="border-r border-white/10 px-2">
-            <div className="text-xl sm:text-3xl font-black text-[#ffd700] mb-1">฿90/วัน</div>
-            <div className="text-[11px] sm:text-sm text-white/50 font-medium">เริ่มต้นเพียง</div>
+            <div className="text-xl sm:text-3xl font-black text-[#ffd700] mb-1">{t("highlight.price")}</div>
+            <div className="text-[11px] sm:text-sm text-white/50 font-medium">{t("highlight.price_sub")}</div>
           </div>
           <div className="px-2">
-            <div className="text-xl sm:text-3xl font-black text-[#ffd700] mb-1">ครบครัน</div>
-            <div className="text-[11px] sm:text-sm text-white/50 font-medium">อุปกรณ์ทุกประเภท</div>
+            <div className="text-xl sm:text-3xl font-black text-[#ffd700] mb-1">{t("highlight.equip")}</div>
+            <div className="text-[11px] sm:text-sm text-white/50 font-medium">{t("highlight.equip_sub")}</div>
           </div>
         </div>
       </section>
@@ -233,31 +238,31 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-5 py-16 sm:py-20">
           <div className="text-center mb-10">
             <h2 className="text-3xl sm:text-4xl font-extrabold text-[#0a1628] tracking-tight">
-              แพ็กเกจสมาชิก
+              {t("pkg.title")}
             </h2>
             <p className="text-[#64748b] text-sm sm:text-base mt-3 max-w-lg mx-auto">
-              เลือกช่วงเวลาและแพ็กเกจที่เหมาะกับคุณ — ยิ่งนาน ยิ่งคุ้ม
+              {t("pkg.subtitle")}
             </p>
 
             {/* Time Slot Toggle */}
             <div className="mt-6 inline-flex items-center bg-white rounded-xl p-1.5 shadow-sm border border-[#e2e8f0]">
               <button
                 onClick={() => setActiveSlot("07:00-14:00")}
-                className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all ${activeSlot === "07:00-14:00"
+                className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all cursor-pointer ${activeSlot === "07:00-14:00"
                   ? "bg-[#003087] text-white shadow-md"
                   : "text-[#64748b] hover:text-[#0a1628]"
                   }`}
               >
-                07:00 - 14:00
+                {t("pkg.offpeak")}
               </button>
               <button
                 onClick={() => setActiveSlot("07:00-22:00")}
-                className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all ${activeSlot === "07:00-22:00"
+                className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all cursor-pointer ${activeSlot === "07:00-22:00"
                   ? "bg-[#003087] text-white shadow-md"
                   : "text-[#64748b] hover:text-[#0a1628]"
                   }`}
               >
-                07:00 - 22:00
+                {t("pkg.allday")}
               </button>
             </div>
           </div>
@@ -290,13 +295,13 @@ export default function Home() {
                         : "bg-[#003087] text-white"
                       }`}
                   >
-                    {isLast ? "คุ้มที่สุด" : isDaily ? "ทั่วไป" : "ยอดนิยม"}
+                    {isLast ? t("pkg.badge_best") : isDaily ? t("pkg.badge_general") : t("pkg.badge_popular")}
                   </div>
 
                   <div className="p-5 flex flex-col flex-1">
                     {/* Package Label */}
                     <div className="text-xs font-semibold text-[#64748b] uppercase tracking-wider mb-3">
-                      {pkg.label}
+                      {lang === "en" ? (pkg.durationDays === 1 ? "1 Day Pass" : pkg.durationDays === 365 ? "1 Year" : `${pkg.durationDays} Days`) : pkg.label}
                     </div>
 
                     {/* Price */}
@@ -307,11 +312,11 @@ export default function Home() {
                     </div>
                     {pricePerDay ? (
                       <div className="text-[11px] text-[#94a3b8] mb-5">
-                        เฉลี่ยวันละ {pricePerDay} บาท
+                        {t("pkg.per_day")} {pricePerDay} {t("pkg.baht")}
                       </div>
                     ) : (
                       <div className="text-[11px] text-[#94a3b8] mb-5">
-                        ต่อครั้ง
+                        {t("pkg.per_time")}
                       </div>
                     )}
 
@@ -319,23 +324,23 @@ export default function Home() {
                     <ul className="space-y-2 flex-1 mb-5 text-sm text-[#334155]">
                       <li className="flex items-start gap-2">
                         <span className="text-[#003087] font-bold mt-0.5">✓</span>
-                        ใช้งาน {pkg.label}
+                        {t("pkg.use_time")} {lang === "en" ? (pkg.durationDays === 1 ? "1 Day" : pkg.durationDays === 365 ? "1 Year" : `${pkg.durationDays} Days`) : pkg.label}
                       </li>
                       <li className="flex items-start gap-2">
                         <span className="text-[#003087] font-bold mt-0.5">✓</span>
-                        ช่วง {pkg.timeSlot} น.
+                        {t("pkg.time_range")} {pkg.timeSlot}
                       </li>
                       {pkg.friendCoupons > 0 && (
                         <li className="flex items-start gap-2">
                           <span className="text-[#003087] font-bold mt-0.5">✓</span>
-                          พาเพื่อนฟรี {pkg.friendCoupons} ครั้ง
+                          {t("pkg.friend_free")} {pkg.friendCoupons} {t("pkg.times")}
                         </li>
                       )}
                       {pkg.bonusDays > 0 && (
                         <li className="flex items-start gap-2">
                           <span className="text-[#ffd700] font-bold mt-0.5">★</span>
                           <span className="text-[#003087] font-semibold">
-                            ฟรี! +{pkg.bonusDays} วัน
+                            {t("pkg.bonus_free")} {pkg.bonusDays} {t("pkg.days")}
                           </span>
                         </li>
                       )}
@@ -352,7 +357,7 @@ export default function Home() {
                           : "btn-blue"
                         }`}
                     >
-                      เลือกแพ็กเกจนี้
+                      {t("pkg.btn_select")}
                     </button>
                   </div>
                 </div>
@@ -369,10 +374,10 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-5 py-16 sm:py-20">
           <div className="text-center mb-10">
             <h2 className="text-3xl sm:text-4xl font-extrabold text-[#0a1628] tracking-tight">
-              ภายในฟิตเนส
+              {t("gym.title")}
             </h2>
             <p className="text-[#64748b] text-sm sm:text-base mt-3">
-              อุปกรณ์ออกกำลังกายครบครัน พร้อมให้บริการ
+              {t("gym.subtitle")}
             </p>
           </div>
 
@@ -380,7 +385,7 @@ export default function Home() {
             <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-[#e2e8f0]">
               <Image
                 src="/bg1.jpg"
-                alt="ภายในฟิตเนส 1"
+                alt="Gym Interior 1"
                 fill
                 sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
                 className="object-cover hover:scale-105 transition-transform duration-500"
@@ -389,7 +394,7 @@ export default function Home() {
             <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-[#e2e8f0]">
               <Image
                 src="/bg2.webp"
-                alt="ภายในฟิตเนส 2"
+                alt="Gym Interior 2"
                 fill
                 sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
                 className="object-cover hover:scale-105 transition-transform duration-500"
@@ -398,7 +403,7 @@ export default function Home() {
             <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-[#e2e8f0]">
               <Image
                 src="/bg3.jpg"
-                alt="ภายในฟิตเนส 3"
+                alt="Gym Interior 3"
                 fill
                 sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
                 className="object-cover hover:scale-105 transition-transform duration-500"
@@ -415,17 +420,17 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-5 py-14 sm:py-16 flex flex-col sm:flex-row items-center justify-between gap-6 text-center sm:text-left">
           <div>
             <h3 className="text-2xl sm:text-3xl font-extrabold text-white">
-              พร้อมเริ่มแล้วหรือยัง?
+              {t("cta.title")}
             </h3>
             <p className="text-white/60 text-sm sm:text-base mt-2">
-              สมัครสมาชิกวันนี้ รับสิทธิพิเศษทันที
+              {t("cta.subtitle")}
             </p>
           </div>
           <Link
             href="/member/register"
-            className="btn-gold px-8 py-3.5 rounded-lg text-base shrink-0"
+            className="btn-gold px-8 py-3.5 rounded-lg text-base shrink-0 font-extrabold"
           >
-            สมัครสมาชิกเลย
+            {t("cta.btn")}
           </Link>
         </div>
       </section>
@@ -447,17 +452,17 @@ export default function Home() {
               <div className="text-sm">
                 <span className="text-white/80 font-bold">BLU FITNESS</span>
                 <span className="mx-2">·</span>
-                ชะอำ, เพชรบุรี
+                {t("footer.location")}
               </div>
             </div>
 
             <div className="text-xs text-white/60">
-              <span>เปิดบริการทุกวัน 07:00 - 22:00 น.</span>
+              <span>{t("footer.hours")}</span>
             </div>
           </div>
 
           <div className="border-t border-white/10 mt-8 pt-6 text-xs text-center text-white/30">
-            © 2026 Blu Fitness Cha-am. All rights reserved.
+            {t("footer.rights")}
           </div>
         </div>
       </footer>

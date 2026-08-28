@@ -5,10 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 import { X, Eye, EyeOff, Lock } from "lucide-react";
+import LanguageToggle from "@/components/LanguageToggle";
+import { useLanguage } from "@/context/LanguageContext";
 
 type Step = "phone" | "otp" | "register";
 
 export default function RegisterPage() {
+  const { t, lang } = useLanguage();
   const router = useRouter();
   const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("");
@@ -33,7 +36,7 @@ export default function RegisterPage() {
 
   const processFile = (file: File) => {
     if (file.size > 5 * 1024 * 1024) {
-      alert("ไฟล์รูปต้องมีขนาดไม่เกิน 5MB");
+      alert("ไฟล์รูปต้องมีขนาดไม่เกิน 5MB / Max file size is 5MB");
       return;
     }
     setSelectedFile(file);
@@ -115,7 +118,7 @@ export default function RegisterPage() {
   const handleRegister = async () => {
     if (!fullName.trim() || !birthDay || !birthMonth || !password) return;
     if (password !== confirmPassword) {
-      alert("รหัสผ่านไม่ตรงกัน กรุณาตรวจสอบอีกครั้ง");
+      alert("รหัสผ่านไม่ตรงกัน กรุณาตรวจสอบอีกครั้ง / Passwords do not match");
       return;
     }
     setLoading(true);
@@ -168,6 +171,18 @@ export default function RegisterPage() {
     }
   }, [step]);
 
+  const thaiMonths = [
+    "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน",
+    "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม",
+    "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
+  ];
+
+  const englishMonths = [
+    "January", "February", "March", "April",
+    "May", "June", "July", "August",
+    "September", "October", "November", "December",
+  ];
+
   return (
     <main className="min-h-screen bg-[#0a1628] flex flex-col">
       {/* ─── Header ─── */}
@@ -185,12 +200,15 @@ export default function RegisterPage() {
             BLU FITNESS
           </span>
         </Link>
-        <Link
-          href="/"
-          className="text-white/50 hover:text-white text-sm transition-colors"
-        >
-          กลับหน้าหลัก
-        </Link>
+        <div className="flex items-center gap-3">
+          <LanguageToggle variant="dark" />
+          <Link
+            href="/"
+            className="text-white/70 hover:text-white text-xs sm:text-sm transition-colors"
+          >
+            {t("login.back_home")}
+          </Link>
+        </div>
       </header>
 
       {/* ─── Card ─── */}
@@ -231,17 +249,17 @@ export default function RegisterPage() {
             <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl">
               <div className="text-center mb-6">
                 <h1 className="text-2xl font-extrabold text-[#0a1628] mb-2">
-                  สมัครสมาชิกใหม่
+                  {t("reg.phone_title")}
                 </h1>
                 <p className="text-sm text-[#64748b]">
-                  กรอกเบอร์มือถือเพื่อรับรหัสยืนยัน OTP
+                  {t("reg.phone_sub")}
                 </p>
               </div>
 
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-semibold text-[#334155] mb-1.5">
-                    เบอร์มือถือ
+                    {t("login.phone_label")}
                   </label>
                   <input
                     type="tel"
@@ -260,17 +278,17 @@ export default function RegisterPage() {
                   disabled={phone.length < 9 || loading}
                   className="w-full btn-gold py-3.5 rounded-xl text-base font-bold disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                 >
-                  {loading ? "กำลังส่ง OTP..." : "ส่งรหัส OTP"}
+                  {loading ? "..." : t("reg.btn_send_otp")}
                 </button>
               </div>
 
               <div className="text-center mt-6 pt-5 border-t border-slate-100">
-                <span className="text-xs text-slate-500">มีบัญชีสมาชิกอยู่แล้ว? </span>
+                <span className="text-xs text-slate-500">{t("reg.have_account")} </span>
                 <Link
                   href="/member/login"
                   className="text-xs text-[#003087] font-bold hover:underline"
                 >
-                  เข้าสู่ระบบ
+                  {t("reg.login_link")}
                 </Link>
               </div>
             </div>
@@ -283,10 +301,10 @@ export default function RegisterPage() {
             <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl">
               <div className="text-center mb-6">
                 <h1 className="text-2xl font-extrabold text-[#0a1628] mb-2">
-                  ยืนยันรหัส OTP
+                  {t("reg.otp_title")}
                 </h1>
                 <p className="text-sm text-[#64748b]">
-                  กรอกรหัส 6 หลักที่ส่งไปยัง{" "}
+                  {t("reg.otp_sub")}{" "}
                   <span className="font-bold text-[#003087]">{phone}</span>
                 </p>
               </div>
@@ -315,7 +333,7 @@ export default function RegisterPage() {
                 onClick={handleAutoFillOtp}
                 className="w-full mb-4 py-2 rounded-lg text-xs font-semibold text-[#003087] bg-[#003087]/5 hover:bg-[#003087]/10 border border-[#003087]/20 transition-all cursor-pointer"
               >
-                🔑 Auto-fill OTP (Demo: 123456)
+                {t("reg.otp_demo")}
               </button>
 
               <button
@@ -323,7 +341,7 @@ export default function RegisterPage() {
                 disabled={otp.join("").length !== 6 || loading}
                 className="w-full btn-gold py-3.5 rounded-xl text-base font-bold disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
-                {loading ? "กำลังตรวจสอบ..." : "ยืนยัน OTP"}
+                {loading ? "..." : t("reg.btn_verify_otp")}
               </button>
 
               <div className="flex items-center justify-between mt-5">
@@ -334,10 +352,10 @@ export default function RegisterPage() {
                   }}
                   className="text-xs text-[#64748b] hover:text-[#0a1628] transition-colors cursor-pointer"
                 >
-                  ← เปลี่ยนเบอร์
+                  ← {lang === "en" ? "Change Number" : "เปลี่ยนเบอร์"}
                 </button>
                 <button className="text-xs text-[#003087] font-semibold hover:underline cursor-pointer">
-                  ส่ง OTP อีกครั้ง
+                  {lang === "en" ? "Resend OTP" : "ส่ง OTP อีกครั้ง"}
                 </button>
               </div>
             </div>
@@ -353,10 +371,10 @@ export default function RegisterPage() {
                   ✓
                 </div>
                 <h1 className="text-2xl font-extrabold text-[#0a1628] mb-1">
-                  ข้อมูลสมาชิก
+                  {t("reg.profile_title")}
                 </h1>
                 <p className="text-xs text-[#64748b]">
-                  กรอกข้อมูลและตั้งรหัสผ่านสำหรับเข้าใช้งาน
+                  {t("reg.profile_sub")}
                 </p>
               </div>
 
@@ -364,13 +382,13 @@ export default function RegisterPage() {
                 {/* Full Name */}
                 <div>
                   <label className="block text-sm font-semibold text-[#334155] mb-1">
-                    ชื่อ-นามสกุล <span className="text-red-500">*</span>
+                    {t("reg.fullname_label")} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
-                    placeholder="เช่น สมชาย ใจดี"
+                    placeholder={t("reg.fullname_placeholder")}
                     className="w-full px-4 py-3 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] text-[#0a1628] text-sm sm:text-base placeholder:text-[#cbd5e1] focus:outline-none focus:ring-2 focus:ring-[#003087] focus:border-transparent transition-all"
                     autoFocus
                   />
@@ -379,7 +397,7 @@ export default function RegisterPage() {
                 {/* Birthday */}
                 <div>
                   <label className="block text-sm font-semibold text-[#334155] mb-1">
-                    วันเกิด (วัน/เดือน) <span className="text-red-500">*</span>
+                    {t("reg.bday_label")} <span className="text-red-500">*</span>
                   </label>
                   <div className="grid grid-cols-2 gap-2.5">
                     <select
@@ -388,7 +406,7 @@ export default function RegisterPage() {
                       required
                       className="px-3.5 py-3 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] text-[#0a1628] text-sm focus:outline-none focus:ring-2 focus:ring-[#003087] focus:border-transparent transition-all cursor-pointer"
                     >
-                      <option value="">เลือกวันที่ *</option>
+                      <option value="">{t("reg.day_select")} *</option>
                       {Array.from({ length: 31 }, (_, i) => (
                         <option key={i + 1} value={String(i + 1)}>
                           {i + 1}
@@ -401,12 +419,8 @@ export default function RegisterPage() {
                       required
                       className="px-3.5 py-3 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] text-[#0a1628] text-sm focus:outline-none focus:ring-2 focus:ring-[#003087] focus:border-transparent transition-all cursor-pointer"
                     >
-                      <option value="">เลือกเดือน *</option>
-                      {[
-                        "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน",
-                        "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม",
-                        "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
-                      ].map((m, i) => (
+                      <option value="">{t("reg.month_select")} *</option>
+                      {(lang === "en" ? englishMonths : thaiMonths).map((m, i) => (
                         <option key={i + 1} value={String(i + 1)}>
                           {m}
                         </option>
@@ -418,14 +432,14 @@ export default function RegisterPage() {
                 {/* Password / PIN */}
                 <div>
                   <label className="block text-sm font-semibold text-[#334155] mb-1">
-                    ตั้งรหัสผ่าน (PIN 6 หลัก หรือ รหัสผ่าน) <span className="text-red-500">*</span>
+                    {t("reg.pwd_label")} <span className="text-red-500">*</span>
                   </label>
                   <div className="relative">
                     <input
                       type={showPassword ? "text" : "password"}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="กำหนดรหัสผ่าน เช่น 123456"
+                      placeholder={t("reg.pwd_placeholder")}
                       className="w-full pl-10 pr-10 py-3 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] text-[#0a1628] text-sm placeholder:text-[#cbd5e1] focus:outline-none focus:ring-2 focus:ring-[#003087] focus:border-transparent transition-all"
                     />
                     <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -446,14 +460,14 @@ export default function RegisterPage() {
                 {/* Confirm Password */}
                 <div>
                   <label className="block text-sm font-semibold text-[#334155] mb-1">
-                    ยืนยันรหัสผ่าน <span className="text-red-500">*</span>
+                    {t("reg.confirm_pwd_label")} <span className="text-red-500">*</span>
                   </label>
                   <div className="relative">
                     <input
                       type={showPassword ? "text" : "password"}
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
-                      placeholder="กรอกรหัสผ่านอีกครั้ง"
+                      placeholder={t("reg.confirm_pwd_placeholder")}
                       className={`w-full pl-10 pr-4 py-3 rounded-xl border bg-[#f8fafc] text-[#0a1628] text-sm placeholder:text-[#cbd5e1] focus:outline-none focus:ring-2 focus:ring-[#003087] focus:border-transparent transition-all ${
                         confirmPassword && password !== confirmPassword
                           ? "border-rose-400 focus:ring-rose-400"
@@ -464,7 +478,7 @@ export default function RegisterPage() {
                   </div>
                   {confirmPassword && password !== confirmPassword && (
                     <p className="text-xs text-rose-500 mt-1">
-                      รหัสผ่านไม่ตรงกัน
+                      {lang === "en" ? "Passwords do not match" : "รหัสผ่านไม่ตรงกัน"}
                     </p>
                   )}
                 </div>
@@ -472,7 +486,7 @@ export default function RegisterPage() {
                 {/* Profile Photo */}
                 <div>
                   <label className="block text-sm font-semibold text-[#334155] mb-1">
-                    รูปโปรไฟล์
+                    {t("reg.avatar_label")}
                   </label>
                   <input
                     type="file"
@@ -521,7 +535,9 @@ export default function RegisterPage() {
 
                     <div className="flex-1 min-w-0">
                       <span className="text-sm font-bold text-[#003087]">
-                        {previewUrl ? "เปลี่ยนรูปภาพ" : "อัปโหลดรูปภาพ"}
+                        {previewUrl
+                          ? (lang === "en" ? "Change Image" : "เปลี่ยนรูปภาพ")
+                          : t("reg.avatar_drop")}
                       </span>
                     </div>
                   </div>
@@ -537,9 +553,9 @@ export default function RegisterPage() {
                     password !== confirmPassword ||
                     loading
                   }
-                  className="w-full btn-gold py-3.5 rounded-xl text-base font-bold disabled:opacity-40 disabled:cursor-not-allowed mt-2 cursor-pointer"
+                  className="w-full btn-gold py-3.5 rounded-xl text-base font-bold disabled:opacity-40 disabled:cursor-not-allowed mt-2 cursor-pointer shadow-md"
                 >
-                  {loading ? "กำลังสมัครสมาชิก..." : "สมัครสมาชิก"}
+                  {loading ? t("reg.submitting") : t("reg.btn_complete")}
                 </button>
               </div>
             </div>

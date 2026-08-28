@@ -19,6 +19,8 @@ import {
 import { MockPackage } from "@/lib/mock-data";
 import { generatePromptPayPayload } from "@/lib/promptpay";
 
+import { useLanguage } from "@/context/LanguageContext";
+
 // PromptPay Gym Account (Khun James)
 const PROMPTPAY_NUMBER = "0897720282";
 const PROMPTPAY_NAME = "BLU FITNESS (ชะอำ)";
@@ -30,6 +32,7 @@ interface PaymentModalProps {
 }
 
 export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps) {
+  const { t, lang } = useLanguage();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -127,10 +130,10 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
           <div>
             <h3 className="font-extrabold text-base sm:text-lg text-slate-900">
-              ชำระเงินผ่าน PromptPay
+              {t("pay.title")}
             </h3>
             <p className="text-xs text-slate-500">
-              สแกน QR และแนบสลิปเพื่อเปิดใช้งานทันที
+              {t("pay.subtitle")}
             </p>
           </div>
 
@@ -149,10 +152,10 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
               <CheckCircle2 className="w-10 h-10" />
             </div>
             <h4 className="text-xl font-black text-slate-900">
-              ชำระเงินสำเร็จ!
+              {t("pay.success_title")}
             </h4>
             <p className="text-xs text-slate-600 max-w-xs mx-auto">
-              ระบบเพิ่มวันสมาชิกแพ็กเกจ <span className="font-bold text-[#003087]">{pkg.name}</span> เรียบร้อยแล้ว กำลังพากลับหน้าสมาชิก...
+              {t("pay.success_desc")}
             </p>
           </div>
         ) : (
@@ -160,29 +163,33 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
             {/* Order Summary Box */}
             <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200/80 space-y-2 text-xs">
               <div className="flex justify-between items-center">
-                <span className="text-slate-500">แพ็กเกจที่เลือก:</span>
-                <span className="font-extrabold text-slate-900">{pkg.name}</span>
+                <span className="text-slate-500">{t("pay.selected_pkg")}</span>
+                <span className="font-extrabold text-slate-900">
+                  {lang === "en"
+                    ? `BLU ${pkg.timeSlot} (${pkg.durationDays === 1 ? "Day Pass" : pkg.durationDays === 365 ? "1 Year Pass" : `${pkg.durationDays} Days Pass`})`
+                    : pkg.name}
+                </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-slate-500">ช่วงเวลาเข้าใช้:</span>
-                <span className="font-bold text-slate-800">{pkg.timeSlot} น.</span>
+                <span className="text-slate-500">{t("pay.time_slot")}</span>
+                <span className="font-bold text-slate-800">{pkg.timeSlot}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-slate-500">อายุการใช้งาน:</span>
+                <span className="text-slate-500">{t("pay.duration")}</span>
                 <span className="font-bold text-slate-800">
-                  {pkg.durationDays} วัน {pkg.bonusDays > 0 && `(+ แถม ${pkg.bonusDays} วัน)`}
+                  {pkg.durationDays} {t("pkg.days")} {pkg.bonusDays > 0 && `(${t("pay.bonus")} ${pkg.bonusDays} ${t("pkg.days")})`}
                 </span>
               </div>
               {pkg.friendCoupons > 0 && (
                 <div className="flex justify-between items-center text-sky-700">
                   <span className="flex items-center gap-1 font-bold">
-                    <Ticket className="w-3.5 h-3.5" /> สิทธิ์คูปองเพื่อน:
+                    <Ticket className="w-3.5 h-3.5" /> {t("pay.friend_coupons")}
                   </span>
-                  <span className="font-extrabold">+{pkg.friendCoupons} สิทธิ์</span>
+                  <span className="font-extrabold">+{pkg.friendCoupons} {t("pkg.times")}</span>
                 </div>
               )}
               <div className="flex justify-between items-center pt-2 border-t border-slate-200 text-sm">
-                <span className="font-bold text-slate-700">ยอดชำระสุทธิ:</span>
+                <span className="font-bold text-slate-700">{t("pay.total")}</span>
                 <span className="text-xl font-black text-[#003087]">
                   ฿{pkg.price.toLocaleString()}
                 </span>
@@ -193,7 +200,7 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
             <div className="bg-gradient-to-b from-[#002f87] to-[#001f5c] rounded-2xl p-5 text-white text-center shadow-md space-y-3">
               <div className="inline-flex items-center gap-1.5 bg-white/10 px-3 py-1 rounded-full text-[11px] font-bold text-slate-200">
                 <QrCode className="w-3.5 h-3.5 text-[#ffd700]" />
-                <span>Thai QR Payment / PromptPay</span>
+                <span>{t("pay.qr_label")}</span>
               </div>
 
               {/* QR Code Canvas */}
@@ -209,17 +216,17 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
               {/* Account Name & Copy Button */}
               <div className="space-y-1 text-xs">
                 <div className="font-extrabold text-white text-sm">
-                  {PROMPTPAY_NAME}
+                  {t("pay.account_name")}
                 </div>
                 <div className="flex items-center justify-center gap-2 text-white/80 font-mono">
-                  <span>พร้อมเพย์: {PROMPTPAY_NUMBER}</span>
+                  <span>{t("pay.promptpay_no")} {PROMPTPAY_NUMBER}</span>
                   <button
                     type="button"
                     onClick={handleCopyPromptPay}
                     className="text-[#ffd700] hover:text-white transition-colors flex items-center gap-0.5 text-[11px] font-bold cursor-pointer"
                   >
                     <Copy className="w-3 h-3" />
-                    <span>{copiedPromptPay ? "คัดลอกแล้ว!" : "คัดลอก"}</span>
+                    <span>{copiedPromptPay ? t("pay.copied") : t("pay.copy")}</span>
                   </button>
                 </div>
               </div>
@@ -228,7 +235,7 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
             {/* Slip Upload & Verification Section */}
             <div className="space-y-3">
               <label className="block text-xs font-extrabold text-slate-800">
-                แนบสลิปการโอนเงิน (ตรวจอัตโนมัติ)
+                {t("pay.slip_label")}
               </label>
 
               <input
@@ -255,7 +262,7 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
                         {slipFile?.name}
                       </div>
                       <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-0.5">
-                        <CheckCircle2 className="w-3 h-3" /> พร้อมตรวจสอบ
+                        <CheckCircle2 className="w-3 h-3" /> {t("pay.slip_ready")}
                       </span>
                     </div>
                   </div>
@@ -280,10 +287,10 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
                     <UploadCloud className="w-5 h-5" />
                   </div>
                   <div className="text-xs font-bold text-slate-800">
-                    คลิกเพื่ออัปโหลดสลิป
+                    {t("pay.slip_upload")}
                   </div>
                   <p className="text-[10px] text-slate-500">
-                    รองรับไฟล์ JPG, PNG (รูปสลิปจากแอปธนาคาร)
+                    {t("pay.slip_hint")}
                   </p>
                 </div>
               )}
@@ -302,12 +309,12 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
                 {isVerifying ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin text-slate-700" />
-                    <span>กำลังตรวจสอบสลิป EasySlip...</span>
+                    <span>{t("pay.verifying")}</span>
                   </>
                 ) : (
                   <>
                     <ShieldCheck className="w-4 h-4" />
-                    <span>ยืนยันการชำระเงิน</span>
+                    <span>{t("pay.btn_confirm")}</span>
                   </>
                 )}
               </button>

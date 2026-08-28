@@ -5,8 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Lock, Phone, Eye, EyeOff } from "lucide-react";
+import LanguageToggle from "@/components/LanguageToggle";
+import { useLanguage } from "@/context/LanguageContext";
 
 export default function LoginPage() {
+  const { t } = useLanguage();
   const router = useRouter();
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
@@ -70,12 +73,15 @@ export default function LoginPage() {
             BLU FITNESS
           </span>
         </Link>
-        <Link
-          href="/"
-          className="text-white/50 hover:text-white text-sm transition-colors"
-        >
-          กลับหน้าหลัก
-        </Link>
+        <div className="flex items-center gap-3">
+          <LanguageToggle variant="dark" />
+          <Link
+            href="/"
+            className="text-white/70 hover:text-white text-xs sm:text-sm transition-colors"
+          >
+            {t("login.back_home")}
+          </Link>
+        </div>
       </header>
 
       {/* ─── Card ─── */}
@@ -84,10 +90,10 @@ export default function LoginPage() {
           <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl">
             <div className="text-center mb-6">
               <h1 className="text-2xl font-extrabold text-[#0a1628] mb-1.5">
-                เข้าสู่ระบบสมาชิก
+                {t("login.title")}
               </h1>
               <p className="text-sm text-[#64748b]">
-                กรอกเบอร์มือถือและรหัสผ่านเพื่อเข้าใช้งาน
+                {t("login.subtitle")}
               </p>
             </div>
 
@@ -95,7 +101,7 @@ export default function LoginPage() {
               {/* Phone Input */}
               <div>
                 <label className="block text-sm font-semibold text-[#334155] mb-1.5">
-                  เบอร์มือถือ
+                  {t("login.phone_label")}
                 </label>
                 <div className="relative">
                   <input
@@ -117,14 +123,14 @@ export default function LoginPage() {
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block text-sm font-semibold text-[#334155]">
-                    รหัสผ่าน / PIN
+                    {t("login.password_label")}
                   </label>
                   <button
                     type="button"
                     onClick={() => alert("ระบบกู้คืนรหัสผ่านด้วย OTP จะเปิดให้บริการเร็วๆ นี้")}
                     className="text-xs text-[#003087] hover:underline cursor-pointer"
                   >
-                    ลืมรหัสผ่าน?
+                    {t("login.forgot_pwd")}
                   </button>
                 </div>
                 <div className="relative">
@@ -132,7 +138,7 @@ export default function LoginPage() {
                     type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="กรอกรหัสผ่าน"
+                    placeholder={t("login.pwd_placeholder")}
                     className="w-full pl-10 pr-10 py-3 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] text-[#0a1628] text-base placeholder:text-[#cbd5e1] focus:outline-none focus:ring-2 focus:ring-[#003087] focus:border-transparent transition-all"
                     required
                   />
@@ -163,7 +169,7 @@ export default function LoginPage() {
                 onClick={handleDemoFill}
                 className="w-full py-2 rounded-lg text-xs font-semibold text-[#003087] bg-[#003087]/5 hover:bg-[#003087]/10 border border-[#003087]/20 transition-all cursor-pointer"
               >
-                🔑 Auto-fill บัญชีทดสอบ (081-234-5678 / 123456)
+                {t("login.demo_fill")}
               </button>
 
               <button
@@ -171,17 +177,17 @@ export default function LoginPage() {
                 disabled={phone.length < 9 || !password || loading}
                 className="w-full btn-gold py-3.5 rounded-xl text-base font-bold disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-md"
               >
-                {loading ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
+                {loading ? t("login.submitting") : t("login.btn_submit")}
               </button>
             </form>
 
             <div className="text-center mt-6 pt-5 border-t border-slate-100">
-              <span className="text-xs text-slate-500">ยังไม่ได้เป็นสมาชิก? </span>
+              <span className="text-xs text-slate-500">{t("login.no_account")} </span>
               <Link
                 href="/member/register"
                 className="text-xs text-[#003087] font-bold hover:underline"
               >
-                สมัครสมาชิกใหม่
+                {t("login.register_link")}
               </Link>
             </div>
           </div>
