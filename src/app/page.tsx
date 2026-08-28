@@ -86,16 +86,16 @@ export default function Home() {
               <span className="text-[#ffd700] font-bold">฿90/วัน</span>
             </p>
 
-            <div className="grid grid-cols-2 gap-3 sm:flex sm:items-center sm:gap-3 pt-1 max-w-sm">
+            <div className="flex flex-row items-center gap-3.5 sm:gap-4 pt-2 w-full max-w-md">
               <Link
                 href="/member/login"
-                className="btn-gold py-3.5 rounded-xl text-center text-sm font-bold shadow-md"
+                className="btn-gold flex-1 sm:flex-initial px-6 py-3.5 sm:px-8 rounded-xl text-center text-sm sm:text-base font-bold shadow-md whitespace-nowrap flex items-center justify-center"
               >
                 สมัครสมาชิก
               </Link>
               <a
                 href="#packages"
-                className="py-3.5 rounded-xl text-center text-sm font-semibold text-white border border-white/30 hover:bg-white/10 transition-all"
+                className="flex-1 sm:flex-initial px-6 py-3.5 sm:px-8 rounded-xl text-center text-sm sm:text-base font-semibold text-white border border-white/30 hover:bg-white/10 transition-all backdrop-blur-xs whitespace-nowrap flex items-center justify-center"
               >
                 ดูแพ็กเกจ
               </a>
