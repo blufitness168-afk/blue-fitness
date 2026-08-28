@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { getPackagesBySlot, type TimeSlot } from "@/lib/mock-data";
 
 function formatPrice(price: number) {
@@ -11,6 +11,21 @@ function formatPrice(price: number) {
 
 export default function Home() {
   const [activeSlot, setActiveSlot] = useState<TimeSlot>("07:00-22:00");
+  const [member, setMember] = useState<{
+    fullName?: string;
+    avatarUrl?: string;
+    phone?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("blu_member");
+      if (saved) {
+        setMember(JSON.parse(saved));
+      }
+    } catch (e) {}
+  }, []);
+
   const packages = getPackagesBySlot(activeSlot);
 
   return (
@@ -26,7 +41,7 @@ export default function Home() {
               alt="Blu Fitness"
               width={38}
               height={38}
-              className="rounded-lg"
+              className="w-[38px] h-[38px] rounded-lg object-cover"
               priority
             />
             <span className="text-white font-extrabold tracking-wider text-lg">
@@ -35,18 +50,44 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-3">
-            <Link
-              href="/member/login"
-              className="text-white/70 hover:text-white text-sm font-medium transition-colors hidden sm:block"
-            >
-              เข้าสู่ระบบ
-            </Link>
-            <Link
-              href="/member/login"
-              className="btn-gold px-5 py-2 rounded-lg text-sm"
-            >
-              สมัครสมาชิก
-            </Link>
+            {member ? (
+              <Link
+                href="/member"
+                className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/15 border border-[#ffd700]/30 transition-all group"
+              >
+                <div className="relative w-8 h-8 rounded-full overflow-hidden border border-[#ffd700] shrink-0 bg-[#003087] flex items-center justify-center text-xs font-bold text-[#ffd700]">
+                  {member.avatarUrl ? (
+                    <Image
+                      src={member.avatarUrl}
+                      alt={member.fullName || "Member"}
+                      fill
+                      sizes="32px"
+                      className="object-cover"
+                    />
+                  ) : (
+                    <span>{member.fullName ? member.fullName.slice(0, 1) : "👤"}</span>
+                  )}
+                </div>
+                <span className="text-white text-xs sm:text-sm font-semibold max-w-[120px] truncate hidden xs:inline group-hover:text-[#ffd700] transition-colors">
+                  {member.fullName}
+                </span>
+              </Link>
+            ) : (
+              <>
+                <Link
+                  href="/member/login"
+                  className="text-white/70 hover:text-white text-sm font-medium transition-colors hidden sm:block"
+                >
+                  เข้าสู่ระบบ
+                </Link>
+                <Link
+                  href="/member/login"
+                  className="btn-gold px-5 py-2 rounded-lg text-sm"
+                >
+                  สมัครสมาชิก
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </nav>
@@ -338,7 +379,7 @@ export default function Home() {
                 alt="Blu Fitness"
                 width={32}
                 height={32}
-                className="rounded-lg opacity-70"
+                className="w-[32px] h-[32px] rounded-lg opacity-70 object-cover"
               />
               <div className="text-sm">
                 <span className="text-white/80 font-bold">BLU FITNESS</span>
