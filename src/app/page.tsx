@@ -4,7 +4,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { useState, useEffect, useRef } from "react";
 import { User, LogOut } from "lucide-react";
-import { getPackagesBySlot, type TimeSlot } from "@/lib/mock-data";
+import { getPackagesBySlot, type TimeSlot, type MockPackage } from "@/lib/mock-data";
+import PaymentModal from "@/components/PaymentModal";
 
 function formatPrice(price: number) {
   return price.toLocaleString("th-TH");
@@ -12,6 +13,7 @@ function formatPrice(price: number) {
 
 export default function Home() {
   const [activeSlot, setActiveSlot] = useState<TimeSlot>("07:00-22:00");
+  const [selectedPackage, setSelectedPackage] = useState<MockPackage | null>(null);
   const [member, setMember] = useState<{
     fullName?: string;
     avatarUrl?: string;
@@ -341,7 +343,9 @@ export default function Home() {
 
                     {/* CTA */}
                     <button
-                      className={`w-full py-2.5 rounded-lg text-sm font-bold transition-all ${isLast
+                      type="button"
+                      onClick={() => setSelectedPackage(pkg)}
+                      className={`w-full py-2.5 rounded-lg text-sm font-bold transition-all cursor-pointer ${isLast
                         ? "btn-gold"
                         : isDaily
                           ? "bg-slate-700 hover:bg-slate-800 text-white"
@@ -457,6 +461,14 @@ export default function Home() {
           </div>
         </div>
       </footer>
+      {/* ═══════════════════════════════════════════════
+          PAYMENT MODAL (PromptPay QR & Slip Verification)
+      ═══════════════════════════════════════════════ */}
+      <PaymentModal
+        pkg={selectedPackage}
+        isOpen={!!selectedPackage}
+        onClose={() => setSelectedPackage(null)}
+      />
     </main>
   );
 }

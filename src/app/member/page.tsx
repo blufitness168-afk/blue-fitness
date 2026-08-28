@@ -56,7 +56,7 @@ export default function MemberDashboardPage() {
           registeredAt: "28 ส.ค. 2026",
         });
       }
-    } catch (e) {}
+    } catch (e) { }
   }, []);
 
   const handleLogout = () => {
@@ -134,13 +134,13 @@ export default function MemberDashboardPage() {
         <section className="relative">
           {/* Card Body (Rounded-2xl, Clean White Card on Gray Background with Natural Drop Shadow) */}
           <div className="relative aspect-[1.58/1] w-full bg-white rounded-2xl overflow-hidden border border-slate-200/80 shadow-lg flex select-none">
-            
+
             {/* ── Left Edge Blue Accent (Full Height with Center-to-Edge Gradient) ── */}
             <div className="absolute inset-y-0 left-0 w-2.5 sm:w-3 bg-gradient-to-b from-[#001f5c] via-[#0052cc] to-[#001f5c] rounded-l-2xl z-20" />
 
             {/* ── Left 58%: White & Stacked Large Logo & Clean Single-Line Fields ── */}
             <div className="flex-1 pl-6 pr-3 py-3.5 sm:pl-8 sm:pr-4 sm:py-4 flex flex-col justify-between relative bg-white">
-              
+
               {/* Stacked Large Brand Logo (Big Icon with BLU pulled tight underneath) */}
               <div className="flex flex-col items-start z-10">
                 <div className="relative w-[136px] h-[136px] sm:w-[154px] sm:h-[154px] -ml-2 -mt-3">
@@ -249,17 +249,15 @@ export default function MemberDashboardPage() {
               return (
                 <div
                   key={i}
-                  className={`aspect-square rounded-none flex flex-col items-center justify-center p-1 relative transition-all ${
-                    fill === 100
+                  className={`aspect-square rounded-none flex flex-col items-center justify-center p-1 relative transition-all ${fill === 100
                       ? "bg-[#ffd700]/15 border-2 border-[#ffd700] shadow-[0_0_12px_rgba(255,215,0,0.25)]"
                       : fill > 0
-                      ? "bg-white/10 border border-[#ffd700]/70"
-                      : "bg-white/5 border border-white/10"
-                  }`}
+                        ? "bg-white/10 border border-[#ffd700]/70"
+                        : "bg-white/5 border border-white/10"
+                    }`}
                 >
-                  <span className={`absolute top-1 left-1.5 text-[8px] sm:text-[9px] font-mono font-bold ${
-                    fill > 0 ? "text-[#ffd700]" : "text-white/30"
-                  }`}>
+                  <span className={`absolute top-1 left-1.5 text-[8px] sm:text-[9px] font-mono font-bold ${fill > 0 ? "text-[#ffd700]" : "text-white/30"
+                    }`}>
                     {slotNum * 10}
                   </span>
                   <svg
@@ -355,7 +353,7 @@ export default function MemberDashboardPage() {
                 <span className="inline-block text-[10px] sm:text-[11px] font-black tracking-widest text-[#ffd700] uppercase drop-shadow-sm">
                   ✦ BLU FITNESS VIP PASS ✦
                 </span>
-                
+
                 <h4 className="text-2xl sm:text-3xl font-black text-white tracking-tight uppercase leading-none drop-shadow-md">
                   FRIEND PASS
                 </h4>
