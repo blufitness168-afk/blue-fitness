@@ -1,124 +1,364 @@
-import Link from "next/link";
+"use client";
+
 import Image from "next/image";
-import {
-  CreditCard,
-  QrCode,
-  ShieldAlert,
-  Activity,
-  CheckCircle2,
-  Sparkles,
-  ArrowRight,
-  Flame,
-} from "lucide-react";
+import Link from "next/link";
+import { useState } from "react";
+import { getPackagesBySlot, type TimeSlot } from "@/lib/mock-data";
+
+function formatPrice(price: number) {
+  return price.toLocaleString("th-TH");
+}
 
 export default function Home() {
-  return (
-    <main className="min-h-screen bg-gradient-to-b from-[#060b19] via-[#0a122c] to-[#060b19] text-white flex flex-col justify-between p-6 sm:p-12 relative overflow-hidden">
-      {/* Background Glows */}
-      <div className="absolute top-[-10%] left-[-10%] w-[40vw] h-[40vw] bg-[#003087]/30 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[40vw] h-[40vw] bg-[#ffd700]/10 rounded-full blur-[120px] pointer-events-none" />
+  const [activeSlot, setActiveSlot] = useState<TimeSlot>("07:00-22:00");
+  const packages = getPackagesBySlot(activeSlot);
 
-      {/* Header */}
-      <header className="max-w-6xl w-full mx-auto flex items-center justify-between z-10">
-        <div className="flex items-center gap-3">
-          <div className="relative w-11 h-11 rounded-xl overflow-hidden border border-[#ffd700]/40 shadow-[0_0_15px_rgba(0,48,135,0.8)] shrink-0">
+  return (
+    <main className="min-h-screen bg-white text-[#0f172a]">
+      {/* ═══════════════════════════════════════════════
+          NAVBAR
+      ═══════════════════════════════════════════════ */}
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-[#0a1628]/95 backdrop-blur-md border-b border-white/5">
+        <div className="max-w-7xl mx-auto px-5 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3">
             <Image
               src="/logo.jpg"
-              alt="Blu Fitness Logo"
-              width={44}
-              height={44}
-              className="w-full h-full object-cover"
+              alt="Blu Fitness"
+              width={38}
+              height={38}
+              className="rounded-lg"
               priority
             />
+            <span className="text-white font-extrabold tracking-wider text-lg">
+              BLU FITNESS
+            </span>
           </div>
-          <div>
-            <div className="font-extrabold tracking-wider text-lg leading-tight">BLU FITNESS</div>
-            <div className="text-[10px] text-[#ffd700] tracking-widest uppercase">Digital Membership</div>
+
+          <div className="flex items-center gap-3">
+            <Link
+              href="/member/login"
+              className="text-white/70 hover:text-white text-sm font-medium transition-colors hidden sm:block"
+            >
+              เข้าสู่ระบบ
+            </Link>
+            <Link
+              href="/member/login"
+              className="btn-gold px-5 py-2 rounded-lg text-sm"
+            >
+              สมัครสมาชิก
+            </Link>
           </div>
         </div>
+      </nav>
 
-        <Link
-          href="/test"
-          className="flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 transition-all"
-        >
-          <Activity className="w-3.5 h-3.5 animate-pulse" />
-          <span>API Diagnostics</span>
-        </Link>
-      </header>
+      {/* ═══════════════════════════════════════════════
+          HERO — Mobile-First
+      ═══════════════════════════════════════════════ */}
+      <section className="relative min-h-[600px] sm:min-h-[550px] sm:h-[85vh] sm:max-h-[750px] flex items-end sm:items-center pb-12 sm:pb-0 pt-20">
+        <Image
+          src="/bg1.jpg"
+          alt="Blu Fitness Gym"
+          fill
+          sizes="100vw"
+          className="object-cover"
+          priority
+        />
+        {/* Mobile: dark from bottom up / Desktop: dark from left */}
+        <div className="absolute inset-0 bg-gradient-to-t from-[#0a1628] via-[#0a1628]/65 to-transparent sm:hidden" />
+        <div className="absolute inset-0 hidden sm:block hero-overlay" />
 
-      {/* Hero Section */}
-      <section className="max-w-4xl w-full mx-auto text-center my-12 z-10 space-y-6">
-        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#0d1b3e] border border-amber-500/30 text-amber-300 text-xs font-bold shadow-lg">
-          <Sparkles className="w-3.5 h-3.5 text-[#ffd700]" />
-          ระบบจัดการสมาชิกและสแกนเช็คอินฟิตเนสออนไลน์
-        </div>
-
-        <h1 className="text-4xl sm:text-6xl font-black tracking-tight leading-tight">
-          SMART FITNESS <br />
-          <span className="bg-gradient-to-r from-[#ffd700] via-[#fff2a3] to-[#d4af37] bg-clip-text text-transparent">
-            ONLINE MEMBERSHIP
-          </span>
-        </h1>
-
-        <p className="text-slate-300 text-sm sm:text-base max-w-2xl mx-auto leading-relaxed">
-          ระบบบัตรสมาชิกดิจิทัล นับเวลาถอยหลังอายุสมาชิก ชำระเงิน PromptPay ตรวจสลิปอัตโนมัติ 
-          และสแกน Check-in สะสมแต้มหน้าร้านครบวงจร
-        </p>
-
-        {/* Feature Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-6 text-left">
-          {/* Card 1: Diagnostics */}
-          <Link
-            href="/test"
-            className="group bg-[#0d1b3e]/70 hover:bg-[#132452] border border-amber-500/20 hover:border-amber-500/60 rounded-2xl p-5 transition-all flex flex-col justify-between shadow-xl hover:shadow-[0_0_25px_rgba(255,215,0,0.15)]"
-          >
-            <div>
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                <Activity className="w-5 h-5" />
-              </div>
-              <h3 className="font-bold text-base text-white mb-1">ทดสอบระบบ (Health Check)</h3>
-              <p className="text-xs text-slate-400">ตรวจสอบสถานะ Neon, Cloudinary, EasySlip, SMS, และ LINE</p>
+        <div className="relative z-10 max-w-7xl mx-auto px-5 sm:px-6 w-full">
+          <div className="max-w-xl space-y-5 sm:space-y-6">
+            <div className="inline-block px-3.5 py-1.5 bg-[#ffd700] text-[#0a1628] text-xs font-extrabold rounded tracking-wider uppercase shadow-sm">
+              Blu Fitness — ชะอำ
             </div>
-            <div className="mt-4 flex items-center text-xs font-bold text-emerald-400 group-hover:translate-x-1 transition-transform">
-              เปิดหน้าทดสอบ <ArrowRight className="w-3.5 h-3.5 ml-1" />
-            </div>
-          </Link>
 
-          {/* Card 2: Member App */}
-          <div className="bg-[#0d1b3e]/70 border border-slate-700/60 rounded-2xl p-5 flex flex-col justify-between opacity-85">
-            <div>
-              <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center mb-4">
-                <CreditCard className="w-5 h-5" />
-              </div>
-              <h3 className="font-bold text-base text-white mb-1">ฝั่งสมาชิก (Member App)</h3>
-              <p className="text-xs text-slate-400">บัตรดิจิทัล, ตัวเลขนับถอยหลัง, แพ็กเกจ, กระเป๋าคูปอง และแลกแต้ม</p>
-            </div>
-            <div className="mt-4 flex items-center text-xs font-bold text-[#ffd700]">
-              Phase 2 & 3 (In Progress)
-            </div>
-          </div>
+            <h1 className="text-[2.5rem] leading-[1.15] sm:text-5xl lg:text-6xl font-black text-white tracking-tight">
+              เริ่มต้น
+              <br />
+              <span className="text-[#ffd700]">ชีวิตที่แข็งแกร่ง</span>
+              <br />
+              วันนี้
+            </h1>
 
-          {/* Card 3: Admin & Scanner */}
-          <div className="bg-[#0d1b3e]/70 border border-slate-700/60 rounded-2xl p-5 flex flex-col justify-between opacity-85">
-            <div>
-              <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center mb-4">
-                <QrCode className="w-5 h-5" />
-              </div>
-              <h3 className="font-bold text-base text-white mb-1">ฝั่งแอดมิน (Front Desk)</h3>
-              <p className="text-xs text-slate-400">เครื่องสแกนกล้อง/ฮาร์ดแวร์ +1 แต้ม, ตารางสมาชิก Excel, ตรวจสลิป</p>
-            </div>
-            <div className="mt-4 flex items-center text-xs font-bold text-[#ffd700]">
-              Phase 4 (In Progress)
+            <p className="text-white/80 text-base sm:text-lg leading-relaxed max-w-md">
+              ฟิตเนสครบวงจร อุปกรณ์ครบครัน สมัครออนไลน์ เริ่มต้นเพียง{" "}
+              <span className="text-[#ffd700] font-bold">฿90/วัน</span>
+            </p>
+
+            <div className="grid grid-cols-2 gap-3 sm:flex sm:items-center sm:gap-3 pt-1 max-w-sm">
+              <Link
+                href="/member/login"
+                className="btn-gold py-3.5 rounded-xl text-center text-sm font-bold shadow-md"
+              >
+                สมัครสมาชิก
+              </Link>
+              <a
+                href="#packages"
+                className="py-3.5 rounded-xl text-center text-sm font-semibold text-white border border-white/30 hover:bg-white/10 transition-all"
+              >
+                ดูแพ็กเกจ
+              </a>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="max-w-6xl w-full mx-auto text-center text-xs text-slate-500 py-4 border-t border-slate-800/80 z-10 flex flex-col sm:flex-row items-center justify-between gap-2">
-        <div>© 2026 Blu Fitness Cha-am. All rights reserved.</div>
-        <div className="text-slate-400">
-          Staging URL: <span className="text-[#ffd700]">https://blue-fitness-chi.vercel.app</span>
+      {/* ═══════════════════════════════════════════════
+          HIGHLIGHTS — Always 3-col
+      ═══════════════════════════════════════════════ */}
+      <section className="bg-[#0a1628] text-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-7 sm:py-12 grid grid-cols-3 text-center">
+          <div className="border-r border-white/10 px-2">
+            <div className="text-xl sm:text-3xl font-black text-[#ffd700] mb-1">07:00-22:00</div>
+            <div className="text-[11px] sm:text-sm text-white/50 font-medium">เปิดทุกวัน</div>
+          </div>
+          <div className="border-r border-white/10 px-2">
+            <div className="text-xl sm:text-3xl font-black text-[#ffd700] mb-1">฿90/วัน</div>
+            <div className="text-[11px] sm:text-sm text-white/50 font-medium">เริ่มต้นเพียง</div>
+          </div>
+          <div className="px-2">
+            <div className="text-xl sm:text-3xl font-black text-[#ffd700] mb-1">ครบครัน</div>
+            <div className="text-[11px] sm:text-sm text-white/50 font-medium">อุปกรณ์ทุกประเภท</div>
+          </div>
+        </div>
+      </section>
+
+      {/* ═══════════════════════════════════════════════
+          PACKAGES — with time slot toggle
+      ═══════════════════════════════════════════════ */}
+      <section id="packages" className="scroll-mt-20 bg-[#f1f5f9]">
+        <div className="max-w-7xl mx-auto px-5 py-16 sm:py-20">
+          <div className="text-center mb-10">
+            <h2 className="text-3xl sm:text-4xl font-extrabold text-[#0a1628] tracking-tight">
+              แพ็กเกจสมาชิก
+            </h2>
+            <p className="text-[#64748b] text-sm sm:text-base mt-3 max-w-lg mx-auto">
+              เลือกช่วงเวลาและแพ็กเกจที่เหมาะกับคุณ — ยิ่งนาน ยิ่งคุ้ม
+            </p>
+
+            {/* Time Slot Toggle */}
+            <div className="mt-6 inline-flex items-center bg-white rounded-xl p-1.5 shadow-sm border border-[#e2e8f0]">
+              <button
+                onClick={() => setActiveSlot("07:00-14:00")}
+                className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all ${activeSlot === "07:00-14:00"
+                    ? "bg-[#003087] text-white shadow-md"
+                    : "text-[#64748b] hover:text-[#0a1628]"
+                  }`}
+              >
+                07:00 - 14:00
+              </button>
+              <button
+                onClick={() => setActiveSlot("07:00-22:00")}
+                className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all ${activeSlot === "07:00-22:00"
+                    ? "bg-[#003087] text-white shadow-md"
+                    : "text-[#64748b] hover:text-[#0a1628]"
+                  }`}
+              >
+                07:00 - 22:00
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            {packages.map((pkg, index) => {
+              const isLast = index === packages.length - 1;
+              const isDaily = pkg.durationDays === 1;
+              const pricePerDay =
+                pkg.durationDays > 1
+                  ? Math.round(pkg.price / pkg.durationDays)
+                  : null;
+
+              return (
+                <div
+                  key={pkg.id}
+                  className={`relative bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-lg transition-shadow flex flex-col ${isLast
+                      ? "ring-2 ring-[#ffd700]"
+                      : isDaily
+                        ? "ring-1 ring-slate-300 border border-slate-200"
+                        : "ring-2 ring-[#003087]"
+                    }`}
+                >
+                  {/* Badge */}
+                  <div
+                    className={`text-center py-1.5 text-xs font-bold tracking-wider uppercase ${isLast
+                        ? "bg-[#ffd700] text-[#0a1628]"
+                        : isDaily
+                          ? "bg-slate-500 text-white"
+                          : "bg-[#003087] text-white"
+                      }`}
+                  >
+                    {isLast ? "คุ้มที่สุด" : isDaily ? "ทั่วไป" : "ยอดนิยม"}
+                  </div>
+
+                  <div className="p-5 flex flex-col flex-1">
+                    {/* Package Label */}
+                    <div className="text-xs font-semibold text-[#64748b] uppercase tracking-wider mb-3">
+                      {pkg.label}
+                    </div>
+
+                    {/* Price */}
+                    <div className="mb-1">
+                      <span className="text-3xl font-black text-[#0a1628]">
+                        ฿{formatPrice(pkg.price)}
+                      </span>
+                    </div>
+                    {pricePerDay ? (
+                      <div className="text-[11px] text-[#94a3b8] mb-5">
+                        เฉลี่ยวันละ {pricePerDay} บาท
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-[#94a3b8] mb-5">
+                        ต่อครั้ง
+                      </div>
+                    )}
+
+                    {/* Features */}
+                    <ul className="space-y-2 flex-1 mb-5 text-sm text-[#334155]">
+                      <li className="flex items-start gap-2">
+                        <span className="text-[#003087] font-bold mt-0.5">✓</span>
+                        ใช้งาน {pkg.label}
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-[#003087] font-bold mt-0.5">✓</span>
+                        ช่วง {pkg.timeSlot} น.
+                      </li>
+                      {pkg.friendCoupons > 0 && (
+                        <li className="flex items-start gap-2">
+                          <span className="text-[#003087] font-bold mt-0.5">✓</span>
+                          พาเพื่อนฟรี {pkg.friendCoupons} ครั้ง
+                        </li>
+                      )}
+                      {pkg.bonusDays > 0 && (
+                        <li className="flex items-start gap-2">
+                          <span className="text-[#ffd700] font-bold mt-0.5">★</span>
+                          <span className="text-[#003087] font-semibold">
+                            ฟรี! +{pkg.bonusDays} วัน
+                          </span>
+                        </li>
+                      )}
+                    </ul>
+
+                    {/* CTA */}
+                    <button
+                      className={`w-full py-2.5 rounded-lg text-sm font-bold transition-all ${isLast
+                          ? "btn-gold"
+                          : isDaily
+                            ? "bg-slate-700 hover:bg-slate-800 text-white"
+                            : "btn-blue"
+                        }`}
+                    >
+                      เลือกแพ็กเกจนี้
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* ═══════════════════════════════════════════════
+          GYM PHOTOS
+      ═══════════════════════════════════════════════ */}
+      <section className="bg-white">
+        <div className="max-w-7xl mx-auto px-5 py-16 sm:py-20">
+          <div className="text-center mb-10">
+            <h2 className="text-3xl sm:text-4xl font-extrabold text-[#0a1628] tracking-tight">
+              ภายในฟิตเนส
+            </h2>
+            <p className="text-[#64748b] text-sm sm:text-base mt-3">
+              อุปกรณ์ออกกำลังกายครบครัน พร้อมให้บริการ
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-[#e2e8f0]">
+              <Image
+                src="/bg1.jpg"
+                alt="ภายในฟิตเนส 1"
+                fill
+                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                className="object-cover hover:scale-105 transition-transform duration-500"
+              />
+            </div>
+            <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-[#e2e8f0]">
+              <Image
+                src="/bg2.webp"
+                alt="ภายในฟิตเนส 2"
+                fill
+                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                className="object-cover hover:scale-105 transition-transform duration-500"
+              />
+            </div>
+            <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-[#e2e8f0]">
+              <Image
+                src="/bg3.jpg"
+                alt="ภายในฟิตเนส 3"
+                fill
+                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                className="object-cover hover:scale-105 transition-transform duration-500"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ═══════════════════════════════════════════════
+          CTA BANNER
+      ═══════════════════════════════════════════════ */}
+      <section className="bg-[#003087]">
+        <div className="max-w-7xl mx-auto px-5 py-14 sm:py-16 flex flex-col sm:flex-row items-center justify-between gap-6 text-center sm:text-left">
+          <div>
+            <h3 className="text-2xl sm:text-3xl font-extrabold text-white">
+              พร้อมเริ่มแล้วหรือยัง?
+            </h3>
+            <p className="text-white/60 text-sm sm:text-base mt-2">
+              สมัครสมาชิกวันนี้ รับสิทธิพิเศษทันที
+            </p>
+          </div>
+          <Link
+            href="/member/login"
+            className="btn-gold px-8 py-3.5 rounded-lg text-base shrink-0"
+          >
+            สมัครสมาชิกเลย
+          </Link>
+        </div>
+      </section>
+
+      {/* ═══════════════════════════════════════════════
+          FOOTER
+      ═══════════════════════════════════════════════ */}
+      <footer className="bg-[#0a1628] text-white/50">
+        <div className="max-w-7xl mx-auto px-5 py-10">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
+            <div className="flex items-center gap-3">
+              <Image
+                src="/logo.jpg"
+                alt="Blu Fitness"
+                width={32}
+                height={32}
+                className="rounded-lg opacity-70"
+              />
+              <div className="text-sm">
+                <span className="text-white/80 font-bold">BLU FITNESS</span>
+                <span className="mx-2">·</span>
+                ชะอำ, เพชรบุรี
+              </div>
+            </div>
+
+            <div className="flex items-center gap-5 text-xs">
+              <span>เปิดบริการ 07:00 - 22:00 น.</span>
+              <span>·</span>
+              <Link href="/test" className="hover:text-white transition-colors">
+                API Diagnostics
+              </Link>
+            </div>
+          </div>
+
+          <div className="border-t border-white/10 mt-8 pt-6 text-xs text-center text-white/30">
+            © 2026 Blu Fitness Cha-am. All rights reserved.
+          </div>
         </div>
       </footer>
     </main>
