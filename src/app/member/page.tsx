@@ -289,26 +289,20 @@ export default function MemberDashboardPage() {
             })}
           </div>
 
-          {/* Bottom Action: Redeem Rewards with Underline */}
+          {/* Bottom Action: Redeem Rewards (No Redirect) */}
           <div className="pt-1 text-center">
-            <Link
-              href="/member/rewards"
-              className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-[#ffd700] hover:text-[#ffe55b] transition-colors underline underline-offset-4 decoration-[#ffd700]/70 hover:decoration-[#ffd700] cursor-pointer"
-            >
+            <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-[#ffd700] hover:text-[#ffe55b] transition-colors underline underline-offset-4 decoration-[#ffd700]/70 cursor-pointer select-none">
               <span>แลกรางวัล</span>
               <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
+            </span>
           </div>
         </section>
 
         {/* ═══════════════════════════════════════════════
-            3. LUXURY NAVY & GOLD FRIEND PASS TICKET (100% True Transparent Vector SVG)
+            3. LUXURY NAVY & GOLD FRIEND PASS TICKET (No Redirect)
         ═══════════════════════════════════════════════ */}
         <section>
-          <Link
-            href="/member/coupons"
-            className="block relative w-full max-w-md mx-auto hover:scale-[1.02] transition-transform group cursor-pointer select-none"
-          >
+          <div className="relative w-full max-w-md mx-auto hover:scale-[1.01] transition-transform select-none cursor-pointer">
             {/* 100% True Transparent Vector Ticket Graphic */}
             <svg
               viewBox="0 0 460 230"
@@ -364,14 +358,14 @@ export default function MemberDashboardPage() {
                 </p>
 
                 <div className="pt-1">
-                  <span className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-black text-[#ffd700] underline underline-offset-4 decoration-[#ffd700]/70 group-hover:text-[#ffe55b]">
+                  <span className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-black text-[#ffd700] underline underline-offset-4 decoration-[#ffd700]/70 hover:text-[#ffe55b]">
                     <span>เปิดใช้งานคูปอง</span>
-                    <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                    <ArrowRight className="w-3.5 h-3.5" />
                   </span>
                 </div>
               </div>
             </div>
-          </Link>
+          </div>
         </section>
 
         {/* ═══════════════════════════════════════════════
@@ -379,7 +373,7 @@ export default function MemberDashboardPage() {
         ═══════════════════════════════════════════════ */}
         <section>
           <Link
-            href="/member/packages"
+            href="/#packages"
             className="w-full btn-gold py-4 px-6 rounded-2xl text-center font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer"
           >
             <CreditCard className="w-5 h-5" />
