@@ -1,24 +1,27 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Kanit:wght@400;500;600;700;800;900&display=swap');
 @import "tailwindcss";
 
+@theme {
+  --color-blu-ice: #f0fcfe;
+  --color-blu-sky: #b7d9e2;
+  --color-blu-ocean: #86b6c6;
+  --color-blu-steel: #5c93aa;
+  --color-blu-slate: #3a728e;
+  --color-blu-navy: #1f5372;
+  --color-blu-dark: #0c3756;
+  --color-blu-yellow: #ffd700;
+}
+
 @layer base {
   :root {
-    --blue-900: #0a1628;
-    --blue-800: #0f2240;
-    --blue-700: #003087;
-    --blue-600: #1a4fbf;
-    --gold: #ffd700;
-    --gold-dim: #c9a800;
-    --gray-50: #f8fafc;
-    --gray-100: #f1f5f9;
-    --gray-200: #e2e8f0;
-    --gray-300: #cbd5e1;
-    --gray-400: #94a3b8;
-    --gray-500: #64748b;
-    --gray-600: #475569;
-    --gray-700: #334155;
-    --gray-800: #1e293b;
-    --gray-900: #0f172a;
+    --blu-ice: #f0fcfe;
+    --blu-sky: #b7d9e2;
+    --blu-ocean: #86b6c6;
+    --blu-steel: #5c93aa;
+    --blu-slate: #3a728e;
+    --blu-navy: #1f5372;
+    --blu-dark: #0c3756;
+    --blu-yellow: #ffd700;
   }
 
   html {
@@ -26,40 +29,55 @@
   }
 
   body {
-    background-color: #ffffff;
-    color: var(--gray-900);
+    background-color: var(--blu-dark);
+    color: var(--blu-dark);
     font-family: 'Inter', 'Kanit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
 }
 
-/* Gold accent button */
+/* Gold / Yellow accent button */
 .btn-gold {
-  background: var(--gold);
-  color: var(--blue-900);
+  background: var(--blu-yellow);
+  color: var(--blu-dark);
   font-weight: 700;
   transition: all 0.2s ease;
 }
+
 .btn-gold:hover {
   background: #ffe433;
   box-shadow: 0 4px 20px rgba(255, 215, 0, 0.35);
 }
 
 .btn-blue {
-  background: var(--blue-700);
+  background: var(--blu-slate);
   color: #ffffff;
   font-weight: 600;
   transition: all 0.2s ease;
 }
+
 .btn-blue:hover {
-  background: var(--blue-600);
+  background: var(--blu-navy);
 }
 
 /* Hero overlay */
 .hero-overlay {
-  background: linear-gradient(
-    to right,
-    rgba(10, 22, 40, 0.75) 0%,
-    rgba(10, 22, 40, 0.50) 50%,
-    rgba(10, 22, 40, 0.15) 100%
-  );
+  background: linear-gradient(to right,
+      rgba(12, 55, 86, 0.85) 0%,
+      rgba(12, 55, 86, 0.60) 50%,
+      rgba(12, 55, 86, 0.20) 100%);
+}
+
+/* 🛡️ Live Anti-Fraud Flowing Gradient Animation */
+@keyframes flowDown {
+  0% {
+    background-position: 0% 0%;
+  }
+  100% {
+    background-position: 0% 200%;
+  }
+}
+
+.animate-flow-down {
+  background-size: 100% 200% !important;
+  animation: flowDown 2.2s linear infinite !important;
 }

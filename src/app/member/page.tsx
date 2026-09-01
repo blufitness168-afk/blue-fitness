@@ -7,10 +7,7 @@ import { useState, useEffect } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
   ChevronLeft,
-  Maximize2,
   X,
-  Sparkles,
-  Ticket,
   Calendar,
   Phone,
   CreditCard,
@@ -19,27 +16,54 @@ import {
   LogOut,
   ArrowRight,
   ShieldCheck,
-  Gift,
+  HeartHandshake,
 } from "lucide-react";
 import LanguageToggle from "@/components/LanguageToggle";
 import { useLanguage } from "@/context/LanguageContext";
+import { MemberProfile, defaultMockMember } from "@/lib/mock-data";
 
 export default function MemberDashboardPage() {
   const { t, lang } = useLanguage();
   const router = useRouter();
-  const [member, setMember] = useState<{
-    fullName: string;
-    phone: string;
-    avatarUrl?: string;
-    memberCode: string;
-    cardNumber?: string;
-    birthDay?: string;
-    birthMonth?: string;
-    points?: number;
-    registeredAt?: string;
-  } | null>(null);
+  const [member, setMember] = useState<MemberProfile | null>(null);
 
   const [qrModalOpen, setQrModalOpen] = useState(false);
+
+  // 🛡️ Live Anti-Fraud Countdown Timer (Ticks every 1s)
+  const [timeLeft, setTimeLeft] = useState<{
+    days: number;
+    hours: number;
+    minutes: number;
+    seconds: number;
+  }>({ days: 45, hours: 14, minutes: 32, seconds: 45 });
+
+  useEffect(() => {
+    // 45 days, 14 hours, 32 mins, 45 seconds from now
+    const target = new Date();
+    target.setDate(target.getDate() + 45);
+    target.setHours(target.getHours() + 14);
+    target.setMinutes(target.getMinutes() + 32);
+    target.setSeconds(target.getSeconds() + 45);
+
+    const timer = setInterval(() => {
+      const now = new Date();
+      const diff = target.getTime() - now.getTime();
+
+      if (diff <= 0) {
+        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+        return;
+      }
+
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+      const minutes = Math.floor((diff / (1000 * 60)) % 60);
+      const seconds = Math.floor((diff / 1000) % 60);
+
+      setTimeLeft({ days, hours, minutes, seconds });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     try {
@@ -47,17 +71,7 @@ export default function MemberDashboardPage() {
       if (saved) {
         setMember(JSON.parse(saved));
       } else {
-        setMember({
-          fullName: "สมชาย ใจดี",
-          phone: "081-234-5678",
-          avatarUrl: "",
-          memberCode: "BLU-1001",
-          cardNumber: "CARD-8899",
-          birthDay: "15",
-          birthMonth: "สิงหาคม",
-          points: 25,
-          registeredAt: "28 ส.ค. 2026",
-        });
+        setMember(defaultMockMember);
       }
     } catch (e) { }
   }, []);
@@ -69,15 +83,15 @@ export default function MemberDashboardPage() {
 
   if (!member) {
     return (
-      <div className="min-h-screen bg-[#f1f5f9] flex items-center justify-center text-slate-800">
-        <div className="w-8 h-8 border-3 border-[#0047ba] border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-blu-ice flex items-center justify-center text-blu-dark">
+        <div className="w-8 h-8 border-3 border-blu-slate border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   // Active package details
   const activePackage = {
-    name: "BLU 07:00-22:00 (ราย 90 วัน)",
+    name: "BLU 07:00-22:00 (ราย 3 เดือน)",
     timeSlot: "07:00 - 22:00 น.",
     usedDays: 45,
     totalDays: 90,
@@ -87,15 +101,15 @@ export default function MemberDashboardPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#f1f5f9] text-slate-800 pb-16">
+    <main className="min-h-screen bg-blu-ice text-blu-dark pb-16">
       {/* ═══════════════════════════════════════════════
           NAVBAR (Light Glass on Gray Background)
       ═══════════════════════════════════════════════ */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-blu-sky/40 shadow-xs">
         <div className="max-w-2xl mx-auto px-4 h-15 flex items-center justify-between">
           <Link
             href="/"
-            className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-900 transition-colors font-medium"
+            className="flex items-center gap-1.5 text-xs text-blu-steel hover:text-blu-dark transition-colors font-medium"
           >
             <ChevronLeft className="w-4 h-4" />
             <span>{t("member.back")}</span>
@@ -110,7 +124,7 @@ export default function MemberDashboardPage() {
               className="w-[38px] h-[38px] rounded-lg object-cover"
               priority
             />
-            <span className="font-extrabold tracking-wider text-sm text-[#0a1628]">
+            <span className="font-extrabold tracking-wider text-sm text-blu-dark">
               BLU FITNESS
             </span>
           </div>
@@ -120,7 +134,7 @@ export default function MemberDashboardPage() {
             <button
               onClick={handleLogout}
               title={t("nav.logout")}
-              className="text-xs text-slate-500 hover:text-rose-600 flex items-center gap-1 transition-colors cursor-pointer font-medium p-1"
+              className="text-xs text-blu-steel hover:text-rose-600 flex items-center gap-1 transition-colors cursor-pointer font-medium p-1"
             >
               <LogOut className="w-3.5 h-3.5" />
             </button>
@@ -137,16 +151,16 @@ export default function MemberDashboardPage() {
             1. REALISTIC BLU FITNESS PHYSICAL CARD REPLICA
         ═══════════════════════════════════════════════ */}
         <section className="relative">
-          {/* Card Body (Rounded-2xl, Clean White Card on Gray Background with Natural Drop Shadow) */}
-          <div className="relative aspect-[1.58/1] w-full bg-white rounded-2xl overflow-hidden border border-slate-200/80 shadow-lg flex select-none">
+          {/* Card Body */}
+          <div className="relative aspect-[1.58/1] w-full bg-white rounded-2xl overflow-hidden border border-blu-sky/40 shadow-lg flex select-none">
 
-            {/* ── Left Edge Blue Accent (Full Height with Center-to-Edge Gradient) ── */}
-            <div className="absolute inset-y-0 left-0 w-2.5 sm:w-3 bg-gradient-to-b from-[#001f5c] via-[#0052cc] to-[#001f5c] rounded-l-2xl z-20" />
+            {/* ── Left Edge Animated Live Blue/Gold Shimmer Accent (Anti-Fraud Downward Flow) ── */}
+            <div className="absolute inset-y-0 left-0 w-2.5 sm:w-3 bg-[linear-gradient(180deg,_#0c3756_0%,_#3a728e_20%,_#ffd700_50%,_#3a728e_80%,_#0c3756_100%)] animate-flow-down rounded-l-2xl z-20 shadow-xs" />
 
             {/* ── Left 58%: White & Stacked Large Logo & Clean Single-Line Fields ── */}
             <div className="flex-1 pl-6 pr-3 py-3.5 sm:pl-8 sm:pr-4 sm:py-4 flex flex-col justify-between relative bg-white">
 
-              {/* Stacked Large Brand Logo (Big Icon with BLU pulled tight underneath) */}
+              {/* Stacked Large Brand Logo */}
               <div className="flex flex-col items-start z-10">
                 <div className="relative w-[136px] h-[136px] sm:w-[154px] sm:h-[154px] -ml-2 -mt-3">
                   <Image
@@ -159,42 +173,50 @@ export default function MemberDashboardPage() {
                   />
                 </div>
                 <div className="-mt-4 sm:-mt-5 relative z-20">
-                  <div className="text-4xl sm:text-5xl font-black tracking-tight text-[#0047ba] leading-none drop-shadow-xs">
+                  <div className="text-4xl sm:text-5xl font-black tracking-tight text-blu-slate leading-none drop-shadow-xs">
                     BLU
                   </div>
-                  <div className="text-sm sm:text-base font-black tracking-[0.24em] text-[#0a1628] uppercase mt-0.5">
+                  <div className="text-sm sm:text-base font-black tracking-[0.24em] text-blu-dark uppercase mt-0.5">
                     FITNESS
                   </div>
                 </div>
               </div>
 
-              {/* Member & Date Underlined Fields (Strictly 1 Line Each with clean underlines) */}
+              {/* Member & Date Underlined Fields */}
               <div className="space-y-2 sm:space-y-2.5 z-10">
                 {/* Member Name (1 Line) */}
                 <div>
                   <div className="flex items-baseline gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                    <span className="font-extrabold text-[#0a1628] shrink-0">{t("member.member_label")}:</span>
-                    <span className="font-black text-[#0047ba] truncate">
+                    <span className="font-extrabold text-blu-dark shrink-0">{t("member.member_label")}:</span>
+                    <span className="font-black text-blu-slate truncate">
                       {member.fullName}
                     </span>
                   </div>
-                  <div className="h-[1.5px] bg-[#0047ba] w-full mt-0.5 opacity-80" />
+                  <div className="h-[1.5px] bg-blu-slate w-full mt-0.5 opacity-80" />
                 </div>
 
-                {/* Date (1 Line) */}
+                {/* Date (1 Line with Live Ticking Seconds & Pulsing Dot) */}
                 <div>
                   <div className="flex items-baseline justify-between text-xs sm:text-sm whitespace-nowrap gap-1">
                     <div className="flex items-baseline gap-1">
-                      <span className="font-extrabold text-[#0a1628] shrink-0">{t("member.date_label")}:</span>
-                      <span className="font-black text-[#0047ba] font-mono">
+                      <span className="font-extrabold text-blu-dark shrink-0">{t("member.date_label")}:</span>
+                      <span className="font-black text-blu-slate font-mono">
                         {activePackage.usedDays}/{activePackage.totalDays} {t("member.days_unit")}
                       </span>
                     </div>
-                    <span className="text-[10px] sm:text-[11px] text-emerald-600 font-extrabold shrink-0">
-                      ({lang === "en" ? `${activePackage.daysLeft} left` : `เหลือ ${activePackage.daysLeft} วัน`})
-                    </span>
+                    <div className="flex items-center gap-1 text-[10px] sm:text-[11px] text-emerald-600 font-extrabold shrink-0 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200">
+                      <span className="relative flex h-1.5 w-1.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                      </span>
+                      <span className="font-mono">
+                        {lang === "en"
+                          ? `${timeLeft.days}d ${String(timeLeft.hours).padStart(2, "0")}:${String(timeLeft.minutes).padStart(2, "0")}:${String(timeLeft.seconds).padStart(2, "0")}`
+                          : `${timeLeft.days}วัน ${String(timeLeft.hours).padStart(2, "0")}:${String(timeLeft.minutes).padStart(2, "0")}:${String(timeLeft.seconds).padStart(2, "0")}`}
+                      </span>
+                    </div>
                   </div>
-                  <div className="h-[1.5px] bg-[#0047ba] w-full mt-0.5 opacity-80" />
+                  <div className="h-[1.5px] bg-blu-slate w-full mt-0.5 opacity-80" />
                 </div>
               </div>
             </div>
@@ -202,7 +224,7 @@ export default function MemberDashboardPage() {
             {/* ── Right 40%: Metallic Deep Blue Tab (Subtle Diagonal Metallic Sheen & Pure QR) ── */}
             <div
               onClick={() => setQrModalOpen(true)}
-              className="w-[40%] bg-[linear-gradient(135deg,_#001844_0%,_#00318c_25%,_#006eff_50%,_#00318c_75%,_#001844_100%)] p-3 sm:p-4 flex flex-col items-center justify-center text-center text-white relative cursor-pointer hover:brightness-110 transition-all border-l border-[#003087]"
+              className="w-[40%] bg-[linear-gradient(135deg,_#0c3756_0%,_#1f5372_30%,_#3a728e_50%,_#1f5372_70%,_#0c3756_100%)] p-3 sm:p-4 flex flex-col items-center justify-center text-center text-white relative cursor-pointer hover:brightness-110 transition-all border-l border-blu-slate"
               title="แตะเพื่อขยาย QR Code"
             >
               {/* Direct QR Code with Transparent Background (Printed on Blue Metal) */}
@@ -212,7 +234,7 @@ export default function MemberDashboardPage() {
                   size={150}
                   level="H"
                   bgColor="transparent"
-                  fgColor="#051329"
+                  fgColor="#0c3756"
                   marginSize={0}
                   className="w-24 h-24 sm:w-30 sm:h-30 drop-shadow-xs"
                 />
@@ -225,15 +247,15 @@ export default function MemberDashboardPage() {
         {/* ═══════════════════════════════════════════════
             2. BLU POINT 10-SLOT STAMP CARD (Luxury Navy & Gold Theme - Sharp Corners)
         ═══════════════════════════════════════════════ */}
-        <section className="bg-gradient-to-br from-[#003087] via-[#0a1838] to-[#050e24] text-white rounded-none p-5 border-2 border-[#ffd700]/50 shadow-xl space-y-4 relative overflow-hidden">
+        <section className="bg-gradient-to-br from-blu-dark via-blu-navy to-blu-dark text-white rounded-none p-5 border-2 border-blu-yellow/50 shadow-xl space-y-4 relative overflow-hidden">
           {/* Header Row: BLU POINT (Gold) & Total Points Summary (Right) */}
           <div className="flex items-center justify-between pb-3.5 border-b border-white/15">
-            <h3 className="text-base sm:text-lg font-black tracking-wider text-[#ffd700] uppercase">
+            <h3 className="text-base sm:text-lg font-black tracking-wider text-blu-yellow uppercase">
               {t("points.title")}
             </h3>
             <div className="font-mono font-black text-sm sm:text-base">
-              <span className="text-[#ffd700] text-xl sm:text-2xl font-black">{member.points ?? 35}</span>
-              <span className="text-white/60 font-bold ml-1">{t("points.of_100")}</span>
+              <span className="text-blu-yellow text-xl sm:text-2xl font-black">{member.points ?? 35}</span>
+              <span className="text-blu-sky/80 font-bold ml-1">{t("points.of_100")}</span>
             </div>
           </div>
 
@@ -255,13 +277,13 @@ export default function MemberDashboardPage() {
                 <div
                   key={i}
                   className={`aspect-square rounded-none flex flex-col items-center justify-center p-1 relative transition-all ${fill === 100
-                      ? "bg-[#ffd700]/15 border-2 border-[#ffd700] shadow-[0_0_12px_rgba(255,215,0,0.25)]"
+                      ? "bg-blu-yellow/15 border-2 border-blu-yellow shadow-[0_0_12px_rgba(255,215,0,0.25)]"
                       : fill > 0
-                        ? "bg-white/10 border border-[#ffd700]/70"
+                        ? "bg-white/10 border border-blu-yellow/70"
                         : "bg-white/5 border border-white/10"
                     }`}
                 >
-                  <span className={`absolute top-1 left-1.5 text-[8px] sm:text-[9px] font-mono font-bold ${fill > 0 ? "text-[#ffd700]" : "text-white/30"
+                  <span className={`absolute top-1 left-1.5 text-[8px] sm:text-[9px] font-mono font-bold ${fill > 0 ? "text-blu-yellow" : "text-white/30"
                     }`}>
                     {slotNum * 10}
                   </span>
@@ -272,7 +294,7 @@ export default function MemberDashboardPage() {
                     <defs>
                       <linearGradient id={gradId} gradientUnits="userSpaceOnUse" x1="0" y1="22" x2="44" y2="22">
                         <stop offset={`${fill}%`} stopColor="#ffd700" />
-                        <stop offset={`${fill}%`} stopColor="#334155" />
+                        <stop offset={`${fill}%`} stopColor="#3a728e" />
                       </linearGradient>
                     </defs>
                     {/* 45-Degree Diagonal Large Dumbbell with Separated Plate Gaps */}
@@ -296,7 +318,7 @@ export default function MemberDashboardPage() {
 
           {/* Bottom Action: Redeem Rewards (No Redirect) */}
           <div className="pt-1 text-center">
-            <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-[#ffd700] hover:text-[#ffe55b] transition-colors underline underline-offset-4 decoration-[#ffd700]/70 cursor-pointer select-none">
+            <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-blu-yellow hover:text-[#ffe55b] transition-colors underline underline-offset-4 decoration-blu-yellow/70 cursor-pointer select-none">
               <span>{t("points.redeem")}</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </span>
@@ -316,9 +338,9 @@ export default function MemberDashboardPage() {
               <defs>
                 {/* Deep Royal Navy Gradient */}
                 <linearGradient id="navyTicketGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#0d235c" />
-                  <stop offset="50%" stopColor="#08173d" />
-                  <stop offset="100%" stopColor="#050e26" />
+                  <stop offset="0%" stopColor="#1f5372" />
+                  <stop offset="50%" stopColor="#0c3756" />
+                  <stop offset="100%" stopColor="#061c2d" />
                 </linearGradient>
 
                 {/* Metallic Gold Sheen Gradient */}
@@ -349,7 +371,7 @@ export default function MemberDashboardPage() {
             {/* Centered Golden & White Typography Inside Ticket Frame */}
             <div className="absolute inset-0 flex flex-col items-center justify-center text-center z-10 px-8 sm:px-12 py-3">
               <div className="space-y-1">
-                <span className="inline-block text-[10px] sm:text-[11px] font-black tracking-widest text-[#ffd700] uppercase drop-shadow-sm">
+                <span className="inline-block text-[10px] sm:text-[11px] font-black tracking-widest text-blu-yellow uppercase drop-shadow-sm">
                   {t("coupon.vip_pass")}
                 </span>
 
@@ -357,13 +379,16 @@ export default function MemberDashboardPage() {
                   {t("coupon.title")}
                 </h4>
 
-                <p className="text-xs sm:text-sm font-bold text-slate-200 mt-1">
+                <p className="text-xs sm:text-sm font-bold text-blu-sky mt-1">
                   {t("coupon.subtitle")}{" "}
-                  <span className="text-[#ffd700] text-base sm:text-lg font-black">{activePackage.friendCouponsLeft}</span> {t("coupon.passes")}
+                  <span className="text-blu-yellow text-base sm:text-lg font-black">
+                    {member.coupons?.friend_pass?.remaining ?? 5}
+                  </span>{" "}
+                  {t("coupon.passes")}
                 </p>
 
                 <div className="pt-1">
-                  <span className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-black text-[#ffd700] underline underline-offset-4 decoration-[#ffd700]/70 hover:text-[#ffe55b]">
+                  <span className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-black text-blu-yellow underline underline-offset-4 decoration-blu-yellow/70 hover:text-[#ffe55b]">
                     <span>{t("coupon.open")}</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </span>
@@ -389,12 +414,12 @@ export default function MemberDashboardPage() {
         {/* ═══════════════════════════════════════════════
             4. MEMBER PERSONAL DETAILS (White Card on Gray with Profile Photo)
         ═══════════════════════════════════════════════ */}
-        <section className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4 text-xs">
+        <section className="bg-white rounded-2xl p-5 border border-blu-sky/40 shadow-sm space-y-4 text-xs">
           {/* Header Row: Member Avatar Profile Image + Name & Verified Badge */}
-          <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
+          <div className="flex items-center justify-between pb-3.5 border-b border-blu-sky/20">
             <div className="flex items-center gap-3">
               {/* Member Avatar Photo */}
-              <div className="relative w-13 h-13 rounded-full overflow-hidden bg-gradient-to-br from-[#003087] via-[#0052cc] to-[#001f5c] border-2 border-white shadow-sm ring-2 ring-slate-100 flex items-center justify-center shrink-0">
+              <div className="relative w-13 h-13 rounded-full overflow-hidden bg-gradient-to-br from-blu-slate via-blu-navy to-blu-dark border-2 border-white shadow-sm ring-2 ring-blu-sky/30 flex items-center justify-center shrink-0">
                 {member.avatarUrl ? (
                   <Image
                     src={member.avatarUrl}
@@ -411,13 +436,13 @@ export default function MemberDashboardPage() {
 
               <div>
                 <div className="flex items-center gap-1.5">
-                  <h3 className="font-extrabold text-sm sm:text-base text-slate-900 leading-tight">
-                    {member.fullName}
+                  <h3 className="font-extrabold text-sm sm:text-base text-blu-dark leading-tight">
+                    {member.fullName} {member.nickname && <span className="text-xs font-bold text-blu-slate">({member.nickname})</span>}
                   </h3>
-                  <ShieldCheck className="w-4 h-4 text-[#003087] shrink-0" />
+                  <ShieldCheck className="w-4 h-4 text-blu-slate shrink-0" />
                 </div>
-                <p className="text-[11px] text-slate-500 font-mono mt-0.5">
-                  {t("details.code")} <span className="font-bold text-slate-700">{member.memberCode}</span>
+                <p className="text-[11px] text-blu-steel font-mono mt-0.5">
+                  {t("details.code")} <span className="font-bold text-blu-dark">{member.memberCode}</span>
                 </p>
               </div>
             </div>
@@ -427,39 +452,39 @@ export default function MemberDashboardPage() {
             </span>
           </div>
 
-          <div className="space-y-2.5 text-slate-600">
+          <div className="space-y-2.5 text-blu-steel">
             <div className="flex items-center justify-between">
-              <span className="text-slate-500 flex items-center gap-1.5">
-                <CreditCard className="w-3.5 h-3.5 text-slate-400" /> {t("details.pkg_current")}
+              <span className="text-blu-steel flex items-center gap-1.5">
+                <CreditCard className="w-3.5 h-3.5 text-blu-steel/70" /> {t("details.pkg_current")}
               </span>
-              <span className="font-bold text-slate-900 text-right">
-                {lang === "en" ? "BLU 07:00-22:00 (90 Days Pass)" : activePackage.name}
+              <span className="font-bold text-blu-dark text-right">
+                {lang === "en" ? "BLU 07:00-22:00 (3 Months Pass)" : activePackage.name}
               </span>
             </div>
 
             <div className="flex items-center justify-between">
-              <span className="text-slate-500 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-slate-400" /> {t("details.expire_date")}
+              <span className="text-blu-steel flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-blu-steel/70" /> {t("details.expire_date")}
               </span>
-              <span className="font-bold text-[#003087]">
+              <span className="font-bold text-blu-slate">
                 {lang === "en" ? "12 Oct 2026" : activePackage.expireDate}
               </span>
             </div>
 
             <div className="flex items-center justify-between">
-              <span className="text-slate-500 flex items-center gap-1.5">
-                <Phone className="w-3.5 h-3.5 text-slate-400" /> {t("details.phone")}
+              <span className="text-blu-steel flex items-center gap-1.5">
+                <Phone className="w-3.5 h-3.5 text-blu-steel/70" /> {t("details.phone")}
               </span>
-              <span className="font-mono font-bold text-slate-900">
+              <span className="font-mono font-bold text-blu-dark">
                 {member.phone}
               </span>
             </div>
 
             <div className="flex items-center justify-between">
-              <span className="text-slate-500 flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-slate-400" /> {t("details.birthday")}
+              <span className="text-blu-steel flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-blu-steel/70" /> {t("details.birthday")}
               </span>
-              <span className="font-semibold text-slate-900">
+              <span className="font-semibold text-blu-dark">
                 {(() => {
                   const day = member.birthDay || "15";
                   const month = member.birthMonth || "สิงหาคม";
@@ -473,6 +498,21 @@ export default function MemberDashboardPage() {
                 })()}
               </span>
             </div>
+
+            {member.emergencyContact?.name && (
+              <div className="flex items-center justify-between pt-1 border-t border-blu-sky/20">
+                <span className="text-blu-steel flex items-center gap-1.5">
+                  <HeartHandshake className="w-3.5 h-3.5 text-blu-steel/70" /> {t("details.emergency_contact")}
+                </span>
+                <span className="font-medium text-blu-dark text-right text-[11px]">
+                  {member.emergencyContact.name}{" "}
+                  {member.emergencyContact.relation && (
+                    <span className="text-blu-steel">({member.emergencyContact.relation})</span>
+                  )}{" "}
+                  <span className="font-mono font-bold text-blu-dark">{member.emergencyContact.phone}</span>
+                </span>
+              </div>
+            )}
           </div>
         </section>
 
@@ -484,7 +524,7 @@ export default function MemberDashboardPage() {
       {qrModalOpen && (
         <div
           onClick={() => setQrModalOpen(false)}
-          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-6 animate-in fade-in duration-200"
+          className="fixed inset-0 z-50 bg-blu-dark/90 backdrop-blur-md flex flex-col items-center justify-center p-6 animate-in fade-in duration-200"
         >
           <button
             onClick={() => setQrModalOpen(false)}
@@ -495,16 +535,25 @@ export default function MemberDashboardPage() {
 
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-3xl p-8 text-center max-w-xs w-full shadow-2xl animate-in zoom-in-95 duration-150"
+            className="bg-white rounded-3xl p-8 text-center max-w-xs w-full shadow-2xl animate-in zoom-in-95 duration-150 border border-blu-sky/40"
           >
-            <div className="text-xs font-bold text-[#003087] uppercase tracking-wider mb-1">
+            <div className="text-xs font-bold text-blu-slate uppercase tracking-wider mb-1">
               BLU FITNESS CHECK-IN
             </div>
-            <div className="text-base font-bold text-[#0a1628] mb-4 truncate">
+            <div className="text-base font-bold text-blu-dark truncate">
               {member.fullName}
             </div>
+            <div className="flex items-center justify-center gap-1.5 text-[11px] text-emerald-600 font-bold mb-3">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span className="font-mono">
+                LIVE: {timeLeft.days}d {String(timeLeft.hours).padStart(2, "0")}:{String(timeLeft.minutes).padStart(2, "0")}:{String(timeLeft.seconds).padStart(2, "0")}
+              </span>
+            </div>
 
-            <div className="inline-block p-4 bg-[#f8fafc] rounded-2xl border border-slate-200 shadow-inner">
+            <div className="inline-block p-4 bg-blu-ice/60 rounded-2xl border border-blu-sky/40 shadow-inner">
               <QRCodeSVG
                 value={member.memberCode || "BLU-1001"}
                 size={230}
@@ -513,11 +562,11 @@ export default function MemberDashboardPage() {
               />
             </div>
 
-            <div className="mt-4 font-mono font-black text-2xl text-[#003087] tracking-widest">
+            <div className="mt-4 font-mono font-black text-2xl text-blu-slate tracking-widest">
               {member.memberCode || "BLU-1001"}
             </div>
 
-            <p className="text-xs text-slate-500 mt-2">
+            <p className="text-xs text-blu-steel mt-2">
               {t("member.qr_instruction")}
             </p>
           </div>

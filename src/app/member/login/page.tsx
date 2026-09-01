@@ -57,7 +57,7 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#0a1628] flex flex-col">
+    <main className="min-h-screen bg-blu-dark flex flex-col">
       {/* ─── Header ─── */}
       <header className="px-5 pt-6 pb-4 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2.5">
@@ -77,7 +77,7 @@ export default function LoginPage() {
           <LanguageToggle variant="dark" />
           <Link
             href="/"
-            className="text-white/70 hover:text-white text-xs sm:text-sm transition-colors"
+            className="text-blu-sky/80 hover:text-white text-xs sm:text-sm transition-colors"
           >
             {t("login.back_home")}
           </Link>
@@ -87,12 +87,12 @@ export default function LoginPage() {
       {/* ─── Card ─── */}
       <div className="flex-1 flex items-start sm:items-center justify-center px-4 sm:px-5 py-6 sm:py-10">
         <div className="w-full max-w-md">
-          <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl">
+          <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl border border-blu-sky/30">
             <div className="text-center mb-6">
-              <h1 className="text-2xl font-extrabold text-[#0a1628] mb-1.5">
+              <h1 className="text-2xl font-extrabold text-blu-dark mb-1.5">
                 {t("login.title")}
               </h1>
-              <p className="text-sm text-[#64748b]">
+              <p className="text-sm text-blu-steel">
                 {t("login.subtitle")}
               </p>
             </div>
@@ -100,7 +100,7 @@ export default function LoginPage() {
             <form onSubmit={handleLogin} className="space-y-4">
               {/* Phone Input */}
               <div>
-                <label className="block text-sm font-semibold text-[#334155] mb-1.5">
+                <label className="block text-sm font-semibold text-blu-dark mb-1.5">
                   {t("login.phone_label")}
                 </label>
                 <div className="relative">
@@ -111,24 +111,24 @@ export default function LoginPage() {
                       setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
                     }
                     placeholder="0XX-XXX-XXXX"
-                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] text-[#0a1628] text-base font-semibold tracking-wider placeholder:text-[#cbd5e1] placeholder:tracking-normal placeholder:font-normal focus:outline-none focus:ring-2 focus:ring-[#003087] focus:border-transparent transition-all"
+                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-blu-sky/50 bg-blu-ice/30 text-blu-dark text-base font-semibold tracking-wider placeholder:text-blu-ocean/70 placeholder:tracking-normal placeholder:font-normal focus:outline-none focus:ring-2 focus:ring-blu-slate focus:border-transparent transition-all"
                     autoFocus
                     required
                   />
-                  <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <Phone className="w-4 h-4 text-blu-steel absolute left-3.5 top-1/2 -translate-y-1/2" />
                 </div>
               </div>
 
               {/* Password Input */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-sm font-semibold text-[#334155]">
+                  <label className="block text-sm font-semibold text-blu-dark">
                     {t("login.password_label")}
                   </label>
                   <button
                     type="button"
                     onClick={() => alert("ระบบกู้คืนรหัสผ่านด้วย OTP จะเปิดให้บริการเร็วๆ นี้")}
-                    className="text-xs text-[#003087] hover:underline cursor-pointer"
+                    className="text-xs text-blu-slate hover:underline cursor-pointer font-medium"
                   >
                     {t("login.forgot_pwd")}
                   </button>
@@ -139,14 +139,14 @@ export default function LoginPage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder={t("login.pwd_placeholder")}
-                    className="w-full pl-10 pr-10 py-3 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] text-[#0a1628] text-base placeholder:text-[#cbd5e1] focus:outline-none focus:ring-2 focus:ring-[#003087] focus:border-transparent transition-all"
+                    className="w-full pl-10 pr-10 py-3 rounded-xl border border-blu-sky/50 bg-blu-ice/30 text-blu-dark text-base placeholder:text-blu-ocean/70 focus:outline-none focus:ring-2 focus:ring-blu-slate focus:border-transparent transition-all"
                     required
                   />
-                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <Lock className="w-4 h-4 text-blu-steel absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-blu-steel hover:text-blu-dark cursor-pointer"
                   >
                     {showPassword ? (
                       <EyeOff className="w-4 h-4" />
@@ -167,7 +167,7 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={handleDemoFill}
-                className="w-full py-2 rounded-lg text-xs font-semibold text-[#003087] bg-[#003087]/5 hover:bg-[#003087]/10 border border-[#003087]/20 transition-all cursor-pointer"
+                className="w-full py-2 rounded-lg text-xs font-semibold text-blu-slate bg-blu-ice hover:bg-blu-sky/40 border border-blu-sky/60 transition-all cursor-pointer"
               >
                 {t("login.demo_fill")}
               </button>
@@ -181,11 +181,11 @@ export default function LoginPage() {
               </button>
             </form>
 
-            <div className="text-center mt-6 pt-5 border-t border-slate-100">
-              <span className="text-xs text-slate-500">{t("login.no_account")} </span>
+            <div className="text-center mt-6 pt-5 border-t border-blu-sky/30">
+              <span className="text-xs text-blu-steel">{t("login.no_account")} </span>
               <Link
                 href="/member/register"
-                className="text-xs text-[#003087] font-bold hover:underline"
+                className="text-xs text-blu-slate font-bold hover:underline"
               >
                 {t("login.register_link")}
               </Link>
@@ -195,7 +195,7 @@ export default function LoginPage() {
       </div>
 
       {/* ─── Footer ─── */}
-      <footer className="text-center text-[11px] text-white/25 pb-6 px-5">
+      <footer className="text-center text-[11px] text-blu-sky/40 pb-6 px-5">
         © 2026 Blu Fitness Cha-am
       </footer>
     </main>

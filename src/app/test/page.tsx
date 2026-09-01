@@ -113,19 +113,19 @@ export default function TestServicesPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#060b19] text-slate-100 py-10 px-4 sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-blu-dark text-slate-100 py-10 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto space-y-8">
         {/* Header Section */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-amber-500/20">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-blu-yellow/20">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <span className="px-2.5 py-0.5 rounded text-xs font-extrabold bg-[#003087] text-[#ffd700] border border-[#ffd700]/30 tracking-wider">
+              <span className="px-2.5 py-0.5 rounded text-xs font-extrabold bg-blu-slate text-blu-yellow border border-blu-yellow/30 tracking-wider">
                 DIAGNOSTICS & HEALTH CHECK
               </span>
-              <span className="text-xs text-slate-400">Environment: Staging / Dev</span>
+              <span className="text-xs text-blu-sky/70">Environment: Staging / Dev</span>
             </div>
             <h1 className="text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
-              <div className="relative w-9 h-9 rounded-lg overflow-hidden border border-[#ffd700]/40 shadow-sm shrink-0">
+              <div className="relative w-9 h-9 rounded-lg overflow-hidden border border-blu-yellow/40 shadow-sm shrink-0">
                 <Image
                   src="/logo.jpg"
                   alt="Blu Fitness Logo"
@@ -134,14 +134,14 @@ export default function TestServicesPage() {
                   className="w-full h-full object-cover"
                 />
               </div>
-              <span>Blu Fitness</span> <span className="text-[#ffd700] text-xl font-normal hidden sm:inline">| ตรวจสอบสถานะ API & Database</span>
+              <span>Blu Fitness</span> <span className="text-blu-yellow text-xl font-normal hidden sm:inline">| ตรวจสอบสถานะ API & Database</span>
             </h1>
           </div>
 
           <button
             onClick={runAllTests}
             disabled={loading}
-            className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm bg-gradient-to-r from-[#ffd700] to-[#e6c200] text-[#060b19] hover:shadow-[0_0_20px_rgba(255,215,0,0.4)] transition-all disabled:opacity-50"
+            className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm bg-gradient-to-r from-blu-yellow to-[#e6c200] text-blu-dark hover:shadow-[0_0_20px_rgba(255,215,0,0.4)] transition-all disabled:opacity-50 cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
             {loading ? "กำลังวิเคราะห์..." : "ทดสอบระบบทั้งหมดอีกครั้ง"}

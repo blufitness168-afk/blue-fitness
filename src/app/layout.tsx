@@ -26,12 +26,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="th"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} antialiased`}
     >
       <head>
         <link rel="icon" href="/logo.jpg" />
       </head>
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-screen bg-blu-dark flex flex-col">
         <LanguageProvider>{children}</LanguageProvider>
       </body>
     </html>

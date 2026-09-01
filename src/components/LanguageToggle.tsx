@@ -2,7 +2,6 @@
 
 import React from "react";
 import { useLanguage } from "@/context/LanguageContext";
-import { Globe } from "lucide-react";
 
 interface LanguageToggleProps {
   variant?: "dark" | "light";
@@ -16,7 +15,7 @@ export default function LanguageToggle({ variant = "dark" }: LanguageToggleProps
       className={`inline-flex items-center rounded-full p-0.5 text-xs font-bold transition-all border ${
         variant === "dark"
           ? "bg-white/10 border-white/15 text-white"
-          : "bg-slate-100 border-slate-200 text-slate-700 shadow-xs"
+          : "bg-blu-ice border-blu-sky/60 text-blu-dark shadow-xs"
       }`}
     >
       <button
@@ -25,11 +24,11 @@ export default function LanguageToggle({ variant = "dark" }: LanguageToggleProps
         className={`px-2.5 py-1 rounded-full transition-all cursor-pointer ${
           lang === "th"
             ? variant === "dark"
-              ? "bg-[#ffd700] text-[#0a1628] font-black shadow-xs"
-              : "bg-[#003087] text-white font-black shadow-xs"
+              ? "bg-blu-yellow text-blu-dark font-black shadow-xs"
+              : "bg-blu-slate text-white font-black shadow-xs"
             : variant === "dark"
             ? "text-white/70 hover:text-white"
-            : "text-slate-500 hover:text-slate-800"
+            : "text-blu-steel hover:text-blu-dark"
         }`}
       >
         TH
@@ -41,11 +40,11 @@ export default function LanguageToggle({ variant = "dark" }: LanguageToggleProps
         className={`px-2.5 py-1 rounded-full transition-all cursor-pointer ${
           lang === "en"
             ? variant === "dark"
-              ? "bg-[#ffd700] text-[#0a1628] font-black shadow-xs"
-              : "bg-[#003087] text-white font-black shadow-xs"
+              ? "bg-blu-yellow text-blu-dark font-black shadow-xs"
+              : "bg-blu-slate text-white font-black shadow-xs"
             : variant === "dark"
             ? "text-white/70 hover:text-white"
-            : "text-slate-500 hover:text-slate-800"
+            : "text-blu-steel hover:text-blu-dark"
         }`}
       >
         EN

@@ -4,7 +4,7 @@ export default function MemberLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-[#f1f5f9] text-slate-900 flex flex-col">
+    <div className="min-h-screen w-full bg-blu-dark flex flex-col">
       {children}
     </div>
   );

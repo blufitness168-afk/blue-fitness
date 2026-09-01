@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
-import { X, Eye, EyeOff, Lock } from "lucide-react";
+import { X, Eye, EyeOff, Lock, User, Phone, HeartHandshake, UploadCloud } from "lucide-react";
 import LanguageToggle from "@/components/LanguageToggle";
 import { useLanguage } from "@/context/LanguageContext";
 
@@ -16,12 +16,20 @@ export default function RegisterPage() {
   const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
+  
+  // Registration Form Fields
   const [fullName, setFullName] = useState("");
+  const [nickname, setNickname] = useState("");
   const [birthDay, setBirthDay] = useState("");
   const [birthMonth, setBirthMonth] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+
+  // Emergency Contact Fields
+  const [emergencyName, setEmergencyName] = useState("");
+  const [emergencyPhone, setEmergencyPhone] = useState("");
+  const [emergencyRelation, setEmergencyRelation] = useState("");
   
   // Local preview state for avatar
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -146,9 +154,15 @@ export default function RegisterPage() {
     const memberData = {
       phone,
       fullName,
+      nickname: nickname.trim(),
       birthDay,
       birthMonth,
       password,
+      emergencyContact: {
+        name: emergencyName.trim(),
+        phone: emergencyPhone.trim(),
+        relation: emergencyRelation.trim(),
+      },
       avatarUrl: finalAvatarUrl || previewUrl || "",
       memberCode: "BLU-1001",
       cardNumber: "CARD-8899",
@@ -162,7 +176,7 @@ export default function RegisterPage() {
     }
 
     setLoading(false);
-    router.push("/");
+    router.push("/member");
   };
 
   useEffect(() => {
@@ -172,103 +186,149 @@ export default function RegisterPage() {
   }, [step]);
 
   const thaiMonths = [
-    "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน",
-    "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม",
-    "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
+    "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+    "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
   ];
-
   const englishMonths = [
-    "January", "February", "March", "April",
-    "May", "June", "July", "August",
-    "September", "October", "November", "December",
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
   ];
 
   return (
-    <main className="min-h-screen bg-[#0a1628] flex flex-col">
-      {/* ─── Header ─── */}
-      <header className="px-5 pt-6 pb-4 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-2.5">
+    <main className="min-h-screen bg-blu-dark text-white flex flex-col justify-between">
+      {/* ─── Top Navbar ─── */}
+      <header className="w-full max-w-7xl mx-auto px-5 py-4 flex items-center justify-between">
+        <Link href="/" className="flex items-center gap-2">
           <Image
             src="/logo.jpg"
             alt="Blu Fitness"
-            width={34}
-            height={34}
-            className="w-[34px] h-[34px] rounded-lg object-cover"
-            priority
+            width={36}
+            height={36}
+            className="w-9 h-9 rounded-lg object-cover"
           />
-          <span className="text-white font-extrabold tracking-wider text-base">
+          <span className="font-extrabold tracking-wider text-sm text-white">
             BLU FITNESS
           </span>
         </Link>
-        <div className="flex items-center gap-3">
+
+        <div className="flex items-center gap-2">
           <LanguageToggle variant="dark" />
           <Link
             href="/"
-            className="text-white/70 hover:text-white text-xs sm:text-sm transition-colors"
+            className="text-xs text-blu-sky/70 hover:text-white transition-colors"
           >
-            {t("login.back_home")}
+            {t("member.back")}
           </Link>
         </div>
       </header>
 
-      {/* ─── Card ─── */}
-      <div className="flex-1 flex items-start sm:items-center justify-center px-4 sm:px-5 py-6 sm:py-10">
+      {/* ─── Main Content ─── */}
+      <div className="flex-1 flex items-center justify-center px-4 py-8">
         <div className="w-full max-w-md">
-          {/* Progress Steps */}
-          <div className="flex items-center justify-center gap-2 mb-8">
-            {(["phone", "otp", "register"] as Step[]).map((s, i) => (
-              <div key={s} className="flex items-center gap-2">
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                    step === s
-                      ? "bg-[#ffd700] text-[#0a1628] scale-110"
-                      : i < ["phone", "otp", "register"].indexOf(step)
-                        ? "bg-[#003087] text-white"
-                        : "bg-white/10 text-white/40"
-                  }`}
-                >
-                  {i + 1}
-                </div>
-                {i < 2 && (
-                  <div
-                    className={`w-10 sm:w-14 h-0.5 rounded-full ${
-                      i < ["phone", "otp", "register"].indexOf(step)
-                        ? "bg-[#003087]"
-                        : "bg-white/10"
-                    }`}
-                  />
-                )}
+          {/* Progress Steps (Numbered Circles 1 - 2 - 3) */}
+          <div className="flex items-center justify-center gap-3 sm:gap-4 mb-8">
+            {/* Step 1 */}
+            <div className="flex items-center gap-2">
+              <div
+                className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-sm transition-all ${
+                  step === "phone"
+                    ? "bg-blu-yellow text-blu-dark shadow-md ring-4 ring-blu-yellow/30"
+                    : "bg-blu-slate text-white"
+                }`}
+              >
+                {step === "otp" || step === "register" ? "✓" : "1"}
               </div>
-            ))}
+              <span
+                className={`text-xs font-bold ${
+                  step === "phone" ? "text-blu-yellow" : "text-blu-sky/70"
+                }`}
+              >
+                {t("reg.step_phone")}
+              </span>
+            </div>
+
+            <div
+              className={`w-6 sm:w-10 h-0.5 transition-all ${
+                step === "otp" || step === "register"
+                  ? "bg-blu-yellow"
+                  : "bg-white/20"
+              }`}
+            />
+
+            {/* Step 2 */}
+            <div className="flex items-center gap-2">
+              <div
+                className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-sm transition-all ${
+                  step === "otp"
+                    ? "bg-blu-yellow text-blu-dark shadow-md ring-4 ring-blu-yellow/30"
+                    : step === "register"
+                      ? "bg-blu-slate text-white"
+                      : "bg-white/10 text-blu-sky/50 border border-white/15"
+                }`}
+              >
+                {step === "register" ? "✓" : "2"}
+              </div>
+              <span
+                className={`text-xs font-bold ${
+                  step === "otp" ? "text-blu-yellow" : "text-blu-sky/70"
+                }`}
+              >
+                {t("reg.step_otp")}
+              </span>
+            </div>
+
+            <div
+              className={`w-6 sm:w-10 h-0.5 transition-all ${
+                step === "register" ? "bg-blu-yellow" : "bg-white/20"
+              }`}
+            />
+
+            {/* Step 3 */}
+            <div className="flex items-center gap-2">
+              <div
+                className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-sm transition-all ${
+                  step === "register"
+                    ? "bg-blu-yellow text-blu-dark shadow-md ring-4 ring-blu-yellow/30"
+                    : "bg-white/10 text-blu-sky/50 border border-white/15"
+                }`}
+              >
+                3
+              </div>
+              <span
+                className={`text-xs font-bold ${
+                  step === "register" ? "text-blu-yellow" : "text-blu-sky/70"
+                }`}
+              >
+                {t("reg.step_profile")}
+              </span>
+            </div>
           </div>
 
           {/* ═══════════════════════════════════════
               Step 1: Phone Number
           ═══════════════════════════════════════ */}
           {step === "phone" && (
-            <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl">
+            <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl border border-blu-sky/30">
               <div className="text-center mb-6">
-                <h1 className="text-2xl font-extrabold text-[#0a1628] mb-2">
+                <h1 className="text-2xl font-extrabold text-blu-dark mb-1">
                   {t("reg.phone_title")}
                 </h1>
-                <p className="text-sm text-[#64748b]">
+                <p className="text-xs text-blu-steel">
                   {t("reg.phone_sub")}
                 </p>
               </div>
 
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-semibold text-[#334155] mb-1.5">
+                  <label className="block text-sm font-semibold text-blu-dark mb-1">
                     {t("login.phone_label")}
                   </label>
                   <input
                     type="tel"
                     value={phone}
-                    onChange={(e) =>
-                      setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
-                    }
-                    placeholder="0XX-XXX-XXXX"
-                    className="w-full px-4 py-3.5 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] text-[#0a1628] text-lg font-semibold tracking-widest placeholder:text-[#cbd5e1] placeholder:tracking-normal placeholder:font-normal focus:outline-none focus:ring-2 focus:ring-[#003087] focus:border-transparent transition-all"
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="08X-XXX-XXXX"
+                    className="w-full px-4 py-3 rounded-xl border border-blu-sky/50 bg-blu-ice/30 text-blu-dark text-base placeholder:text-blu-ocean/70 focus:outline-none focus:ring-2 focus:ring-blu-slate focus:border-transparent transition-all font-mono"
                     autoFocus
                   />
                 </div>
@@ -276,17 +336,17 @@ export default function RegisterPage() {
                 <button
                   onClick={handleSendOtp}
                   disabled={phone.length < 9 || loading}
-                  className="w-full btn-gold py-3.5 rounded-xl text-base font-bold disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  className="w-full btn-gold py-3.5 rounded-xl text-base font-bold disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-md transition-all"
                 >
-                  {loading ? "..." : t("reg.btn_send_otp")}
+                  {loading ? "กำลังส่ง OTP..." : t("reg.btn_send_otp")}
                 </button>
               </div>
 
-              <div className="text-center mt-6 pt-5 border-t border-slate-100">
-                <span className="text-xs text-slate-500">{t("reg.have_account")} </span>
+              <div className="mt-6 text-center text-xs text-blu-steel">
+                {t("reg.have_account")}{" "}
                 <Link
                   href="/member/login"
-                  className="text-xs text-[#003087] font-bold hover:underline"
+                  className="font-bold text-blu-slate hover:underline cursor-pointer"
                 >
                   {t("reg.login_link")}
                 </Link>
@@ -298,113 +358,134 @@ export default function RegisterPage() {
               Step 2: OTP Verification
           ═══════════════════════════════════════ */}
           {step === "otp" && (
-            <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl">
+            <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl border border-blu-sky/30">
               <div className="text-center mb-6">
-                <h1 className="text-2xl font-extrabold text-[#0a1628] mb-2">
+                <h1 className="text-2xl font-extrabold text-blu-dark mb-1">
                   {t("reg.otp_title")}
                 </h1>
-                <p className="text-sm text-[#64748b]">
+                <p className="text-xs text-blu-steel">
                   {t("reg.otp_sub")}{" "}
-                  <span className="font-bold text-[#003087]">{phone}</span>
+                  <span className="font-bold text-blu-dark font-mono">
+                    {phone}
+                  </span>
                 </p>
               </div>
 
-              {/* OTP Inputs */}
-              <div className="flex justify-center gap-2 sm:gap-2.5 mb-5">
-                {otp.map((digit, i) => (
-                  <input
-                    key={i}
-                    ref={(el) => {
-                      otpRefs.current[i] = el;
-                    }}
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={1}
-                    value={digit}
-                    onChange={(e) => handleOtpChange(i, e.target.value)}
-                    onKeyDown={(e) => handleOtpKeyDown(i, e)}
-                    className="w-11 h-13 sm:w-13 sm:h-15 text-center text-2xl font-black text-[#0a1628] border-2 border-[#e2e8f0] rounded-xl bg-[#f8fafc] focus:outline-none focus:border-[#003087] focus:ring-2 focus:ring-[#003087]/20 transition-all"
-                  />
-                ))}
-              </div>
+              <div className="space-y-5">
+                <div className="flex justify-center gap-2 sm:gap-2.5">
+                  {otp.map((digit, i) => (
+                    <input
+                      key={i}
+                      ref={(el) => {
+                        otpRefs.current[i] = el;
+                      }}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={1}
+                      value={digit}
+                      onChange={(e) => handleOtpChange(i, e.target.value)}
+                      onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                      className="w-11 h-13 sm:w-12 sm:h-14 text-center text-xl font-bold font-mono rounded-xl border border-blu-sky/50 bg-blu-ice/30 text-blu-dark focus:outline-none focus:ring-2 focus:ring-blu-slate focus:border-transparent transition-all shadow-xs"
+                    />
+                  ))}
+                </div>
 
-              {/* Auto-fill Demo Button */}
-              <button
-                onClick={handleAutoFillOtp}
-                className="w-full mb-4 py-2 rounded-lg text-xs font-semibold text-[#003087] bg-[#003087]/5 hover:bg-[#003087]/10 border border-[#003087]/20 transition-all cursor-pointer"
-              >
-                {t("reg.otp_demo")}
-              </button>
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={handleAutoFillOtp}
+                    className="inline-flex items-center gap-1 text-xs font-bold text-blu-slate bg-blu-ice hover:bg-blu-sky/30 px-3 py-1.5 rounded-full border border-blu-sky/60 transition-all cursor-pointer"
+                  >
+                    {t("reg.otp_demo")}
+                  </button>
+                </div>
 
-              <button
-                onClick={handleVerifyOtp}
-                disabled={otp.join("").length !== 6 || loading}
-                className="w-full btn-gold py-3.5 rounded-xl text-base font-bold disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-              >
-                {loading ? "..." : t("reg.btn_verify_otp")}
-              </button>
-
-              <div className="flex items-center justify-between mt-5">
                 <button
-                  onClick={() => {
-                    setStep("phone");
-                    setOtp(["", "", "", "", "", ""]);
-                  }}
-                  className="text-xs text-[#64748b] hover:text-[#0a1628] transition-colors cursor-pointer"
+                  onClick={handleVerifyOtp}
+                  disabled={otp.join("").length !== 6 || loading}
+                  className="w-full btn-gold py-3.5 rounded-xl text-base font-bold disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-md transition-all"
                 >
-                  ← {lang === "en" ? "Change Number" : "เปลี่ยนเบอร์"}
+                  {loading ? "กำลังตรวจสอบ..." : t("reg.btn_verify_otp")}
                 </button>
-                <button className="text-xs text-[#003087] font-semibold hover:underline cursor-pointer">
-                  {lang === "en" ? "Resend OTP" : "ส่ง OTP อีกครั้ง"}
-                </button>
+
+                <div className="flex justify-between items-center text-xs text-blu-steel pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setStep("phone")}
+                    className="hover:text-blu-dark font-medium cursor-pointer"
+                  >
+                    ← แก้ไขเบอร์โทร
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSendOtp}
+                    className="text-blu-slate hover:underline font-bold cursor-pointer"
+                  >
+                    ส่งรหัสใหม่ (Resend)
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
           {/* ═══════════════════════════════════════
-              Step 3: Registration Form & Set Password
+              Step 3: Registration Form & Profile Setup
           ═══════════════════════════════════════ */}
           {step === "register" && (
-            <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl">
+            <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl border border-blu-sky/30">
               <div className="text-center mb-6">
-                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-[#003087]/10 text-[#003087] mb-2 font-bold text-xl">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-blu-ice text-blu-slate mb-2 font-bold text-xl">
                   ✓
                 </div>
-                <h1 className="text-2xl font-extrabold text-[#0a1628] mb-1">
+                <h1 className="text-2xl font-extrabold text-blu-dark mb-1">
                   {t("reg.profile_title")}
                 </h1>
-                <p className="text-xs text-[#64748b]">
+                <p className="text-xs text-blu-steel">
                   {t("reg.profile_sub")}
                 </p>
               </div>
 
               <div className="space-y-4">
-                {/* Full Name */}
+                {/* 1. Full Name */}
                 <div>
-                  <label className="block text-sm font-semibold text-[#334155] mb-1">
-                    {t("reg.fullname_label")} <span className="text-red-500">*</span>
+                  <label className="block text-sm font-semibold text-blu-dark mb-1">
+                    {t("reg.fullname_label")} <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                     placeholder={t("reg.fullname_placeholder")}
-                    className="w-full px-4 py-3 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] text-[#0a1628] text-sm sm:text-base placeholder:text-[#cbd5e1] focus:outline-none focus:ring-2 focus:ring-[#003087] focus:border-transparent transition-all"
+                    className="w-full px-4 py-3 rounded-xl border border-blu-sky/50 bg-blu-ice/30 text-blu-dark text-sm sm:text-base placeholder:text-blu-ocean/70 focus:outline-none focus:ring-2 focus:ring-blu-slate focus:border-transparent transition-all"
                     autoFocus
                   />
                 </div>
 
-                {/* Birthday */}
+                {/* 2. Nickname */}
                 <div>
-                  <label className="block text-sm font-semibold text-[#334155] mb-1">
-                    {t("reg.bday_label")} <span className="text-red-500">*</span>
+                  <label className="block text-sm font-semibold text-blu-dark mb-1">
+                    {t("reg.nickname_label")}
+                  </label>
+                  <input
+                    type="text"
+                    value={nickname}
+                    onChange={(e) => setNickname(e.target.value)}
+                    placeholder={t("reg.nickname_placeholder")}
+                    className="w-full px-4 py-3 rounded-xl border border-blu-sky/50 bg-blu-ice/30 text-blu-dark text-sm sm:text-base placeholder:text-blu-ocean/70 focus:outline-none focus:ring-2 focus:ring-blu-slate focus:border-transparent transition-all"
+                  />
+                </div>
+
+                {/* 3. Birthday */}
+                <div>
+                  <label className="block text-sm font-semibold text-blu-dark mb-1">
+                    {t("reg.bday_label")} <span className="text-rose-500">*</span>
                   </label>
                   <div className="grid grid-cols-2 gap-2.5">
                     <select
                       value={birthDay}
                       onChange={(e) => setBirthDay(e.target.value)}
                       required
-                      className="px-3.5 py-3 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] text-[#0a1628] text-sm focus:outline-none focus:ring-2 focus:ring-[#003087] focus:border-transparent transition-all cursor-pointer"
+                      className="px-3.5 py-3 rounded-xl border border-blu-sky/50 bg-blu-ice/30 text-blu-dark text-sm focus:outline-none focus:ring-2 focus:ring-blu-slate focus:border-transparent transition-all cursor-pointer"
                     >
                       <option value="">{t("reg.day_select")} *</option>
                       {Array.from({ length: 31 }, (_, i) => (
@@ -417,7 +498,7 @@ export default function RegisterPage() {
                       value={birthMonth}
                       onChange={(e) => setBirthMonth(e.target.value)}
                       required
-                      className="px-3.5 py-3 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] text-[#0a1628] text-sm focus:outline-none focus:ring-2 focus:ring-[#003087] focus:border-transparent transition-all cursor-pointer"
+                      className="px-3.5 py-3 rounded-xl border border-blu-sky/50 bg-blu-ice/30 text-blu-dark text-sm focus:outline-none focus:ring-2 focus:ring-blu-slate focus:border-transparent transition-all cursor-pointer"
                     >
                       <option value="">{t("reg.month_select")} *</option>
                       {(lang === "en" ? englishMonths : thaiMonths).map((m, i) => (
@@ -429,10 +510,64 @@ export default function RegisterPage() {
                   </div>
                 </div>
 
-                {/* Password / PIN */}
+                {/* 4. Emergency Contact Section */}
+                <div className="pt-2 pb-1">
+                  <div className="bg-blu-ice/50 rounded-2xl p-4 border border-blu-sky/60 space-y-3">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-blu-slate uppercase tracking-wider">
+                      <HeartHandshake className="w-4 h-4 text-blu-slate" />
+                      <span>{t("reg.emergency_title")}</span>
+                    </div>
+
+                    {/* Emergency Name */}
+                    <div>
+                      <label className="block text-xs font-semibold text-blu-dark mb-1">
+                        {t("reg.emergency_name_label")}
+                      </label>
+                      <input
+                        type="text"
+                        value={emergencyName}
+                        onChange={(e) => setEmergencyName(e.target.value)}
+                        placeholder={t("reg.emergency_name_placeholder")}
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-blu-sky/50 bg-white text-blu-dark text-xs sm:text-sm placeholder:text-blu-ocean/70 focus:outline-none focus:ring-2 focus:ring-blu-slate focus:border-transparent transition-all"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {/* Emergency Phone */}
+                      <div>
+                        <label className="block text-xs font-semibold text-blu-dark mb-1">
+                          {t("reg.emergency_phone_label")}
+                        </label>
+                        <input
+                          type="tel"
+                          value={emergencyPhone}
+                          onChange={(e) => setEmergencyPhone(e.target.value)}
+                          placeholder={t("reg.emergency_phone_placeholder")}
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-blu-sky/50 bg-white text-blu-dark text-xs sm:text-sm placeholder:text-blu-ocean/70 focus:outline-none focus:ring-2 focus:ring-blu-slate focus:border-transparent transition-all font-mono"
+                        />
+                      </div>
+
+                      {/* Emergency Relation */}
+                      <div>
+                        <label className="block text-xs font-semibold text-blu-dark mb-1">
+                          {t("reg.emergency_relation_label")}
+                        </label>
+                        <input
+                          type="text"
+                          value={emergencyRelation}
+                          onChange={(e) => setEmergencyRelation(e.target.value)}
+                          placeholder={t("reg.emergency_relation_placeholder")}
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-blu-sky/50 bg-white text-blu-dark text-xs sm:text-sm placeholder:text-blu-ocean/70 focus:outline-none focus:ring-2 focus:ring-blu-slate focus:border-transparent transition-all"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 5. Password / PIN */}
                 <div>
-                  <label className="block text-sm font-semibold text-[#334155] mb-1">
-                    {t("reg.pwd_label")} <span className="text-red-500">*</span>
+                  <label className="block text-sm font-semibold text-blu-dark mb-1">
+                    {t("reg.pwd_label")} <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                     <input
@@ -440,13 +575,13 @@ export default function RegisterPage() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder={t("reg.pwd_placeholder")}
-                      className="w-full pl-10 pr-10 py-3 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] text-[#0a1628] text-sm placeholder:text-[#cbd5e1] focus:outline-none focus:ring-2 focus:ring-[#003087] focus:border-transparent transition-all"
+                      className="w-full pl-10 pr-10 py-3 rounded-xl border border-blu-sky/50 bg-blu-ice/30 text-blu-dark text-sm placeholder:text-blu-ocean/70 focus:outline-none focus:ring-2 focus:ring-blu-slate focus:border-transparent transition-all"
                     />
-                    <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <Lock className="w-4 h-4 text-blu-steel absolute left-3.5 top-1/2 -translate-y-1/2" />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-blu-steel hover:text-blu-dark cursor-pointer"
                     >
                       {showPassword ? (
                         <EyeOff className="w-4 h-4" />
@@ -457,10 +592,10 @@ export default function RegisterPage() {
                   </div>
                 </div>
 
-                {/* Confirm Password */}
+                {/* 6. Confirm Password */}
                 <div>
-                  <label className="block text-sm font-semibold text-[#334155] mb-1">
-                    {t("reg.confirm_pwd_label")} <span className="text-red-500">*</span>
+                  <label className="block text-sm font-semibold text-blu-dark mb-1">
+                    {t("reg.confirm_pwd_label")} <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                     <input
@@ -468,13 +603,13 @@ export default function RegisterPage() {
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder={t("reg.confirm_pwd_placeholder")}
-                      className={`w-full pl-10 pr-4 py-3 rounded-xl border bg-[#f8fafc] text-[#0a1628] text-sm placeholder:text-[#cbd5e1] focus:outline-none focus:ring-2 focus:ring-[#003087] focus:border-transparent transition-all ${
+                      className={`w-full pl-10 pr-4 py-3 rounded-xl border bg-blu-ice/30 text-blu-dark text-sm placeholder:text-blu-ocean/70 focus:outline-none focus:ring-2 focus:ring-blu-slate focus:border-transparent transition-all ${
                         confirmPassword && password !== confirmPassword
                           ? "border-rose-400 focus:ring-rose-400"
-                          : "border-[#e2e8f0]"
+                          : "border-blu-sky/50"
                       }`}
                     />
-                    <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <Lock className="w-4 h-4 text-blu-steel absolute left-3.5 top-1/2 -translate-y-1/2" />
                   </div>
                   {confirmPassword && password !== confirmPassword && (
                     <p className="text-xs text-rose-500 mt-1">
@@ -483,9 +618,9 @@ export default function RegisterPage() {
                   )}
                 </div>
 
-                {/* Profile Photo */}
+                {/* 7. Profile Photo */}
                 <div>
-                  <label className="block text-sm font-semibold text-[#334155] mb-1">
+                  <label className="block text-sm font-semibold text-blu-dark mb-1">
                     {t("reg.avatar_label")}
                   </label>
                   <input
@@ -502,11 +637,11 @@ export default function RegisterPage() {
                     onDrop={handleDrop}
                     className={`relative flex items-center gap-4 p-3.5 rounded-xl border-2 border-dashed transition-all cursor-pointer ${
                       isDragging
-                        ? "border-[#ffd700] bg-[#ffd700]/10"
-                        : "border-[#cbd5e1] bg-[#f8fafc] hover:border-[#003087]/40"
+                        ? "border-blu-yellow bg-blu-yellow/10"
+                        : "border-blu-sky/70 bg-blu-ice/40 hover:border-blu-slate"
                     }`}
                   >
-                    <div className="relative w-14 h-14 rounded-full bg-[#e2e8f0] flex items-center justify-center text-[#94a3b8] text-2xl shrink-0 overflow-visible border-2 border-dashed border-[#003087]/30">
+                    <div className="relative w-14 h-14 rounded-full bg-blu-ice flex items-center justify-center text-blu-steel text-2xl shrink-0 overflow-visible border-2 border-dashed border-blu-slate/40">
                       {previewUrl ? (
                         <div className="relative w-full h-full rounded-full overflow-hidden">
                           <Image
@@ -518,7 +653,7 @@ export default function RegisterPage() {
                           />
                         </div>
                       ) : (
-                        "👤"
+                        <User className="w-6 h-6 text-blu-slate" />
                       )}
 
                       {previewUrl && (
@@ -534,13 +669,18 @@ export default function RegisterPage() {
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <span className="text-sm font-bold text-[#003087]">
-                        {previewUrl
-                          ? (lang === "en" ? "Change Image" : "เปลี่ยนรูปภาพ")
-                          : t("reg.avatar_drop")}
+                      <span className="inline-flex items-center gap-1.5 text-sm font-bold text-blu-slate hover:underline">
+                        <UploadCloud className="w-4 h-4 text-blu-slate" />
+                        <span>{previewUrl ? t("reg.avatar_change") : t("reg.avatar_drop")}</span>
                       </span>
+                      <p className="text-[11px] text-blu-steel mt-0.5">
+                        {t("reg.avatar_hint")}
+                      </p>
                     </div>
                   </div>
+                  <p className="text-[11px] text-blu-steel/80 mt-1">
+                    {t("reg.avatar_note")}
+                  </p>
                 </div>
 
                 <button
@@ -553,7 +693,7 @@ export default function RegisterPage() {
                     password !== confirmPassword ||
                     loading
                   }
-                  className="w-full btn-gold py-3.5 rounded-xl text-base font-bold disabled:opacity-40 disabled:cursor-not-allowed mt-2 cursor-pointer shadow-md"
+                  className="w-full btn-gold py-3.5 rounded-xl text-base font-bold disabled:opacity-40 disabled:cursor-not-allowed mt-2 cursor-pointer shadow-md transition-all"
                 >
                   {loading ? t("reg.submitting") : t("reg.btn_complete")}
                 </button>
@@ -564,7 +704,7 @@ export default function RegisterPage() {
       </div>
 
       {/* ─── Footer ─── */}
-      <footer className="text-center text-[11px] text-white/25 pb-6 px-5">
+      <footer className="text-center text-[11px] text-blu-sky/40 pb-6 px-5">
         © 2026 Blu Fitness Cha-am
       </footer>
     </main>
