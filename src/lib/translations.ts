@@ -108,6 +108,22 @@ export const translations = {
     "coupon.subtitle": "คูปองชวนเพื่อนเล่นฟรี · คงเหลือ",
     "coupon.passes": "สิทธิ์",
     "coupon.open": "เปิดใช้งานคูปอง",
+    "coupon.show_all": "ดูคูปองทั้งหมด (Show All)",
+    "coupon.show_less": "ซ่อน (Show Less)",
+    "coupon.none": "ไม่มีคูปองอื่นเพิ่มเติมในขณะนี้",
+
+    // Promo Discount Voucher
+    "promo.tag": "✦ EXCLUSIVE DISCOUNT ✦",
+    "promo.title": "DISCOUNT 10%",
+    "promo.desc": "ส่วนลด 10% (สูงสุด 300 บาท) สำหรับต่ออายุแพ็กเกจ",
+    "promo.title_50": "DISCOUNT ฿50",
+    "promo.desc_50": "ส่วนลด 50 บาท สำหรับทุกแพ็กเกจ (ไม่มีขั้นต่ำ)",
+    "promo.code_label": "โค้ดส่วนลด",
+    "promo.copy": "คัดลอกโค้ด",
+    "promo.copied": "คัดลอกแล้ว!",
+    "promo.valid_thru": "ใช้ได้ถึง 31 ธ.ค. 2569",
+    "promo.show_all": "ดูส่วนลดทั้งหมด (Show All)",
+    "promo.show_less": "ซ่อน (Show Less)",
 
     // Renew Action Button
     "action.renew": "ซื้อแพ็กเกจ / ต่ออายุสมาชิก",
@@ -286,6 +302,22 @@ export const translations = {
     "coupon.subtitle": "Free Friend Day Pass · Remaining",
     "coupon.passes": "passes",
     "coupon.open": "Open Voucher",
+    "coupon.show_all": "Show All Coupons",
+    "coupon.show_less": "Show Less",
+    "coupon.none": "No additional coupons available",
+
+    // Promo Discount Voucher
+    "promo.tag": "✦ EXCLUSIVE DISCOUNT ✦",
+    "promo.title": "DISCOUNT 10%",
+    "promo.desc": "10% Off (Max ฿300) on your next membership renewal",
+    "promo.title_50": "DISCOUNT ฿50",
+    "promo.desc_50": "฿50 Off on any membership pass (No min. spend)",
+    "promo.code_label": "Promo Code",
+    "promo.copy": "Copy Code",
+    "promo.copied": "Copied!",
+    "promo.valid_thru": "Valid until 31 Dec 2026",
+    "promo.show_all": "Show All Discounts",
+    "promo.show_less": "Show Less",
 
     // Renew Action Button
     "action.renew": "Buy Package / Renew Membership",

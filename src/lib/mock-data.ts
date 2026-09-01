@@ -226,6 +226,18 @@ export const mockPromoCodes: PromoCode[] = [
     isActive: true,
     description: "โค้ดทดสอบหมดอายุและโควต้าเต็ม",
   },
+  {
+    id: "promo-5",
+    code: "BLU50",
+    discountType: "FIXED",
+    discountValue: 50,
+    minSpend: 90,
+    usageLimit: 100,
+    usedCount: 24,
+    expiresAt: "2026-12-31T23:59:59Z",
+    isActive: true,
+    description: "ส่วนลด 50 บาท สำหรับทุกแพ็กเกจ",
+  },
 ];
 
 /** ตรวจสอบความถูกต้องและคำนวณส่วนลด */

@@ -17,6 +17,12 @@ import {
   ArrowRight,
   ShieldCheck,
   HeartHandshake,
+  Tag,
+  Copy,
+  Check,
+  Ticket,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import LanguageToggle from "@/components/LanguageToggle";
 import { useLanguage } from "@/context/LanguageContext";
@@ -28,6 +34,15 @@ export default function MemberDashboardPage() {
   const [member, setMember] = useState<MemberProfile | null>(null);
 
   const [qrModalOpen, setQrModalOpen] = useState(false);
+  const [showAllCoupons, setShowAllCoupons] = useState(false);
+  const [showAllPromos, setShowAllPromos] = useState(false);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
+
+  const handleCopyPromo = (code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedCode(code);
+    setTimeout(() => setCopiedCode(null), 2000);
+  };
 
   // 🛡️ Live Anti-Fraud Countdown Timer (Ticks every 1s)
   const [timeLeft, setTimeLeft] = useState<{
@@ -396,10 +411,240 @@ export default function MemberDashboardPage() {
               </div>
             </div>
           </div>
+
+          {/* Bottom Button / Toggle: Show All Coupons */}
+          <div className="pt-2 text-center">
+            <button
+              type="button"
+              onClick={() => setShowAllCoupons(!showAllCoupons)}
+              className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-blu-slate hover:text-blu-dark transition-colors cursor-pointer select-none"
+            >
+              <span>{showAllCoupons ? t("coupon.show_less") : t("coupon.show_all")}</span>
+              {showAllCoupons ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+          </div>
+
+          {/* None State (When Show All is expanded) */}
+          {showAllCoupons && (
+            <div className="mt-3 p-4 rounded-2xl bg-white/90 border-2 border-dashed border-blu-sky/80 text-center text-xs text-blu-steel space-y-1 animate-in fade-in slide-in-from-top-2 duration-200 shadow-xs">
+              <Ticket className="w-6 h-6 mx-auto text-blu-steel/50 mb-0.5" />
+              <p className="font-bold text-blu-dark text-xs sm:text-sm">{t("coupon.none")}</p>
+              <p className="text-[10px] text-blu-steel">
+                {lang === "en" ? "Check back later for new member vouchers" : "รอติดตามคูปองและสิทธิพิเศษใหม่ๆ เร็วๆ นี้"}
+              </p>
+            </div>
+          )}
         </section>
 
         {/* ═══════════════════════════════════════════════
-            3. ACTION BUTTON: RENEW / BUY PACKAGE
+            4. VIBRANT RUBY RED SCALLOPED STAMP DISCOUNT TAG (Anti-Screenshot Red Contrast)
+        ═══════════════════════════════════════════════ */}
+        <section>
+          <div className="relative w-full max-w-md mx-auto hover:scale-[1.01] transition-transform select-none">
+            {/* 100% True Transparent Vector Scalloped Stamp Tag Graphic */}
+            <svg
+              viewBox="0 0 460 220"
+              className="w-full h-auto drop-shadow-xl"
+            >
+              <defs>
+                {/* Vibrant Coral Ruby Red Gradient */}
+                <linearGradient id="rubyStampGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#ff2e63" />
+                  <stop offset="50%" stopColor="#e11d48" />
+                  <stop offset="100%" stopColor="#be123c" />
+                </linearGradient>
+
+                {/* Soft Gold/White Tag Accent */}
+                <linearGradient id="whiteTagGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#ffffff" />
+                  <stop offset="100%" stopColor="#fef08a" />
+                </linearGradient>
+              </defs>
+
+              {/* Scalloped Postage Stamp Border Base */}
+              <path
+                d="M 20 20 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 Z"
+                fill="url(#rubyStampGrad)"
+              />
+
+              {/* Inner Dashed White Ticket Border */}
+              <rect
+                x="36"
+                y="34"
+                width="388"
+                height="152"
+                rx="14"
+                fill="none"
+                stroke="white"
+                strokeWidth="2.5"
+                strokeDasharray="7 4"
+                opacity="0.9"
+              />
+
+              {/* Top Tag Punch Hole */}
+              <circle cx="230" cy="42" r="5" fill="#f0fcfe" stroke="white" strokeWidth="1.5" />
+            </svg>
+
+            {/* Typography & Code Box Inside Scalloped Tag */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-center z-10 px-8 sm:px-12 py-2">
+              <div className="space-y-1">
+                {/* Limited Time Badge */}
+                <div className="inline-flex items-center gap-1 bg-white/20 px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-black tracking-widest text-white uppercase backdrop-blur-xs">
+                  <span>✦ {lang === "en" ? "LIMITED TIME OFFER" : "ส่วนลดพิเศษจำกัดเวลา"} ✦</span>
+                </div>
+
+                {/* Big Discount Title */}
+                <div className="flex items-center justify-center gap-2">
+                  <span className="line-through text-white/60 text-xs sm:text-sm font-bold">฿1,000</span>
+                  <h4 className="text-3xl sm:text-4xl font-black text-white tracking-tight uppercase leading-none drop-shadow-md">
+                    {t("promo.title")}
+                  </h4>
+                </div>
+
+                <p className="text-[11px] sm:text-xs font-bold text-white/90">
+                  {t("promo.desc")}
+                </p>
+
+                {/* Promo Code Box + Copy CTA */}
+                <div className="pt-1 flex items-center justify-center gap-2">
+                  <div className="bg-white text-rose-600 px-3 py-1 rounded-lg flex items-center gap-1.5 font-mono font-black text-xs sm:text-sm tracking-wider shadow-md">
+                    <Tag className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                    <span>FITNESS10</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyPromo("FITNESS10")}
+                    className="bg-blu-yellow hover:bg-[#ffe433] text-blu-dark px-3 py-1 rounded-lg text-xs font-black flex items-center gap-1 shadow-md hover:shadow-lg transition-all cursor-pointer"
+                  >
+                    {copiedCode === "FITNESS10" ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-800" />
+                        <span>{t("promo.copied")}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5 text-blu-dark" />
+                        <span>{t("promo.copy")}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="text-[10px] text-white/80 font-medium pt-0.5">
+                  {t("promo.valid_thru")}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Second Scalloped Stamp Tag (BLU50 - 50 THB OFF) shown on Show All */}
+          {showAllPromos && (
+            <div className="relative w-full max-w-md mx-auto hover:scale-[1.01] transition-transform select-none mt-3.5 animate-in fade-in slide-in-from-top-2 duration-300">
+              <svg
+                viewBox="0 0 460 220"
+                className="w-full h-auto drop-shadow-xl"
+              >
+                <defs>
+                  {/* Sunset Amber-Crimson Gradient */}
+                  <linearGradient id="amberRubyStampGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#f97316" />
+                    <stop offset="50%" stopColor="#ea580c" />
+                    <stop offset="100%" stopColor="#c2410c" />
+                  </linearGradient>
+                </defs>
+
+                {/* Scalloped Postage Stamp Border Base */}
+                <path
+                  d="M 20 20 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 Z"
+                  fill="url(#amberRubyStampGrad)"
+                />
+
+                {/* Inner Dashed White Ticket Border */}
+                <rect
+                  x="36"
+                  y="34"
+                  width="388"
+                  height="152"
+                  rx="14"
+                  fill="none"
+                  stroke="white"
+                  strokeWidth="2.5"
+                  strokeDasharray="7 4"
+                  opacity="0.9"
+                />
+
+                {/* Top Tag Punch Hole */}
+                <circle cx="230" cy="42" r="5" fill="#f0fcfe" stroke="white" strokeWidth="1.5" />
+              </svg>
+
+              {/* Typography & Code Box Inside Scalloped Tag */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center z-10 px-8 sm:px-12 py-2">
+                <div className="space-y-1">
+                  {/* Limited Time Badge */}
+                  <div className="inline-flex items-center gap-1 bg-white/20 px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-black tracking-widest text-white uppercase backdrop-blur-xs">
+                    <span>✦ {lang === "en" ? "ALL PASSES DISCOUNT" : "ส่วนลดพิเศษทุกแพ็กเกจ"} ✦</span>
+                  </div>
+
+                  {/* Big Discount Title */}
+                  <div className="flex items-center justify-center gap-2">
+                    <span className="line-through text-white/60 text-xs sm:text-sm font-bold">฿100</span>
+                    <h4 className="text-3xl sm:text-4xl font-black text-white tracking-tight uppercase leading-none drop-shadow-md">
+                      {t("promo.title_50")}
+                    </h4>
+                  </div>
+
+                  <p className="text-[11px] sm:text-xs font-bold text-white/90">
+                    {t("promo.desc_50")}
+                  </p>
+
+                  {/* Promo Code Box + Copy CTA */}
+                  <div className="pt-1 flex items-center justify-center gap-2">
+                    <div className="bg-white text-orange-600 px-3 py-1 rounded-lg flex items-center gap-1.5 font-mono font-black text-xs sm:text-sm tracking-wider shadow-md">
+                      <Tag className="w-3.5 h-3.5 text-orange-600 shrink-0" />
+                      <span>BLU50</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyPromo("BLU50")}
+                      className="bg-blu-yellow hover:bg-[#ffe433] text-blu-dark px-3 py-1 rounded-lg text-xs font-black flex items-center gap-1 shadow-md hover:shadow-lg transition-all cursor-pointer"
+                    >
+                      {copiedCode === "BLU50" ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-800" />
+                          <span>{t("promo.copied")}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 text-blu-dark" />
+                          <span>{t("promo.copy")}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="text-[10px] text-white/80 font-medium pt-0.5">
+                    {t("promo.valid_thru")}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Bottom Button / Toggle: Show All Discounts */}
+          <div className="pt-2 text-center">
+            <button
+              type="button"
+              onClick={() => setShowAllPromos(!showAllPromos)}
+              className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-rose-600 hover:text-rose-800 transition-colors cursor-pointer select-none font-extrabold"
+            >
+              <span>{showAllPromos ? t("promo.show_less") : t("promo.show_all")}</span>
+              {showAllPromos ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+          </div>
+        </section>
+
+        {/* ═══════════════════════════════════════════════
+            5. ACTION BUTTON: RENEW / BUY PACKAGE
         ═══════════════════════════════════════════════ */}
         <section>
           <Link
