@@ -6,14 +6,12 @@ import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
-  ChevronLeft,
   X,
   Calendar,
   Phone,
   CreditCard,
   CheckCircle2,
   Clock,
-  LogOut,
   ArrowRight,
   ShieldCheck,
   HeartHandshake,
@@ -24,7 +22,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
-import LanguageToggle from "@/components/LanguageToggle";
+import Navbar from "@/components/Navbar";
 import { useLanguage } from "@/context/LanguageContext";
 import { MemberProfile, defaultMockMember } from "@/lib/mock-data";
 
@@ -118,49 +116,14 @@ export default function MemberDashboardPage() {
   return (
     <main className="min-h-screen bg-blu-ice text-blu-dark pb-16">
       {/* ═══════════════════════════════════════════════
-          NAVBAR (Light Glass on Gray Background)
+          NAVBAR (Same component as home)
       ═══════════════════════════════════════════════ */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-blu-sky/40 shadow-xs">
-        <div className="max-w-2xl mx-auto px-4 h-15 flex items-center justify-between">
-          <Link
-            href="/"
-            className="flex items-center gap-1.5 text-xs text-blu-steel hover:text-blu-dark transition-colors font-medium"
-          >
-            <ChevronLeft className="w-4 h-4" />
-            <span>{t("member.back")}</span>
-          </Link>
-
-          <div className="flex items-center gap-2">
-            <Image
-              src="/logo.jpg"
-              alt="Blu Fitness"
-              width={38}
-              height={38}
-              className="w-[38px] h-[38px] rounded-lg object-cover"
-              priority
-            />
-            <span className="font-extrabold tracking-wider text-sm text-blu-dark">
-              BLU FITNESS
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <LanguageToggle variant="light" />
-            <button
-              onClick={handleLogout}
-              title={t("nav.logout")}
-              className="text-xs text-blu-steel hover:text-rose-600 flex items-center gap-1 transition-colors cursor-pointer font-medium p-1"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-      </header>
+      <Navbar member={member} onLogout={handleLogout} />
 
       {/* ═══════════════════════════════════════════════
           MAIN CONTAINER
       ═══════════════════════════════════════════════ */}
-      <div className="max-w-lg mx-auto px-4 pt-6 space-y-6">
+      <div className="max-w-lg mx-auto px-4 pt-24 space-y-6">
 
         {/* ═══════════════════════════════════════════════
             1. REALISTIC BLU FITNESS PHYSICAL CARD REPLICA
