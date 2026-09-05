@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
-import { LogOut, User } from "lucide-react";
+import { LogOut, User, Gift, ShieldCheck } from "lucide-react";
 import LanguageToggle from "@/components/LanguageToggle";
 import { useLanguage } from "@/context/LanguageContext";
 
@@ -11,6 +11,7 @@ export type NavbarMember = {
   fullName?: string;
   avatarUrl?: string;
   phone?: string;
+  role?: "MEMBER" | "ADMIN";
 } | null;
 
 export default function Navbar({
@@ -52,6 +53,14 @@ export default function Navbar({
         </Link>
 
         <div className="flex items-center gap-2.5 sm:gap-4">
+          <Link
+            href="/member/rewards"
+            className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-white/80 hover:text-white hover:bg-white/5 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg transition-colors"
+          >
+            <Gift className="w-4 h-4 text-blu-yellow" />
+            <span className="hidden sm:inline">{t("nav.rewards")}</span>
+          </Link>
+
           <LanguageToggle variant="dark" />
 
           {member ? (
@@ -97,6 +106,19 @@ export default function Navbar({
                       <span>{t("nav.my_account")}</span>
                     </Link>
                   </div>
+
+                  {member.role === "ADMIN" && (
+                    <div className="p-1.5 border-t border-blu-sky/20">
+                      <Link
+                        href="/admin"
+                        onClick={() => setMenuOpen(false)}
+                        className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-blu-dark hover:text-blu-slate hover:bg-blu-ice transition-colors"
+                      >
+                        <ShieldCheck className="w-4 h-4 text-blu-yellow" />
+                        <span>{t("nav.admin_panel")}</span>
+                      </Link>
+                    </div>
+                  )}
 
                   <div className="p-1.5 border-t border-blu-sky/20">
                     <button

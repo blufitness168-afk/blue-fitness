@@ -373,6 +373,7 @@ export interface MemberProfile {
   coupons: Record<string, MemberCoupon>; // กระเป๋าคูปองต่างๆ (เช่น friend_pass, free_trainer)
   activityLogs: ActivityLog[]; // ประวัติความเคลื่อนไหวทั้งหมด (แต้ม, เช็คอิน, คูปอง)
   status: "ACTIVE" | "EXPIRED" | "PENDING";
+  role?: "MEMBER" | "ADMIN"; // สิทธิ์ผู้ใช้งาน (default: MEMBER)
   registeredAt: string;
 }
 
@@ -427,6 +428,7 @@ export const defaultMockMember: MemberProfile = {
     },
   ],
   status: "ACTIVE",
+  role: "ADMIN", // ตัวอย่าง: บัญชีนี้เป็น Admin (เห็นเมนู Admin Panel ใน dropdown)
   registeredAt: "28 ส.ค. 2026",
 };
 

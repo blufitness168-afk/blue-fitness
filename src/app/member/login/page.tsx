@@ -41,6 +41,7 @@ export default function LoginPage() {
       cardNumber: "CARD-8899",
       points: 25,
       status: "ACTIVE",
+      role: "ADMIN",
       registeredAt: new Date().toISOString(),
     };
 

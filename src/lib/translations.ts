@@ -10,6 +10,8 @@ export const translations = {
     "nav.register": "สมัครสมาชิก",
     "nav.my_account": "บัตรสมาชิกดิจิทัล (My Account)",
     "nav.logout": "ออกจากระบบ",
+    "nav.rewards": "ร้านของขวัญ",
+    "nav.admin_panel": "แผงควบคุมผู้ดูแล (Admin Panel)",
 
     // Hero & Highlights
     "hero.badge": "Blu Fitness — ชะอำ",
@@ -221,6 +223,8 @@ export const translations = {
     "nav.register": "Join Now",
     "nav.my_account": "Digital Card (My Account)",
     "nav.logout": "Log Out",
+    "nav.rewards": "Rewards",
+    "nav.admin_panel": "Admin Panel",
 
     // Hero & Highlights
     "hero.badge": "Blu Fitness — Cha-Am",
