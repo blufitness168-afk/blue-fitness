@@ -193,6 +193,23 @@ export const translations = {
     "reg.btn_complete": "ยืนยันการสมัครสมาชิก",
     "reg.have_account": "มีบัญชีสมาชิกอยู่แล้ว?",
     "reg.login_link": "เข้าสู่ระบบ",
+
+    // Reward Shop
+    "rewards.back": "กลับหน้าบัตร",
+    "rewards.title": "ร้านของขวัญ",
+    "rewards.subtitle": "แลกแต้มกับของรางวัลสุดพิเศษ",
+    "rewards.my_points": "แต้มของฉัน",
+    "rewards.out_of": "แต้ม",
+    "rewards.need_points": "แต้มที่ต้องใช้",
+    "rewards.redeem_btn": "รับสิทธิ์เลย",
+    "rewards.redeeming": "กำลังดำเนินการ...",
+    "rewards.insufficient": "แต้มไม่พอ",
+    "rewards.out_of_stock": "หมดแล้ว",
+    "rewards.success_title": "รับสิทธิ์สำเร็จ!",
+    "rewards.success_desc": "นำรหัสนี้ไปแสดงที่เคาน์เตอร์เพื่อรับของรางวัล",
+    "rewards.used": "ใช้ไปแล้ว",
+    "rewards.close": "ปิด",
+    "rewards.empty": "ยังไม่มีรางวัลให้แลกในตอนนี้",
   },
 
   en: {
@@ -387,5 +404,22 @@ export const translations = {
     "reg.btn_complete": "Complete Registration",
     "reg.have_account": "Already a member?",
     "reg.login_link": "Log In",
+
+    // Reward Shop
+    "rewards.back": "Back to Card",
+    "rewards.title": "Reward Shop",
+    "rewards.subtitle": "Redeem your points for special rewards",
+    "rewards.my_points": "My Points",
+    "rewards.out_of": "points",
+    "rewards.need_points": "Points needed",
+    "rewards.redeem_btn": "Redeem Now",
+    "rewards.redeeming": "Processing...",
+    "rewards.insufficient": "Not enough points",
+    "rewards.out_of_stock": "Out of stock",
+    "rewards.success_title": "Redeemed Successfully!",
+    "rewards.success_desc": "Show this code at the counter to receive your reward",
+    "rewards.used": "Used",
+    "rewards.close": "Close",
+    "rewards.empty": "No rewards available right now",
   },
 };

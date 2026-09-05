@@ -294,12 +294,15 @@ export default function MemberDashboardPage() {
             })}
           </div>
 
-          {/* Bottom Action: Redeem Rewards (No Redirect) */}
+          {/* Bottom Action: Redeem Rewards → /member/rewards */}
           <div className="pt-1 text-center">
-            <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-blu-yellow hover:text-[#ffe55b] transition-colors underline underline-offset-4 decoration-blu-yellow/70 cursor-pointer select-none">
+            <Link
+              href="/member/rewards"
+              className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-blu-yellow hover:text-[#ffe55b] transition-colors underline underline-offset-4 decoration-blu-yellow/70"
+            >
               <span>{t("points.redeem")}</span>
               <ArrowRight className="w-3.5 h-3.5" />
-            </span>
+            </Link>
           </div>
         </section>
 

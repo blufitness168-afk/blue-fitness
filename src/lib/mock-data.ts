@@ -430,3 +430,71 @@ export const defaultMockMember: MemberProfile = {
   registeredAt: "28 ส.ค. 2026",
 };
 
+// ==============================================================================
+// 🎁 Rewards System (ระบบแลกของรางวัล)
+// ==============================================================================
+
+export interface RewardItem {
+  id: number;
+  title: string;
+  titleEn: string;
+  description: string;
+  descriptionEn: string;
+  imageUrl: string;
+  pointCost: number;
+  stock: number;
+  isActive: boolean;
+}
+
+// รูปอ้างอิงจาก Unsplash (placeholder) — เปลี่ยนเป็นรูปสินค้าจริงภายหลัง
+export const mockRewards: RewardItem[] = [
+  {
+    id: 1,
+    title: "เครื่องดื่มเกลือแร่ / น้ำดื่ม 1 ขวด",
+    titleEn: "Sports Drink / Bottled Water",
+    description: "แลกรับเครื่องดื่มเย็นสดชื่นที่เคาน์เตอร์ฟิตเนส",
+    descriptionEn: "Redeem a refreshing drink at the front desk",
+    imageUrl:
+      "https://images.unsplash.com/photo-1622483767028-3f66f32aef97?auto=format&fit=crop&w=400&q=80",
+    pointCost: 10,
+    stock: 100,
+    isActive: true,
+  },
+  {
+    id: 2,
+    title: "ผ้าขนหนูออกกำลังกาย Blu Fitness",
+    titleEn: "Blu Fitness Gym Towel",
+    description: "ผ้าขนหนูซับเหงื่อไมโครไฟเบอร์ พรีเมียม พกพาสะดวก",
+    descriptionEn: "Premium microfiber sweat towel, easy to carry",
+    imageUrl:
+      "https://images.unsplash.com/photo-1616803689943-5601631c7fec?auto=format&fit=crop&w=400&q=80",
+    pointCost: 30,
+    stock: 50,
+    isActive: true,
+  },
+  {
+    id: 3,
+    title: "เสื้อยืด Blu Fitness Limited Edition",
+    titleEn: "Blu Fitness Limited Edition Shirt",
+    description: "เสื้อกีฬาเนื้อผ้าระบายอากาศดีเยี่ยม สกรีนโลโก้ทอง Blu Fitness",
+    descriptionEn: "Breathable sports shirt with gold Blu Fitness logo",
+    imageUrl:
+      "https://images.unsplash.com/photo-1576566588028-4147f3842f27?auto=format&fit=crop&w=400&q=80",
+    pointCost: 60,
+    stock: 30,
+    isActive: true,
+  },
+  {
+    id: 4,
+    title: "ฟรีสมาชิกเพิ่ม 7 วัน",
+    titleEn: "Free 7 Days Membership Extension",
+    description: "รับวันใช้งานฟิตเนสเพิ่มฟรีทันที 7 วัน",
+    descriptionEn: "Get 7 extra days of gym access for free",
+    imageUrl:
+      "https://images.unsplash.com/photo-1540497077202-7c8a3999166f?auto=format&fit=crop&w=400&q=80",
+    pointCost: 80,
+    stock: 999,
+    isActive: true,
+  },
+];
+
