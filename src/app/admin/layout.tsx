@@ -17,9 +17,10 @@ import {
 const navItems = [
   { href: "/admin", labelTh: "ภาพรวม", icon: LayoutDashboard },
   { href: "/admin/members", labelTh: "สมาชิก", icon: Users },
-  { href: "/admin/checkin", labelTh: "สแกนเข้าใช้", icon: ScanLine },
+  { href: "/admin/checkin", labelTh: "เช็คอินสมาชิก", icon: ScanLine },
   { href: "/admin/rewards", labelTh: "ของรางวัล", icon: Gift },
   { href: "/admin/promo-codes", labelTh: "โค้ดส่วนลด", icon: Ticket },
+    { href: "/admin/coupons", labelTh: "คูปอง", icon: Ticket },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

@@ -1,0 +1,186 @@
+import { z } from "zod";
+import { mockAdminMembers } from "./admin-mock";
+
+export const BENEFITS_KEY = "blu_benefits_mock_v1";
+export const BENEFITS_EVENT = "blu-benefits-updated";
+const date = z.string().datetime({ offset: true });
+const money = z.number().int().min(0).max(10000000); // Integer baht in this prototype.
+const definitionSchema = z.object({
+  id: z.string().uuid(), kind: z.enum(["PROMO", "COUPON"]),
+  name: z.string().trim().min(1).max(120), code: z.string().regex(/^[A-Z0-9-]{3,40}$/),
+  active: z.boolean(), expiresAt: date, quota: z.number().int().min(1).max(100000),
+  discountType: z.enum(["FIXED", "PERCENT"]), amount: money, minSpend: money,
+  benefit: z.enum(["BRING_FRIEND", "EXTRA_DAYS"]), detail: z.string().trim().min(1).max(300),
+}).strict().superRefine((d, ctx) => {
+  if (d.amount < 1 || (d.kind === "PROMO" && d.discountType === "PERCENT" && d.amount > 100)) {
+    ctx.addIssue({ code: "custom", message: "จำนวนสิทธิ์/ส่วนลดไม่ถูกต้อง (เปอร์เซ็นต์ไม่เกิน 100)" });
+  }
+});
+export type BenefitDefinition = z.infer<typeof definitionSchema>;
+export type BenefitKind = BenefitDefinition["kind"];
+const grantSchema = z.object({
+  id: z.string().uuid(), code: z.string().regex(/^BLU-(CP|PC)-[A-F0-9-]{36}$/),
+  definition: definitionSchema, memberCode: z.string().regex(/^BLU-\d+$/), memberName: z.string().min(1),
+  batchId: z.string().uuid(), issuedAt: date, status: z.enum(["UNUSED", "USED"]),
+  usedAt: date.optional(), paymentId: z.string().uuid().optional(), paidAmount: money.optional(),
+}).strict();
+export type BenefitGrant = z.infer<typeof grantSchema>;
+const stateSchema = z.object({
+  version: z.literal(1), revision: z.number().int().nonnegative(), definitions: z.array(definitionSchema), grants: z.array(grantSchema),
+  batches: z.array(z.object({ id: z.string().uuid(), definitionId: z.string().uuid(), mode: z.enum(["SELECTED", "ALL"]), memberCodes: z.array(z.string()), createdAt: date }).strict()),
+}).strict();
+export type BenefitsState = z.infer<typeof stateSchema>;
+export type GrantPlan = { revision: number; batchId: string; definitionId: string; mode: "SELECTED" | "ALL"; memberCodes: string[]; newCodes: string[]; skipped: number };
+const fail = (message: string): never => { throw new Error(message); };
+function unique(values: string[]) { return new Set(values).size === values.length; }
+export function parseBenefits(raw: string | null): BenefitsState {
+  if (raw === null) return { version: 1, revision: 0, definitions: [], grants: [], batches: [] };
+  try {
+    const s = stateSchema.parse(JSON.parse(raw));
+    if (!unique(s.definitions.map(d => d.id)) || !unique(s.definitions.map(d => `${d.kind}:${d.code}`)) ||
+      !unique(s.grants.map(g => g.id)) || !unique(s.grants.map(g => g.code)) || !unique(s.grants.map(g => `${g.definition.id}:${g.memberCode}`)) ||
+      !unique(s.batches.map(b => b.id)) || !unique(s.grants.flatMap(g => g.paymentId ? [g.paymentId] : []))) throw Error();
+    for (const d of s.definitions) {
+      if (s.grants.filter(g => g.definition.id === d.id).length > d.quota) throw Error();
+    }
+    for (const g of s.grants) {
+      const b = s.batches.find(b => b.id === g.batchId);
+      if (!s.definitions.some(d => d.id === g.definition.id && d.kind === g.definition.kind) || !b || b.definitionId !== g.definition.id ||
+        !b.memberCodes.includes(g.memberCode) || g.issuedAt !== b.createdAt || !g.definition.active ||
+        Date.parse(g.issuedAt) >= Date.parse(g.definition.expiresAt) ||
+        g.code !== `BLU-${g.definition.kind === "COUPON" ? "CP" : "PC"}-${g.id.toUpperCase()}` ||
+        (g.status === "USED") !== !!g.usedAt || (g.usedAt && (Date.parse(g.usedAt) < Date.parse(g.issuedAt) || Date.parse(g.usedAt) >= Date.parse(g.definition.expiresAt))) ||
+        (g.status === "USED" && g.definition.kind === "PROMO" ? !g.paymentId || g.paidAmount === undefined : g.paymentId !== undefined || g.paidAmount !== undefined)) throw Error();
+    }
+    for (const b of s.batches) {
+      if (!b.memberCodes.length || !unique(b.memberCodes) || !s.definitions.some(d => d.id === b.definitionId) ||
+        b.memberCodes.some(code => !s.grants.some(g => g.batchId === b.id && g.memberCode === code)) ||
+        s.grants.filter(g => g.batchId === b.id).length !== b.memberCodes.length) throw Error();
+    }
+    return s;
+  } catch { return fail("ข้อมูลสิทธิ์ mock เสียหาย ระบบหยุดทำรายการ กรุณาตรวจสอบ localStorage (ไม่รีเซ็ตสิทธิ์อัตโนมัติ)"); }
+}
+export function readBenefits(): BenefitsState {
+  let raw: string | null;
+  try { raw = localStorage.getItem(BENEFITS_KEY); } catch { return fail("อ่านข้อมูลสิทธิ์ไม่ได้ กรุณาอนุญาตพื้นที่จัดเก็บเบราว์เซอร์"); }
+  return parseBenefits(raw);
+}
+async function writeBenefits<T>(operation: (state: BenefitsState, now: Date) => T): Promise<T> {
+  if (typeof navigator === "undefined" || !navigator.locks?.request) return fail("ต้องใช้ Web Locks ผ่าน HTTPS หรือ localhost จึงจะบันทึกได้");
+  return navigator.locks.request(BENEFITS_KEY, { mode: "exclusive" }, () => {
+    const state = readBenefits();
+    const result = operation(state, new Date());
+    state.revision++;
+    const serialized = JSON.stringify(state);
+    parseBenefits(serialized);
+    const event = new CustomEvent(BENEFITS_EVENT);
+    try { localStorage.setItem(BENEFITS_KEY, serialized); } catch { return fail("บันทึกไม่สำเร็จ ยังไม่ได้แจก/ใช้สิทธิ์ กรุณาตรวจสอบพื้นที่จัดเก็บ"); }
+    window.dispatchEvent(event);
+    return result;
+  });
+}
+export function newDefinition(kind: BenefitKind): BenefitDefinition {
+  return { id: crypto.randomUUID(), kind, name: "", code: "", active: true, expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(), quota: 100,
+    discountType: "FIXED", amount: 1, minSpend: 0, benefit: "BRING_FRIEND", detail: kind === "PROMO" ? "ส่วนลดแพ็กเกจ (mock)" : "พาเพื่อนมาออกกำลังกาย (mock)" };
+}
+export async function saveDefinition(value: BenefitDefinition, expected: BenefitDefinition | null): Promise<void> {
+  const parsed = definitionSchema.safeParse(value);
+  if (!parsed.success) return fail(parsed.error.issues.map(i => i.message).join(" • "));
+  const draft = parsed.data;
+  const snapshot = expected && JSON.stringify(expected);
+  await writeBenefits(s => {
+    const old = s.definitions.find(d => d.id === draft.id);
+    if ((old ? JSON.stringify(old) : null) !== snapshot || (old && old.kind !== draft.kind)) return fail("รายการเปลี่ยนแล้ว กรุณาโหลดและแก้ไขใหม่");
+    if (s.definitions.some(d => d.id !== draft.id && d.kind === draft.kind && d.code === draft.code)) return fail("รหัสนิยามซ้ำ");
+    if (draft.quota < s.grants.filter(g => g.definition.id === draft.id).length) return fail("โควต้าต้องไม่น้อยกว่าจำนวนที่แจกแล้ว");
+    s.definitions = [...s.definitions.filter(d => d.id !== draft.id), draft];
+  });
+}
+export async function removeDefinition(expected: BenefitDefinition): Promise<"DISABLED" | "DELETED"> {
+  const snapshot = JSON.stringify(expected);
+  return writeBenefits(s => {
+    const old = s.definitions.find(d => d.id === expected.id);
+    if (!old || JSON.stringify(old) !== snapshot) return fail("รายการเปลี่ยนแล้ว กรุณาโหลดใหม่");
+    if (s.grants.some(g => g.definition.id === old.id)) { old.active = false; return "DISABLED"; }
+    s.definitions = s.definitions.filter(d => d.id !== old.id);
+    return "DELETED";
+  });
+}
+export function resolveBenefitMember(code: string) {
+  const normalized = code.trim().toUpperCase();
+  const matches = mockAdminMembers.filter(m => m.memberCode === normalized || m.cardNumber === normalized);
+  if (matches.length !== 1) return fail("ไม่พบสมาชิกหรือรหัสซ้ำกำกวม: ใช้รหัส BLU-… หรือเลขบัตร CARD-… เท่านั้น");
+  return matches[0];
+}
+function usableDefinition(s: BenefitsState, id: string, now: Date) {
+  const d = s.definitions.find(d => d.id === id);
+  if (!d || !d.active || !Number.isFinite(now.getTime()) || Date.parse(d.expiresAt) <= now.getTime()) return fail("สิทธิ์ปิดใช้งานหรือหมดอายุแล้ว");
+  return d;
+}
+function planFor(s: BenefitsState, id: string, codes: string[], mode: GrantPlan["mode"], batchId: string, now: Date): GrantPlan {
+  const d = usableDefinition(s, id, now);
+  if (!codes.length || !unique(codes) || codes.some(c => !mockAdminMembers.some(m => m.memberCode === c))) return fail("กรุณาเลือกสมาชิกที่ถูกต้องอย่างน้อย 1 คน โดยไม่ซ้ำกัน");
+  const prior = s.grants.filter(g => g.definition.id === id);
+  const newCodes = codes.filter(c => !prior.some(g => g.memberCode === c));
+  if (!newCodes.length) return fail("สมาชิกที่เลือกได้รับสิทธิ์นี้แล้วทั้งหมด (ไม่แจกซ้ำแม้ใช้แล้ว)");
+  if (prior.length + newCodes.length > d.quota) return fail("โควต้าแจกไม่พอ กรุณาลดผู้รับหรือแก้ไขโควต้า");
+  return { revision: s.revision, batchId, definitionId: id, mode, memberCodes: [...codes], newCodes, skipped: codes.length - newCodes.length };
+}
+export function previewGrant(id: string, selected: string[], mode: GrantPlan["mode"], now = new Date()): GrantPlan {
+  return planFor(readBenefits(), id, mode === "ALL" ? mockAdminMembers.map(m => m.memberCode) : [...new Set(selected)], mode, crypto.randomUUID(), now);
+}
+export async function commitGrant(plan: GrantPlan): Promise<number> {
+  const snapshot: GrantPlan = JSON.parse(JSON.stringify(plan));
+  return writeBenefits((s, now) => {
+    if (s.batches.some(b => b.id === snapshot.batchId)) return fail("รายการแจกนี้บันทึกแล้ว ห้ามส่งซ้ำ");
+    const current = planFor(s, snapshot.definitionId, snapshot.memberCodes, snapshot.mode, snapshot.batchId, now);
+    if (JSON.stringify(current) !== JSON.stringify(snapshot)) return fail("ข้อมูลเปลี่ยนหลังแสดงจำนวน กรุณาตรวจสอบผู้รับและยืนยันใหม่");
+    const definition = usableDefinition(s, snapshot.definitionId, now);
+    s.batches.push({ id: snapshot.batchId, definitionId: definition.id, mode: snapshot.mode, memberCodes: [...snapshot.newCodes], createdAt: now.toISOString() });
+    for (const code of snapshot.newCodes) {
+      const member = resolveBenefitMember(code);
+      const id = crypto.randomUUID();
+      s.grants.push({ id, code: `BLU-${definition.kind === "COUPON" ? "CP" : "PC"}-${id.toUpperCase()}`, definition: { ...definition }, memberCode: member.memberCode,
+        memberName: member.fullName, batchId: snapshot.batchId, issuedAt: now.toISOString(), status: "UNUSED" });
+    }
+    return snapshot.newCodes.length;
+  });
+}
+function unusedGrant(s: BenefitsState, code: string, kind: BenefitKind, now: Date) {
+  const g = s.grants.find(g => g.code === code.trim().toUpperCase() && g.definition.kind === kind);
+  if (!g) return fail("ไม่พบรหัสสิทธิ์ที่แจกในกระเป๋า mock นี้ (ไม่รับรหัส DEMO รุ่นเก่า)");
+  if (g.status !== "UNUSED") return fail("สิทธิ์นี้ใช้แล้ว ห้ามใช้ซ้ำ");
+  // Disabling a definition also suspends outstanding grants. Issued terms otherwise remain immutable.
+  const current = s.definitions.find(d => d.id === g.definition.id);
+  if (!current?.active || !Number.isFinite(now.getTime()) || Date.parse(g.definition.expiresAt) <= now.getTime()) return fail("สิทธิ์หมดอายุหรือถูกระงับ");
+  return g;
+}
+export function previewCoupon(code: string, now = new Date()): BenefitGrant { return unusedGrant(readBenefits(), code, "COUPON", now); }
+export async function redeemCoupon(expected: BenefitGrant): Promise<void> {
+  const snapshot = JSON.stringify(expected);
+  await writeBenefits((s, now) => {
+    const g = unusedGrant(s, expected.code, "COUPON", now);
+    if (JSON.stringify(g) !== snapshot) return fail("สิทธิ์เปลี่ยนแล้ว กรุณาสแกนใหม่");
+    g.status = "USED"; g.usedAt = now.toISOString();
+  });
+}
+export type MockPayment = { revision: number; grantCode: string; memberCode: string; subtotal: number; discount: number; total: number; paymentId: string };
+function quote(s: BenefitsState, code: string, memberCode: string, subtotal: number, paymentId: string, now: Date): MockPayment {
+  const g = unusedGrant(s, code, "PROMO", now);
+  if (g.memberCode !== memberCode) return fail("โค้ดนี้ไม่ได้แจกให้สมาชิกที่เลือก");
+  if (!money.safeParse(subtotal).success || subtotal < 1 || subtotal < g.definition.minSpend) return fail("ยอดชำระไม่ถูกต้องหรือต่ำกว่ายอดขั้นต่ำ");
+  const discount = Math.min(subtotal, g.definition.discountType === "PERCENT" ? Math.floor(subtotal * g.definition.amount / 100) : g.definition.amount);
+  return { revision: s.revision, grantCode: g.code, memberCode, subtotal, discount, total: subtotal - discount, paymentId };
+}
+export function previewMockPayment(code: string, memberCode: string, subtotal: number): MockPayment {
+  return quote(readBenefits(), code, memberCode, subtotal, crypto.randomUUID(), new Date());
+}
+export async function completeMockPayment(expected: MockPayment): Promise<void> {
+  const snapshot: MockPayment = { ...expected };
+  await writeBenefits((s, now) => {
+    const current = quote(s, snapshot.grantCode, snapshot.memberCode, snapshot.subtotal, snapshot.paymentId, now);
+    if (JSON.stringify(current) !== JSON.stringify(snapshot) || s.grants.some(g => g.paymentId === snapshot.paymentId)) return fail("รายการชำระเปลี่ยนหรือบันทึกแล้ว กรุณาตรวจสอบใหม่");
+    const g = unusedGrant(s, snapshot.grantCode, "PROMO", now);
+    g.status = "USED"; g.usedAt = now.toISOString(); g.paymentId = snapshot.paymentId; g.paidAmount = snapshot.total;
+  });
+}

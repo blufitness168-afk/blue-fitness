@@ -1,12 +1,18 @@
 "use client";
 
 import Image from "next/image";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
+import { QRCodeSVG } from "qrcode.react";
+import { MockNotice } from "@/components/AdminScanner";
+import { mockAdminMembers, type RedemptionRecord } from "@/lib/admin-mock";
+import { DESK_UPDATED_EVENT, readDeskRewards } from "@/lib/front-desk";
+import { readRewardCatalog, remainingStock, requestMockReward, rewardWallet } from "@/lib/reward-catalog";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, Gift, CheckCircle2, Sparkles } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { useLanguage } from "@/context/LanguageContext";
-import { mockRewards, RewardItem, MemberProfile, defaultMockMember } from "@/lib/mock-data";
+import { type RewardItem, type MemberProfile, defaultMockMember } from "@/lib/mock-data";
 
 export default function RewardsPage() {
   const { t, lang } = useLanguage();
@@ -18,68 +24,51 @@ export default function RewardsPage() {
   const [redeemCode, setRedeemCode] = useState("");
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
 
-  useEffect(() => {
+  const [catalog, setCatalog] = useState<RewardItem[]>([]);
+  const [records, setRecords] = useState<RedemptionRecord[]>([]);
+  const [storageError, setStorageError] = useState("");
+  const writing = useRef(false);
+  const refresh = useCallback(() => {
     try {
       const saved = localStorage.getItem("blu_member");
-      if (saved) {
-        setMember(JSON.parse(saved));
-      } else {
-        setMember(defaultMockMember);
-      }
-    } catch (e) {}
-  }, []);
-
-  const availableRewards = useMemo(
-    () => mockRewards.filter((r) => r.isActive),
-    []
-  );
-
-  const handleRedeem = (reward: RewardItem) => {
-    if (!member) return;
-
-    if (member.points < reward.pointCost) {
-      setInfoMsg(t("rewards.insufficient"));
-      setTimeout(() => setInfoMsg(null), 2500);
-      return;
+      const profile = saved === null ? defaultMockMember : JSON.parse(saved);
+      const identity = mockAdminMembers.find(m => m.memberCode === profile?.memberCode);
+      if (!identity) throw new Error("ร้าน mock รองรับเฉพาะสมาชิกตัวอย่างในรายชื่อ Admin เท่านั้น");
+      const history = readDeskRewards();
+      const rewards = readRewardCatalog();
+      setMember({ ...defaultMockMember, ...profile, memberCode: identity.memberCode, fullName: identity.fullName, points: rewardWallet(identity.memberCode, history) });
+      setCatalog(rewards); setRecords(history);
+      setRedeemed(Object.fromEntries(history.filter(r => r.memberCode === identity.memberCode).map(r => [r.rewardId, true])));
+      setStorageError("");
+    } catch (cause) {
+      setCatalog([]); setRecords([]);
+      setStorageError(cause instanceof Error ? cause.message : "อ่านข้อมูล mock ไม่ได้");
     }
-
-    setRedeeming((prev) => ({ ...prev, [reward.id]: true }));
-
-    // Simulate API call delay
-    setTimeout(() => {
-      const code = "BLU-RW-" + reward.id + "-" + Math.random().toString(36).slice(2, 8).toUpperCase();
-      setRedeemCode(code);
-
-      // Deduct points locally
-      setMember((prev) => (prev ? { ...prev, points: Math.max(0, prev.points - reward.pointCost) } : prev));
-      setRedeemed((prev) => ({ ...prev, [reward.id]: true }));
-      setRedeeming((prev) => ({ ...prev, [reward.id]: false }));
-
-      // Persist redemption request so admin can verify at the counter
-      try {
-        const existing = JSON.parse(localStorage.getItem("blu_redemptions") || "[]");
-        existing.unshift({
-          id: code,
-          rewardCode: code,
-          rewardId: reward.id,
-          rewardTitle: reward.title,
-          memberCode: member.memberCode,
-          memberName: member.fullName,
-          pointsSpent: reward.pointCost,
-          status: "PENDING",
-          redeemedAt: new Date().toISOString(),
-        });
-        localStorage.setItem("blu_redemptions", JSON.stringify(existing));
-      } catch (e) {}
-
-      setSuccessModal(reward);
-    }, 900);
+  }, []);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    refresh();
+    window.addEventListener("storage", refresh); window.addEventListener(DESK_UPDATED_EVENT, refresh);
+    return () => { window.removeEventListener("storage", refresh); window.removeEventListener(DESK_UPDATED_EVENT, refresh); };
+  }, [refresh]);
+  const availableRewards = catalog.filter(r => r.isActive);
+  const handleRedeem = async (reward: RewardItem) => {
+    if (!member || writing.current || storageError) return;
+    writing.current = true;
+    setRedeeming({ [reward.id]: true }); setInfoMsg(null);
+    try {
+      const record = await requestMockReward(reward, member.memberCode);
+      setRedeemCode(record.rewardCode); setSuccessModal(reward);
+    } catch (cause) { setInfoMsg(cause instanceof Error ? cause.message : "บันทึกไม่ได้ ยังไม่ยืนยันการแลก"); }
+    finally { writing.current = false; setRedeeming({}); refresh(); }
   };
 
   const handleLogout = () => {
     localStorage.removeItem("blu_member");
     router.push("/");
   };
+
+  if (storageError) return <main className="mx-auto max-w-lg space-y-4 px-4 py-24"><MockNotice /><p role="alert">{storageError}</p><button className="underline" onClick={refresh}>ลองโหลดใหม่</button></main>;
 
   if (!member) {
     return (
@@ -117,6 +106,10 @@ export default function RewardsPage() {
           </div>
           <p className="text-xs text-blu-steel">{t("rewards.subtitle")}</p>
         </header>
+
+        <MockNotice />
+        <p className="text-xs text-blu-steel">แต้มตั้งต้นจากรายชื่อ Admin หักรายการแลกที่บันทึกแล้ว (ไม่นับ seed) • แยกจากแต้มเช็คอินและแพ็กเกจจริง • แลกได้ 1 ครั้ง/รางวัล/สมาชิก • การแลกรางวัลเพิ่มวันไม่ต่ออายุสมาชิกจริง</p>
+        <Link href="/member/benefits" className="block text-sm underline">กระเป๋าคูปอง / ส่วนลดที่ได้รับ (mock)</Link>
 
         {/* Points Card */}
         <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-blu-dark via-blu-navy to-blu-dark text-white p-5 border-2 border-blu-yellow/40 shadow-xl">
@@ -159,7 +152,8 @@ export default function RewardsPage() {
             availableRewards.map((reward) => {
               const isRedeemed = redeemed[reward.id];
               const isRedeeming = redeeming[reward.id];
-              const canRedeem = member.points >= reward.pointCost && reward.stock > 0 && !isRedeemed;
+              const stock = remainingStock(reward, records);
+                            const canRedeem = member.points >= reward.pointCost && stock > 0 && !isRedeemed;
               const title = lang === "th" ? reward.title : reward.titleEn;
               const desc = lang === "th" ? reward.description : reward.descriptionEn;
 
@@ -170,6 +164,7 @@ export default function RewardsPage() {
                 >
                   <div className="relative aspect-[4/3] w-full bg-blu-ice overflow-hidden">
                     <Image
+                      unoptimized
                       src={reward.imageUrl}
                       alt={title}
                       fill
@@ -182,7 +177,7 @@ export default function RewardsPage() {
                       <Gift className="w-3 h-3" /> {reward.pointCost}
                     </span>
                     {/* Sold out overlay */}
-                    {reward.stock <= 0 && (
+                    {stock <= 0 && (
                       <div className="absolute inset-0 bg-blu-dark/60 backdrop-blur-[1px] flex items-center justify-center">
                         <span className="text-blu-yellow text-xs font-black px-3 py-1.5 bg-blu-dark/80 rounded-full">
                           {t("rewards.out_of_stock")}
@@ -218,7 +213,7 @@ export default function RewardsPage() {
                         ? t("rewards.redeeming")
                         : canRedeem
                         ? t("rewards.redeem_btn")
-                        : reward.stock <= 0
+                        : stock <= 0
                         ? t("rewards.out_of_stock")
                         : t("rewards.insufficient")}
                     </button>
@@ -228,6 +223,7 @@ export default function RewardsPage() {
             })
           )}
         </section>
+        <section className="space-y-3"><h2 className="font-bold">รหัสรับรางวัลและประวัติ mock</h2>{records.filter(r => r.memberCode === member.memberCode).map(r => <details key={r.id} className="rounded-xl bg-white p-4 text-sm"><summary>{r.rewardTitle} • {r.status === "PENDING" ? "รอรับ" : "รับแล้ว"}</summary><p className="my-3 break-all font-mono text-xs">{r.rewardCode}</p><QRCodeSVG value={r.rewardCode} size={144} title={r.rewardTitle} /><p className="mt-2 text-xs">แสดงให้ Admin/Rewards ตรวจสอบก่อนส่งมอบ</p></details>)}</section>
       </main>
 
       {/* Info Toast (insufficient points) */}

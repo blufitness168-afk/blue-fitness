@@ -220,6 +220,7 @@ export interface RedemptionRecord {
   pointsSpent: number;
   status: "PENDING" | "COMPLETED";
   redeemedAt: string; // ISO
+  completedAt?: string;
 }
 
 // ตัวอย่างรายการแลกที่รอหน้าร้านยืนยัน (seed) — รายการจริงจะถูกบันทึกจากหน้า member ผ่าน localStorage
