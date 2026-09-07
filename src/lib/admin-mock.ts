@@ -188,3 +188,96 @@ export const mockRecentSales: AdminSaleRow[] = [
     status: "APPROVED",
   },
 ];
+
+// ==============================================================================
+// 🎁 Reward Redemption (Admin Front Desk) — ระบบยืนยันการรับของรางวัลหน้าร้าน
+// ==============================================================================
+
+export interface AdminMemberLookup {
+  id: number;
+  memberCode: string; // ระบบสร้าง เช่น BLU-1001
+  cardNumber: string; // เลขบนบัตรแข็ง เช่น CARD-8899
+  fullName: string;
+  points: number;
+}
+
+export const mockAdminMembers: AdminMemberLookup[] = [
+  { id: 1, memberCode: "BLU-1001", cardNumber: "CARD-8899", fullName: "สมชาย ใจดี", points: 25 },
+  { id: 101, memberCode: "BLU-1012", cardNumber: "CARD-1188", fullName: "วิภาดา รักฟิต", points: 42 },
+  { id: 102, memberCode: "BLU-1015", cardNumber: "CARD-2299", fullName: "จักรพงษ์ สมบูรณ์", points: 18 },
+  { id: 103, memberCode: "BLU-1020", cardNumber: "CARD-3300", fullName: "ธีรภัทร ใจกล้า", points: 55 },
+  { id: 104, memberCode: "BLU-1025", cardNumber: "CARD-4411", fullName: "กัลยา ศรีสุข", points: 63 },
+  { id: 105, memberCode: "BLU-1019", cardNumber: "CARD-5522", fullName: "ธนวัฒน์ พึ่งบุญ", points: 31 },
+];
+
+export interface RedemptionRecord {
+  id: string;
+  rewardCode: string; // เช่น BLU-RW-2-XXXXXX (ได้จากหน้า member ตอนกดแลก)
+  rewardId: number;
+  rewardTitle: string;
+  memberCode: string;
+  memberName: string;
+  pointsSpent: number;
+  status: "PENDING" | "COMPLETED";
+  redeemedAt: string; // ISO
+}
+
+// ตัวอย่างรายการแลกที่รอหน้าร้านยืนยัน (seed) — รายการจริงจะถูกบันทึกจากหน้า member ผ่าน localStorage
+const SEED_REDEMPTIONS: RedemptionRecord[] = [
+  {
+    id: "seed-1",
+    rewardCode: "BLU-RW-2-DEMO01",
+    rewardId: 2,
+    rewardTitle: "ผ้าขนหนูออกกำลังกาย Blu Fitness",
+    memberCode: "BLU-1012",
+    memberName: "วิภาดา รักฟิต",
+    pointsSpent: 30,
+    status: "PENDING",
+    redeemedAt: "2026-09-05T09:30:00Z",
+  },
+  {
+    id: "seed-2",
+    rewardCode: "BLU-RW-3-DEMO02",
+    rewardId: 3,
+    rewardTitle: "เสื้อยืด Blu Fitness Limited Edition",
+    memberCode: "BLU-1020",
+    memberName: "ธีรภัทร ใจกล้า",
+    pointsSpent: 60,
+    status: "PENDING",
+    redeemedAt: "2026-09-05T08:15:00Z",
+  },
+];
+
+/** อ่านรายการแลกทั้งหมด (seed + รายการจริงจาก localStorage) */
+export function getRedemptions(): RedemptionRecord[] {
+  let stored: RedemptionRecord[] = [];
+  try {
+    stored = JSON.parse(localStorage.getItem("blu_redemptions") || "[]");
+  } catch {
+    stored = [];
+  }
+
+  const merged = [...stored];
+  for (const seed of SEED_REDEMPTIONS) {
+    if (!merged.some((m) => m.rewardCode === seed.rewardCode)) {
+      merged.unshift(seed);
+    }
+  }
+  return merged;
+}
+
+/** บันทึกรายการแลกกลับลง localStorage (เฉพาะรายการจริง ไม่รวม seed) */
+export function saveRedemptions(records: RedemptionRecord[]) {
+  try {
+    localStorage.setItem("blu_redemptions", JSON.stringify(records));
+  } catch {}
+}
+
+/** ค้นหาสมาชิกด้วย member_code หรือ card_number (ใช้ได้ทั้งสองแบบ) */
+export function findMemberByAnyCode(query: string): AdminMemberLookup | undefined {
+  const norm = query.trim().toUpperCase();
+  if (!norm) return undefined;
+  return mockAdminMembers.find(
+    (m) => m.memberCode.toUpperCase() === norm || m.cardNumber.toUpperCase() === norm
+  );
+}

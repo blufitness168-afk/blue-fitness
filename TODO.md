@@ -1,9 +1,11 @@
-# 📋 MASTER TODO: Blu Fitness (อัปเดตตาม Meeting ล่าสุด 01/09/2026)
+# 📋 MASTER TODO: Blu Fitness (อัปเดตตาม Meeting ล่าสุด 01/09/2026 + Sprint หน้าฝั่ง Admin)
 
 เอกสารวางแผนและติดตามสถานะการพัฒนา: **ไล่ทำตามลำดับ Requirement จากการประชุมล่าสุด พร้อมเตรียมต่อยอดสู่ระบบจริง**
 
-> 📌 **สถานะปัจจุบัน (ณ วันที่ 01 ก.ย. 2026):**
-> อัปเดต Requirement จากที่ประชุมล่าสุดเรียบร้อย พร้อมเริ่มดำเนินการจากข้อ 1 (ปรับธีมสี) เป็นต้นไป
+> 📌 **สถานะปัจจุบัน (อัปเดต 05 ก.ย. 2026):**
+> — เสร็จ Thème ต, หน้าแพ็กเกจ, ฟอร์มสมัคร, โค้ดส่วนลด (ส่วนหน้า)
+> — เสร็จหน้า **Reward Shop ฝั่งสมาชิก** (ข้อ 5.1) + **Admin Dashboard** (ข้อ 6.1) + **Navbar ตัวเดียวกัน** + **การเข้าสู่หน้า Admin แบบ B (Admin เป็น Member + Dropdown)**
+> — เหลือ: ระบบยืนยันรางวัลหน้าร้าน, จุดสแกน Check-in, ตารางจัดการสมาชิก, เชื่อมต่อ Backend จริง
 
 ---
 
@@ -61,9 +63,11 @@
 ---
 
 ### 🎁 5. ระบบแลกของรางวัล (Reward Redemption System)
-- [ ] **5.1 หน้าแลกของรางวัลฝั่งสมาชิก (`src/app/member/rewards/page.tsx`):**
-  - [ ] แสดงแต้มสะสมปัจจุบัน
-  - [ ] รายการของรางวัล (รูป, ชื่อ, แต้มที่ต้องใช้) พร้อมปุ่มกดรับสิทธิ์
+- [x] **5.1 หน้าแลกของรางวัลฝั่งสมาชิก (`src/app/member/rewards/page.tsx`):**
+  - [x] แสดงแต้มสะสมปัจจุบัน (Points Card สไตล์ Navy & Gold)
+  - [x] รายการของรางวัล (รูปจาก Unsplash placeholder, ชื่อ, แต้มที่ต้องใช้) พร้อมปุ่มกดรับสิทธิ์
+  - [x] Grid 2 การ์ด/แถว, สถานะปุ่ม (พอ/ไม่พอ/หมด/ใช้แล้ว), Success Modal + รหัสยืนยัน, Toast แจ้งเตือน
+  - [x] ลิงก์จากหน้า "Redeem Rewards" ในหน้าบัตรสมาชิก + ปุ่ม Gift ใน Navbar
 - [ ] **5.2 ระบบยืนยันการรับของรางวัลหน้าร้านฝั่งแอดมิน (`src/app/admin/rewards/`):**
   - [ ] ฟอร์ม/หน้าสำหรับค้นหาสมาชิกและกดยืนยันการตัดแต้มเพื่อมอบของรางวัล
   - [ ] ระบบจัดการรายการของรางวัล (Admin CMS: เพิ่ม/ลบ/แก้ไขรางวัลและแต้ม)
@@ -71,8 +75,17 @@
 ---
 
 ### 🖥️ 6. ระบบผู้ดูแล & สแกน Check-in หน้าร้าน (Admin Dashboard & Front Desk)
-- [ ] **6.1 แดชบอร์ดสรุปภาพรวม (`src/app/admin/page.tsx`):**
-  - [ ] KPI Cards: จำนวนสมาชิก, เช็กอินวันนี้, ยอดขาย, สมาชิกใกล้หมดอายุ
+- [x] **6.1 แดชบอร์ดสรุปภาพรวม (`src/app/admin/page.tsx`):**
+  - [x] Admin Layout พร้อม Sidebar น้ำเงินเข้ม + Mobile Hamburger (`src/app/admin/layout.tsx`)
+  - [x] KPI Cards: จำนวนสมาชิก, เช็กอินวันนี้, ยอดขาย, สมาชิกใกล้หมดอายุ
+  - [x] รายการสมาชิกใกล้หมดอายุ, เช็คอินวันนี้, ตารางยอดขาย/ชำระเงินล่าสุด
+  - [x] Mock Data แยก (`src/lib/admin-mock.ts`)
+  - [x] การเข้าสู่หน้า Admin แบบ B: Admin เป็น Member ปกติ มี `role: ADMIN` + ปุ่ม "Admin Panel" ใน Navbar Dropdown (ลบหน้า login admin แยกออก)
+- [ ] **6.1b หน้าเมนู Admin ที่ยังว่าง (สร้างต่อจาก Dashboard):**
+  - [ ] `/admin/members` — ตารางจัดการข้อมูลสมาชิก
+  - [ ] `/admin/checkin` — จุดสแกน Check-in หน้าร้าน
+  - [ ] `/admin/rewards` — ระบบยืนยัน/จัดการของรางวัล
+  - [ ] `/admin/promo-codes` — ระบบจัดการโค้ดส่วนลด
 - [ ] **6.2 จุดสแกน Check-in หน้าร้าน (รองรับกล้อง + เครื่องสแกน 4600s 2D USB):**
   - [ ] ระบบสแกน QR และ Time Slot Guard (เตือนสีส้มหากหลัง 14:00 สำหรับ Off-Peak)
   - [ ] บันทึกเวลาและเพิ่มแต้มสะสมอัตโนมัติ (+1 แต้ม/วัน)
@@ -100,3 +113,18 @@
 - [ ] โอนย้ายโปรเจกต์ Vercel สู่บัญชีลูกค้า (`blufitness168@gmail.com`)
 - [ ] ล้าง Mock Data ในฐานข้อมูล Neon
 - [ ] ติดตั้ง Rich Menu บน LINE OA (`@816hbkyl`)
+
+---
+
+## 🧹 งานเสริม / Refactor ที่ทำแล้ว (UI & Infrastructure)
+
+### 🏗️ Navbar ตัวเดียวกัน (Shared Component)
+- [x] สร้าง `src/components/Navbar.tsx` ใช้ร่วมกันหน้าแรก / หน้า member / หน้า reward
+- [x] เพิ่มปุ่ม **Reward (Gift)** ข้าง LanguageToggle → `/member/rewards`
+- [x] เพิ่มเมนู **Admin Panel** ใน dropdown เฉพาะบัญชี `role: ADMIN`
+- [x] เพิ่ม translation keys: `nav.rewards`, `nav.admin_panel`
+
+### 🛠️ อื่น ๆ
+- [x] เพิ่ม `images.unsplash.com` เข้า `next.config.ts` `remotePatterns` (รองรับรูป placeholder จาก Unsplash)
+- [x] แก้ UI Admin Dashboard responsive (grid KPI, sidebar layout `lg:ml-64`, icon fixes)
+- [x] เพิ่ม `role` field ใน `MemberProfile` (mock-data) และ `NavbarMember`

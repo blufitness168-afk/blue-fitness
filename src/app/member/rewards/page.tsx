@@ -54,6 +54,24 @@ export default function RewardsPage() {
       setMember((prev) => (prev ? { ...prev, points: Math.max(0, prev.points - reward.pointCost) } : prev));
       setRedeemed((prev) => ({ ...prev, [reward.id]: true }));
       setRedeeming((prev) => ({ ...prev, [reward.id]: false }));
+
+      // Persist redemption request so admin can verify at the counter
+      try {
+        const existing = JSON.parse(localStorage.getItem("blu_redemptions") || "[]");
+        existing.unshift({
+          id: code,
+          rewardCode: code,
+          rewardId: reward.id,
+          rewardTitle: reward.title,
+          memberCode: member.memberCode,
+          memberName: member.fullName,
+          pointsSpent: reward.pointCost,
+          status: "PENDING",
+          redeemedAt: new Date().toISOString(),
+        });
+        localStorage.setItem("blu_redemptions", JSON.stringify(existing));
+      } catch (e) {}
+
       setSuccessModal(reward);
     }, 900);
   };
