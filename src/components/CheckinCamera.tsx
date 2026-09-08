@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { Html5Qrcode } from "html5-qrcode";
 import { Camera, CameraOff, Loader2, QrCode } from "lucide-react";
 
 interface CheckinCameraProps {
   onScan: (code: string) => void;
+  paused?: boolean;
 }
 
 type CameraSession = {
@@ -64,20 +65,22 @@ function cameraError(error: unknown) {
   return "ไม่สามารถเปิดกล้องได้ กรุณาตรวจสอบสิทธิ์กล้องและลองใหม่อีกครั้ง";
 }
 
-export default function CheckinCamera({ onScan }: CheckinCameraProps) {
+export default function CheckinCamera({ onScan, paused = false }: CheckinCameraProps) {
   const id = useId();
   const readerId = `checkin-camera-${id.replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const containerRef = useRef<HTMLDivElement>(null);
   const callbackRef = useRef(onScan);
+  const pausedRef = useRef(paused);
   const sessionRef = useRef<CameraSession | null>(null);
   const mountedRef = useRef(false);
   const recentCodes = useRef(new Map<string, number>());
   const [status, setStatus] = useState<"idle" | "starting" | "scanning" | "stopping">("idle");
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     callbackRef.current = onScan;
-  }, [onScan]);
+    pausedRef.current = paused;
+  }, [onScan, paused]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -96,7 +99,7 @@ export default function CheckinCamera({ onScan }: CheckinCameraProps) {
 
   async function startCamera() {
     const container = containerRef.current;
-    if (!container || sessionRef.current || !mountedRef.current) return;
+    if (!container || sessionRef.current || !mountedRef.current || pausedRef.current) return;
     setError(null);
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       setError("เบราว์เซอร์นี้ไม่รองรับกล้อง หรือการเชื่อมต่อไม่ปลอดภัย กรุณาใช้ HTTPS หรือ localhost");
@@ -120,7 +123,7 @@ export default function CheckinCamera({ onScan }: CheckinCameraProps) {
           { facingMode: "environment" },
           { fps: 10 },
           (code) => {
-            if (session.cancelled || !mountedRef.current) return;
+            if (session.cancelled || !mountedRef.current || pausedRef.current) return;
             const now = performance.now();
             for (const [value, time] of recentCodes.current) {
               if (now - time >= 3000) recentCodes.current.delete(value);
@@ -187,14 +190,14 @@ export default function CheckinCamera({ onScan }: CheckinCameraProps) {
       <p role="status" aria-live="polite" className="mt-3 text-sm text-sky-200">
         {status === "idle" && "กล้องจะเปิดเมื่อคุณกดปุ่มเท่านั้น"}
         {status === "starting" && "กำลังเปิดกล้อง กรุณาอนุญาตการเข้าถึงกล้อง"}
-        {status === "scanning" && "พร้อมสแกน กรุณาถือโค้ดให้นิ่งและมีแสงเพียงพอ"}
+        {status === "scanning" && (paused ? "พักรับสแกนระหว่างตรวจสอบ/บันทึก • กล้องยังเปิดอยู่ แต่ไม่รับรหัส" : "พร้อมสแกน กรุณาถือโค้ดให้นิ่งและมีแสงเพียงพอ")}
         {status === "stopping" && "กำลังปิดกล้อง หากมีหน้าต่างขอสิทธิ์ค้างอยู่ กรุณาปิดหน้าต่างนั้น"}
       </p>
       {error && <p role="alert" className="mt-3 text-sm text-yellow-300">{error}</p>}
       <button
         type="button"
         onClick={status === "idle" ? startCamera : stopCamera}
-        disabled={status === "stopping"}
+        disabled={status === "stopping" || (status === "idle" && paused)}
         aria-controls={readerId}
         className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-yellow-400 px-4 py-3 font-bold text-blu-dark transition hover:bg-yellow-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sky-400 disabled:cursor-wait disabled:opacity-60"
       >

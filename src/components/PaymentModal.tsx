@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef } from "react";
+import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
@@ -14,9 +15,10 @@ import {
   ShieldCheck,
   Loader2,
   Tag,
-  Sparkles,
+
 } from "lucide-react";
-import { MockPackage, PromoCode, validatePromoCode } from "@/lib/mock-data";
+import { defaultMockMember, type MockPackage } from "@/lib/mock-data";
+import { previewMockPayment, purchaseMockPackage, resolveBenefitMember, type MockPayment } from "@/lib/benefits";
 import { generatePromptPayPayload } from "@/lib/promptpay";
 import { useLanguage } from "@/context/LanguageContext";
 
@@ -30,6 +32,18 @@ interface PaymentModalProps {
 }
 
 export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps) {
+  if (!isOpen || !pkg) return null;
+  return <PaymentForm key={pkg.id} pkg={pkg} onClose={onClose} />;
+}
+
+function currentMemberCode(): string {
+  const raw = localStorage.getItem("blu_member");
+  const member = raw === null ? defaultMockMember : JSON.parse(raw);
+  if (!member || typeof member.memberCode !== "string") throw new Error("ข้อมูลสมาชิกไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่");
+  return resolveBenefitMember(member.memberCode).memberCode;
+}
+
+function PaymentForm({ pkg, onClose }: { pkg: MockPackage; onClose: () => void }) {
   const { t, lang } = useLanguage();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -42,38 +56,37 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
 
   // 🎟️ Promo Code States
   const [promoInput, setPromoInput] = useState("");
-  const [appliedPromo, setAppliedPromo] = useState<PromoCode | null>(null);
+  const [appliedPromo, setAppliedPromo] = useState<MockPayment | null>(null);
+  const writing = useRef(false);
+  const [paymentError, setPaymentError] = useState("");
   const [discountAmount, setDiscountAmount] = useState(0);
   const [promoError, setPromoError] = useState("");
-
-  if (!isOpen || !pkg) return null;
 
   // Final Price Calculation
   const finalAmount = Math.max(0, pkg.price - discountAmount);
 
   const handleCopyPromptPay = () => {
-    navigator.clipboard.writeText(PROMPTPAY_NUMBER);
-    setCopiedPromptPay(true);
-    setTimeout(() => setCopiedPromptPay(false), 2000);
+    void navigator.clipboard.writeText(PROMPTPAY_NUMBER).then(() => setCopiedPromptPay(true)).catch(() => setPaymentError("คัดลอกไม่ได้ กรุณาตรวจสอบสิทธิ์ Clipboard"));
   };
 
   const handleApplyPromo = (codeToApply?: string) => {
     const code = codeToApply || promoInput;
-    if (!code.trim()) return;
-
+    if (!code.trim() || writing.current) return;
     setPromoError("");
-    const result = validatePromoCode(code, pkg.price);
-
-    if (result.valid && result.promo) {
-      setAppliedPromo(result.promo);
-      setDiscountAmount(result.discountAmount);
-      setPromoInput(result.promo.code);
-    } else {
-      setPromoError(lang === "en" ? (result.errorMessageEn || "Invalid promo code") : (result.errorMessage || "โค้ดส่วนลดไม่ถูกต้อง"));
+    try {
+      const quote = previewMockPayment(code, currentMemberCode(), pkg.price);
+      setAppliedPromo(quote);
+      setDiscountAmount(quote.discount);
+      setPromoInput(quote.grantCode);
+    } catch (error) {
+      setAppliedPromo(null);
+      setDiscountAmount(0);
+      setPromoError(error instanceof Error ? error.message : "ตรวจสอบส่วนลดไม่ได้");
     }
   };
 
   const handleRemovePromo = () => {
+    if (writing.current) return;
     setAppliedPromo(null);
     setDiscountAmount(0);
     setPromoInput("");
@@ -82,7 +95,11 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
+    if (file && !writing.current) {
+      if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
+        setPaymentError("ใช้ไฟล์รูปภาพขนาดไม่เกิน 5 MB");
+        return;
+      }
       setSlipFile(file);
       const reader = new FileReader();
       reader.onload = () => {
@@ -93,64 +110,20 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
   };
 
   const handleVerifySlip = async () => {
-    if (!slipFile || !pkg) return;
-
+    if ((finalAmount > 0 && !slipFile) || writing.current || verificationSuccess) return;
+    writing.current = true;
     setIsVerifying(true);
-
+    setPaymentError("");
     try {
-      // Simulate verification delay
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      // Confetti burst
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ["#ffd700", "#0c3756", "#3a728e", "#5c93aa"],
-      });
-
+      await purchaseMockPackage(currentMemberCode(), pkg, appliedPromo);
       setVerificationSuccess(true);
-      setIsVerifying(false);
-
-      // Save package to localStorage
-      try {
-        const bonusDays = pkg.bonusDays || 0;
-        const totalAddDays = pkg.durationDays + bonusDays;
-
-        const now = new Date();
-        now.setDate(now.getDate() + totalAddDays);
-
-        const dayNames = [
-          "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
-          "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."
-        ];
-        const newExpireStr = `${now.getDate()} ${dayNames[now.getMonth()]} ${now.getFullYear() + 543}`;
-
-        const updatedPackage = {
-          id: `PKG-${Date.now()}`,
-          name: pkg.name,
-          timeSlot: pkg.timeSlot,
-          startDate: "วันนี้",
-          expireDate: newExpireStr,
-          totalDays: totalAddDays,
-          usedDays: 0,
-          friendCouponsLeft: 5 + (pkg.friendCoupons || 0),
-          paidAmount: finalAmount,
-          promoApplied: appliedPromo?.code || null,
-          status: "active",
-        };
-
-        localStorage.setItem("blu_active_package", JSON.stringify(updatedPackage));
-      } catch (e) {}
-
-      // Auto redirect to /member
-      setTimeout(() => {
-        onClose();
-        router.push("/member");
-      }, 2500);
+      // Cosmetic feedback must never turn a committed purchase into an apparent failure.
+      try { void confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } }); } catch { /* Animation is optional. */ }
     } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : "บันทึกไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      writing.current = false;
       setIsVerifying(false);
-      alert("เกิดข้อผิดพลาดในการตรวจสอบสลิป กรุณาลองใหม่อีกครั้ง");
     }
   };
 
@@ -170,6 +143,7 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
           </div>
 
           <button
+            disabled={isVerifying}
             onClick={onClose}
             className="w-8 h-8 rounded-full bg-blu-ice hover:bg-blu-sky/40 flex items-center justify-center text-blu-steel transition-colors cursor-pointer"
           >
@@ -177,6 +151,8 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
           </button>
         </div>
 
+        <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900">โหมดทดลองเท่านั้น — ห้ามโอนเงินจริง ระบบยังไม่ตรวจ EasySlip รูปสลิปใช้ทดลอง UI และไม่ถูกอัปโหลด การยืนยันจะบันทึกแพ็กเกจ/ส่วนลดในเบราว์เซอร์นี้</p>
+        {paymentError && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{paymentError}</p>}
         {/* Success State */}
         {verificationSuccess ? (
           <div className="py-8 text-center space-y-3">
@@ -184,11 +160,12 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
               <CheckCircle2 className="w-10 h-10" />
             </div>
             <h4 className="text-xl font-black text-blu-dark">
-              {t("pay.success_title")}
+              บันทึกแพ็กเกจทดลองแล้ว
             </h4>
             <p className="text-xs text-blu-steel max-w-xs mx-auto">
-              {t("pay.success_desc")}
+              ต่ออายุและบันทึกการใช้ส่วนลดเรียบร้อย ไม่มีการตรวจสลิปหรือรับเงินจริง
             </p>
+            <button type="button" className="btn-gold rounded-xl px-5 py-3" onClick={() => { onClose(); router.push("/member"); }}>ดูบัตรสมาชิก</button>
           </div>
         ) : (
           <>
@@ -252,7 +229,7 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
                 <div className="flex justify-between items-center text-emerald-600 font-bold bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/80">
                   <span className="flex items-center gap-1">
                     <Tag className="w-3 h-3" />
-                    <span>{t("pay.promo_discount_label")} ({appliedPromo.code})</span>
+                    <span className="break-all">{t("pay.promo_discount_label")} ({appliedPromo.grantCode})</span>
                   </span>
                   <span>-฿{discountAmount.toLocaleString()}</span>
                 </div>
@@ -277,13 +254,13 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
               {appliedPromo ? (
                 <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-3 py-2 text-xs">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-300">
-                      {appliedPromo.code}
+                    <span className="break-all font-mono font-bold text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-300">
+                      {appliedPromo.grantCode}
                     </span>
                     <span className="text-emerald-700 font-semibold">
                       {lang === "en"
-                        ? `Saved ฿${discountAmount.toLocaleString()}${appliedPromo.discountType === "PERCENT" && appliedPromo.maxDiscount ? ` (Capped at ฿${appliedPromo.maxDiscount})` : ""}`
-                        : `ลดแล้ว ฿${discountAmount.toLocaleString()}${appliedPromo.discountType === "PERCENT" && appliedPromo.maxDiscount ? ` (สูงสุดไม่เกิน ฿${appliedPromo.maxDiscount})` : ""}`}
+                        ? `Saved ฿${discountAmount.toLocaleString()}`
+                        : `ลดแล้ว ฿${discountAmount.toLocaleString()}`}
                     </span>
                   </div>
                   <button
@@ -325,29 +302,7 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
                 </p>
               )}
 
-              {/* Demo Hint Badges */}
-              {!appliedPromo && (
-                <div className="pt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
-                  <span className="text-blu-steel flex items-center gap-0.5">
-                    <Sparkles className="w-3 h-3 text-blu-yellow" />
-                    <span>{lang === "en" ? "Try:" : "ลองใช้:"}</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleApplyPromo("BLU100")}
-                    className="bg-white hover:bg-blu-ice border border-blu-sky/60 text-blu-slate font-mono font-bold px-2 py-0.5 rounded cursor-pointer transition-all"
-                  >
-                    BLU100 (-100฿)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleApplyPromo("FITNESS10")}
-                    className="bg-white hover:bg-blu-ice border border-blu-sky/60 text-blu-slate font-mono font-bold px-2 py-0.5 rounded cursor-pointer transition-all"
-                  >
-                    FITNESS10 (-10%)
-                  </button>
-                </div>
-              )}
+              <p className="text-xs text-blu-steel">ใช้รหัส BLU-PC-… ที่แจกให้บัญชีนี้เท่านั้น ไม่รับโค้ดตัวอย่างเดิม <Link href="/member/benefits" className="underline">ดูกระเป๋าส่วนลด</Link></p>
             </div>
 
             {/* 3. Dynamic PromptPay QR Box (Reflects finalAmount) */}
@@ -452,10 +407,10 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
               {/* Submit Action Button */}
               <button
                 type="button"
-                disabled={!slipFile || isVerifying}
+                disabled={(finalAmount > 0 && !slipFile) || isVerifying}
                 onClick={handleVerifySlip}
                 className={`w-full py-3.5 px-6 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all ${
-                  slipFile && !isVerifying
+                  (slipFile || finalAmount === 0) && !isVerifying
                     ? "btn-gold cursor-pointer shadow-md hover:shadow-lg"
                     : "bg-blu-sky/40 text-blu-steel/60 cursor-not-allowed"
                 }`}
@@ -463,12 +418,12 @@ export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps
                 {isVerifying ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin text-blu-dark" />
-                    <span>{t("pay.verifying")}</span>
+                    <span>กำลังบันทึกข้อมูลทดลอง…</span>
                   </>
                 ) : (
                   <>
                     <ShieldCheck className="w-4 h-4" />
-                    <span>{t("pay.btn_confirm")}</span>
+                    <span>ยืนยันซื้อแพ็กเกจทดลอง{finalAmount === 0 ? " (0 บาท ไม่ต้องแนบสลิป)" : ""}</span>
                   </>
                 )}
               </button>

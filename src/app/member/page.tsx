@@ -25,6 +25,7 @@ import {
 import Navbar from "@/components/Navbar";
 import { useLanguage } from "@/context/LanguageContext";
 import { MemberProfile, defaultMockMember } from "@/lib/mock-data";
+import { BENEFITS_EVENT, BENEFITS_KEY, readMembership, type MockMembership } from "@/lib/benefits";
 
 export default function MemberDashboardPage() {
   const { t, lang } = useLanguage();
@@ -42,57 +43,57 @@ export default function MemberDashboardPage() {
     setTimeout(() => setCopiedCode(null), 2000);
   };
 
-  // 🛡️ Live Anti-Fraud Countdown Timer (Ticks every 1s)
-  const [timeLeft, setTimeLeft] = useState<{
-    days: number;
-    hours: number;
-    minutes: number;
-    seconds: number;
-  }>({ days: 45, hours: 14, minutes: 32, seconds: 45 });
+  const [membership, setMembership] = useState<MockMembership | null>(null);
+  const [storageError, setStorageError] = useState("");
+  const [now, setNow] = useState(0);
 
   useEffect(() => {
-    // 45 days, 14 hours, 32 mins, 45 seconds from now
-    const target = new Date();
-    target.setDate(target.getDate() + 45);
-    target.setHours(target.getHours() + 14);
-    target.setMinutes(target.getMinutes() + 32);
-    target.setSeconds(target.getSeconds() + 45);
-
-    const timer = setInterval(() => {
-      const now = new Date();
-      const diff = target.getTime() - now.getTime();
-
-      if (diff <= 0) {
-        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
-        return;
+    const refresh = () => {
+      try {
+        const saved = localStorage.getItem("blu_member");
+        const profile = saved === null ? defaultMockMember : JSON.parse(saved);
+        if (!profile || typeof profile.memberCode !== "string" || !/^BLU-\d+$/.test(profile.memberCode) || typeof profile.fullName !== "string") throw new Error("ข้อมูลโปรไฟล์สมาชิกไม่ถูกต้อง กรุณาตรวจสอบ blu_member");
+        const current = readMembership(profile.memberCode);
+        setMember(profile);
+        setMembership(current);
+        setNow(Date.now());
+        setStorageError("");
+      } catch (cause) {
+        setMembership(null);
+        setStorageError(cause instanceof Error ? cause.message : "อ่านข้อมูลสมาชิกไม่ได้");
       }
-
-      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-      const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
-      const minutes = Math.floor((diff / (1000 * 60)) % 60);
-      const seconds = Math.floor((diff / 1000) % 60);
-
-      setTimeLeft({ days, hours, minutes, seconds });
-    }, 1000);
-
-    return () => clearInterval(timer);
+    };
+    // Hydrate browser-only mock storage; never seed membership from the legacy card template.
+    refresh();
+    const sync = (event: StorageEvent) => {
+      if (event.key === BENEFITS_KEY || event.key === "blu_member" || event.key === null) refresh();
+    };
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    window.addEventListener("storage", sync);
+    window.addEventListener(BENEFITS_EVENT, refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("storage", sync);
+      window.removeEventListener(BENEFITS_EVENT, refresh);
+    };
   }, []);
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("blu_member");
-      if (saved) {
-        setMember(JSON.parse(saved));
-      } else {
-        setMember(defaultMockMember);
-      }
-    } catch (e) { }
-  }, []);
+  const remaining = membership ? Math.max(0, Date.parse(membership.expiresAt) - now) : 0;
+  const timeLeft = membership ? {
+    days: Math.floor(remaining / 86400000),
+    hours: Math.floor(remaining / 3600000) % 24,
+    minutes: Math.floor(remaining / 60000) % 60,
+    seconds: Math.floor(remaining / 1000) % 60,
+  } : { days: 45, hours: 14, minutes: 32, seconds: 45 };
 
   const handleLogout = () => {
     localStorage.removeItem("blu_member");
     router.push("/");
   };
+
+  if (storageError) {
+    return <main className="mx-auto max-w-lg space-y-4 px-4 py-24 text-blu-dark"><p role="alert">{storageError}</p><p>ไม่แสดงแพ็กเกจตัวอย่างแทนข้อมูลที่อ่านไม่สำเร็จ</p><button className="underline" onClick={() => window.location.reload()}>โหลดใหม่</button><Link className="block underline" href="/">กลับหน้าแรก</Link></main>;
+  }
 
   if (!member) {
     return (
@@ -102,14 +103,19 @@ export default function MemberDashboardPage() {
     );
   }
 
-  // Active package details
-  const activePackage = {
-    name: "BLU 07:00-22:00 (ราย 3 เดือน)",
+  const daysLeft = Math.ceil(remaining / 86400000);
+  const activePackage = membership ? {
+    ...membership,
+    usedDays: Math.max(0, Math.min(membership.totalDays, membership.totalDays - daysLeft)),
+    daysLeft,
+    expireDate: new Date(membership.expiresAt).toLocaleString(lang === "en" ? "en-GB" : "th-TH", { timeZone: "Asia/Bangkok" }),
+  } : {
+    name: lang === "en" ? "BLU 07:00-22:00 (3 Months Pass)" : "BLU 07:00-22:00 (ราย 3 เดือน)",
     timeSlot: "07:00 - 22:00 น.",
     usedDays: 45,
     totalDays: 90,
     daysLeft: 45,
-    expireDate: "12 ต.ค. 2026",
+    expireDate: lang === "en" ? "12 Oct 2026" : "12 ต.ค. 2026",
     friendCouponsLeft: 5,
   };
 
@@ -124,6 +130,14 @@ export default function MemberDashboardPage() {
           MAIN CONTAINER
       ═══════════════════════════════════════════════ */}
       <div className="max-w-lg mx-auto px-4 pt-24 space-y-6">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm" role="status">
+          {membership
+            ? (remaining > 0 ? "แพ็กเกจ mock ที่บันทึกในเบราว์เซอร์นี้ • เวลาคงเหลืออิงวันหมดอายุที่บันทึก" : "แพ็กเกจ mock หมดอายุแล้ว")
+            : "ยังไม่มีแพ็กเกจที่บันทึก — บัตร แพ็กเกจ และเวลาคงเหลือด้านล่างเป็นแม่แบบ mock เดิม ไม่ใช่สิทธิ์เข้าใช้ และไม่ใช้เป็นฐานเพิ่มวัน"}
+          <p>ข้อมูลทดลองเท่านั้น ไม่มีการยืนยันสิทธิ์จาก backend</p>
+          <Link className="mr-4 underline" href="/#packages">ซื้อ / ต่ออายุแพ็กเกจ mock</Link>
+          <Link className="underline" href="/member/benefits">กระเป๋าสิทธิ์ที่ได้รับแจก</Link>
+        </div>
 
         {/* ═══════════════════════════════════════════════
             1. REALISTIC BLU FITNESS PHYSICAL CARD REPLICA
@@ -305,6 +319,8 @@ export default function MemberDashboardPage() {
             </Link>
           </div>
         </section>
+
+        <p className="rounded-xl bg-amber-50 p-3 text-xs text-blu-dark">คูปองและโค้ดบนแม่แบบด้านล่างเป็นตัวอย่างเดิม ไม่ใช่สิทธิ์ที่ได้รับแจกและใช้ซื้อแพ็กเกจไม่ได้ — <Link className="underline" href="/member/benefits">ดูสิทธิ์ที่ได้รับแจกในกระเป๋า</Link></p>
 
         {/* ═══════════════════════════════════════════════
             3. LUXURY NAVY & GOLD FRIEND PASS TICKET (No Redirect)
@@ -669,8 +685,12 @@ export default function MemberDashboardPage() {
                 <CreditCard className="w-3.5 h-3.5 text-blu-steel/70" /> {t("details.pkg_current")}
               </span>
               <span className="font-bold text-blu-dark text-right">
-                {lang === "en" ? "BLU 07:00-22:00 (3 Months Pass)" : activePackage.name}
+                {activePackage.name}
               </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>{lang === "en" ? "Access hours (mock)" : "ช่วงเวลาเข้าใช้ (mock)"}</span>
+              <span className="font-bold text-blu-dark">{activePackage.timeSlot}</span>
             </div>
 
             <div className="flex items-center justify-between">
@@ -678,7 +698,7 @@ export default function MemberDashboardPage() {
                 <Clock className="w-3.5 h-3.5 text-blu-steel/70" /> {t("details.expire_date")}
               </span>
               <span className="font-bold text-blu-slate">
-                {lang === "en" ? "12 Oct 2026" : activePackage.expireDate}
+                {activePackage.expireDate}
               </span>
             </div>
 
@@ -760,7 +780,7 @@ export default function MemberDashboardPage() {
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
               <span className="font-mono">
-                LIVE: {timeLeft.days}d {String(timeLeft.hours).padStart(2, "0")}:{String(timeLeft.minutes).padStart(2, "0")}:{String(timeLeft.seconds).padStart(2, "0")}
+                {membership ? "MOCK LIVE" : "TEMPLATE"}: {timeLeft.days}d {String(timeLeft.hours).padStart(2, "0")}:{String(timeLeft.minutes).padStart(2, "0")}:{String(timeLeft.seconds).padStart(2, "0")}
               </span>
             </div>
 

@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { mockAdminMembers } from "./admin-mock";
+import { mockPackages, type MockPackage } from "./mock-data";
+
+const DAY_MS = 86400000;
 
 export const BENEFITS_KEY = "blu_benefits_mock_v1";
 export const BENEFITS_EVENT = "blu-benefits-updated";
@@ -15,6 +18,10 @@ const definitionSchema = z.object({
   if (d.amount < 1 || (d.kind === "PROMO" && d.discountType === "PERCENT" && d.amount > 100)) {
     ctx.addIssue({ code: "custom", message: "จำนวนสิทธิ์/ส่วนลดไม่ถูกต้อง (เปอร์เซ็นต์ไม่เกิน 100)" });
   }
+  // Old v1 values above this limit fail closed, including immutable issued terms.
+  if (d.kind === "COUPON" && d.benefit === "EXTRA_DAYS" && d.amount > 3650) {
+    ctx.addIssue({ code: "custom", message: "วันแถมต้องไม่เกิน 3650 วัน" });
+  }
 });
 export type BenefitDefinition = z.infer<typeof definitionSchema>;
 export type BenefitKind = BenefitDefinition["kind"];
@@ -25,7 +32,15 @@ const grantSchema = z.object({
   usedAt: date.optional(), paymentId: z.string().uuid().optional(), paidAmount: money.optional(),
 }).strict();
 export type BenefitGrant = z.infer<typeof grantSchema>;
+const membershipSchema = z.object({
+  memberCode: z.string().regex(/^BLU-\d+$/), expiresAt: date, startedAt: date,
+  name: z.string().trim().min(1).max(120), timeSlot: z.enum(["07:00-14:00", "07:00-22:00"]),
+  totalDays: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  friendCouponsLeft: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+}).strict().refine(m => Date.parse(m.expiresAt) > Date.parse(m.startedAt), "ช่วงอายุสมาชิกไม่ถูกต้อง");
+export type MockMembership = z.infer<typeof membershipSchema>;
 const stateSchema = z.object({
+  memberships: z.array(membershipSchema).default([]),
   version: z.literal(1), revision: z.number().int().nonnegative(), definitions: z.array(definitionSchema), grants: z.array(grantSchema),
   batches: z.array(z.object({ id: z.string().uuid(), definitionId: z.string().uuid(), mode: z.enum(["SELECTED", "ALL"]), memberCodes: z.array(z.string()), createdAt: date }).strict()),
 }).strict();
@@ -34,10 +49,10 @@ export type GrantPlan = { revision: number; batchId: string; definitionId: strin
 const fail = (message: string): never => { throw new Error(message); };
 function unique(values: string[]) { return new Set(values).size === values.length; }
 export function parseBenefits(raw: string | null): BenefitsState {
-  if (raw === null) return { version: 1, revision: 0, definitions: [], grants: [], batches: [] };
+  if (raw === null) return { version: 1, revision: 0, definitions: [], grants: [], batches: [], memberships: [] };
   try {
     const s = stateSchema.parse(JSON.parse(raw));
-    if (!unique(s.definitions.map(d => d.id)) || !unique(s.definitions.map(d => `${d.kind}:${d.code}`)) ||
+    if (!unique(s.memberships.map(m => m.memberCode)) || !unique(s.definitions.map(d => d.id)) || !unique(s.definitions.map(d => `${d.kind}:${d.code}`)) ||
       !unique(s.grants.map(g => g.id)) || !unique(s.grants.map(g => g.code)) || !unique(s.grants.map(g => `${g.definition.id}:${g.memberCode}`)) ||
       !unique(s.batches.map(b => b.id)) || !unique(s.grants.flatMap(g => g.paymentId ? [g.paymentId] : []))) throw Error();
     for (const d of s.definitions) {
@@ -80,7 +95,8 @@ async function writeBenefits<T>(operation: (state: BenefitsState, now: Date) => 
   });
 }
 export function newDefinition(kind: BenefitKind): BenefitDefinition {
-  return { id: crypto.randomUUID(), kind, name: "", code: "", active: true, expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(), quota: 100,
+  const bangkokDay = new Date(Date.now() + 30 * DAY_MS + 7 * 3600000).toISOString().slice(0, 10);
+  return { id: crypto.randomUUID(), kind, name: "", code: "", active: true, expiresAt: `${bangkokDay}T23:59:59+07:00`, quota: 100,
     discountType: "FIXED", amount: 1, minSpend: 0, benefit: "BRING_FRIEND", detail: kind === "PROMO" ? "ส่วนลดแพ็กเกจ (mock)" : "พาเพื่อนมาออกกำลังกาย (mock)" };
 }
 export async function saveDefinition(value: BenefitDefinition, expected: BenefitDefinition | null): Promise<void> {
@@ -156,12 +172,63 @@ function unusedGrant(s: BenefitsState, code: string, kind: BenefitKind, now: Dat
   return g;
 }
 export function previewCoupon(code: string, now = new Date()): BenefitGrant { return unusedGrant(readBenefits(), code, "COUPON", now); }
+/** EXTRA_DAYS extends an existing membership atomically. BRING_FRIEND only records use; it does not operate a physical gate. */
 export async function redeemCoupon(expected: BenefitGrant): Promise<void> {
   const snapshot = JSON.stringify(expected);
+  const code = expected.code;
   await writeBenefits((s, now) => {
-    const g = unusedGrant(s, expected.code, "COUPON", now);
+    const g = unusedGrant(s, code, "COUPON", now);
     if (JSON.stringify(g) !== snapshot) return fail("สิทธิ์เปลี่ยนแล้ว กรุณาสแกนใหม่");
+    if (g.definition.benefit === "EXTRA_DAYS") {
+      const membership = s.memberships.find(m => m.memberCode === g.memberCode);
+      if (!membership) return fail("ไม่พบข้อมูลสมาชิกแพ็กเกจสำหรับเพิ่มวัน กรุณาซื้อแพ็กเกจก่อน");
+      extendMembership(membership, g.definition.amount, now);
+    }
     g.status = "USED"; g.usedAt = now.toISOString();
+  });
+}
+/** Reads only the shared benefits state; never seeds membership from legacy/demo UI data. Unknown members return null; corrupt storage throws. */
+export function readMembership(memberCode: string): MockMembership | null {
+  return readBenefits().memberships.find(m => m.memberCode === memberCode) ?? null;
+}
+function extendMembership(membership: MockMembership, days: number, now: Date) {
+  membership.expiresAt = new Date(Math.max(now.getTime(), Date.parse(membership.expiresAt)) + days * DAY_MS).toISOString();
+  membership.totalDays += days;
+}
+export type MockPackagePurchase = Pick<MockPackage, "id" | "name" | "timeSlot" | "price" | "durationDays" | "bonusDays" | "friendCoupons">;
+
+/**
+ * Mock checkout: canonical active packages only; null means no promo (no public/legacy codes).
+ * Captures inputs before locking, re-quotes assigned promos under the benefits lock, then writes
+ * membership and promo consumption in one localStorage operation. Failure consumes neither.
+ * Days/coupons accumulate; original startedAt is retained and the latest package supplies name/slot.
+ * No-promo purchases are intentional renewals: callers must guard duplicate UI submissions.
+ */
+export async function purchaseMockPackage(memberCode: string, pkg: MockPackagePurchase, expected: MockPayment | null): Promise<void> {
+  const draft = { ...pkg };
+  const snapshot = expected === null ? null : { ...expected };
+  await writeBenefits((s, now) => {
+    if (resolveBenefitMember(memberCode).memberCode !== memberCode) return fail("กรุณาใช้รหัสสมาชิก BLU ที่ถูกต้อง");
+    const canonical = mockPackages.find(p => p.id === draft.id && p.isActive);
+    const keys = ["id", "name", "timeSlot", "price", "durationDays", "bonusDays", "friendCoupons"] as const;
+    if (!canonical || keys.some(key => draft[key] !== canonical[key])) return fail("แพ็กเกจเปลี่ยนหรือไม่ถูกต้อง กรุณาเลือกใหม่");
+    if (snapshot !== null) {
+      if (snapshot.memberCode !== memberCode || snapshot.subtotal !== canonical.price) return fail("ยอดชำระหรือสมาชิกไม่ตรงกับแพ็กเกจ");
+      const current = quote(s, snapshot.grantCode, memberCode, canonical.price, snapshot.paymentId, now);
+      if (JSON.stringify(current) !== JSON.stringify(snapshot) || s.grants.some(g => g.paymentId === snapshot.paymentId)) return fail("รายการชำระเปลี่ยนหรือบันทึกแล้ว กรุณาตรวจสอบใหม่");
+      const g = unusedGrant(s, snapshot.grantCode, "PROMO", now);
+      g.status = "USED"; g.usedAt = now.toISOString(); g.paymentId = snapshot.paymentId; g.paidAmount = current.total;
+    }
+    const days = canonical.durationDays + canonical.bonusDays;
+    const prior = s.memberships.find(m => m.memberCode === memberCode);
+    if (prior) {
+      extendMembership(prior, days, now);
+      prior.name = canonical.name; prior.timeSlot = canonical.timeSlot;
+      prior.friendCouponsLeft += canonical.friendCoupons;
+    } else {
+      s.memberships.push({ memberCode, startedAt: now.toISOString(), expiresAt: new Date(now.getTime() + days * DAY_MS).toISOString(),
+        name: canonical.name, timeSlot: canonical.timeSlot, totalDays: days, friendCouponsLeft: canonical.friendCoupons });
+    }
   });
 }
 export type MockPayment = { revision: number; grantCode: string; memberCode: string; subtotal: number; discount: number; total: number; paymentId: string };
@@ -175,6 +242,7 @@ function quote(s: BenefitsState, code: string, memberCode: string, subtotal: num
 export function previewMockPayment(code: string, memberCode: string, subtotal: number): MockPayment {
   return quote(readBenefits(), code, memberCode, subtotal, crypto.randomUUID(), new Date());
 }
+/** Legacy assigned-promo-only recording API. Package checkout must use purchaseMockPackage instead. */
 export async function completeMockPayment(expected: MockPayment): Promise<void> {
   const snapshot: MockPayment = { ...expected };
   await writeBenefits((s, now) => {

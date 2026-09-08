@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import CheckinCamera from "./CheckinCamera";
 
 export const panelClass = "rounded-2xl border border-blu-sky/50 bg-white p-5 space-y-4";
@@ -15,18 +15,44 @@ export default function AdminScanner({ label, disabled = false, onScan }: { labe
   const [camera, setCamera] = useState(false);
   const [code, setCode] = useState("");
   const last = useRef({ code: "", time: 0 });
-  function scan(value: string, source: "CAMERA" | "USB_MANUAL" = "USB_MANUAL") {
-    if (disabled) return;
+  const inputRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const restoreFocus = useRef(false);
+  const usbRequested = useRef(false);
+  const latest = useRef({ disabled, camera, onScan });
+  const processing = useRef(false);
+  useLayoutEffect(() => {
+    latest.current = { disabled, camera, onScan };
+    if (camera) return;
+    const active = document.activeElement;
+    if (disabled) {
+      if (active === inputRef.current || (active && formRef.current?.contains(active))) restoreFocus.current = true;
+    } else if (usbRequested.current) {
+      usbRequested.current = false;
+      restoreFocus.current = false;
+      inputRef.current?.focus();
+    } else if (restoreFocus.current) {
+      restoreFocus.current = false;
+      // Do not take focus away from another field the operator chose while paused.
+      if (active === document.body || (active && formRef.current?.contains(active))) inputRef.current?.focus();
+    }
+  }, [disabled, camera, onScan]);
+  async function scan(value: string, source: "CAMERA" | "USB_MANUAL" = "USB_MANUAL") {
+    const current = latest.current;
+    if (current.disabled || processing.current || (source === "CAMERA") !== current.camera) return;
     const normalized = value.trim().toUpperCase();
     if (!normalized || (last.current.code === normalized && Date.now() - last.current.time < 3000)) return;
     last.current = { code: normalized, time: Date.now() };
     setCode("");
-    void onScan(normalized, source);
+    processing.current = true;
+    try { await current.onScan(normalized, source); }
+    finally { processing.current = false; }
   }
   return <section className={panelClass}>
     <h2 className="font-bold">{label}</h2>
-    <div className="flex gap-2"><button type="button" className={buttonClass} disabled={disabled} aria-pressed={!camera} onClick={() => setCamera(false)}>USB / พิมพ์</button><button type="button" className={buttonClass} disabled={disabled} aria-pressed={camera} onClick={() => setCamera(true)}>กล้อง</button></div>
-    {disabled ? <p role="status">พักรับสแกนระหว่างตรวจสอบ/บันทึก</p> : camera ? <CheckinCamera onScan={value => scan(value, "CAMERA")} /> : <form className="flex gap-2" onSubmit={e => { e.preventDefault(); scan(code); }}><input aria-label={label} className={inputClass} autoComplete="off" maxLength={100} value={code} onChange={e => setCode(e.target.value)} placeholder="คลิกที่นี่ แล้วสแกนหรือพิมพ์รหัส" /><button className={buttonClass} disabled={!code.trim()}>ตรวจสอบ</button></form>}
+    <div className="flex gap-2"><button type="button" className={buttonClass} disabled={disabled} aria-pressed={!camera} onClick={() => { usbRequested.current = camera; setCamera(false); if (!camera) inputRef.current?.focus(); }}>USB / พิมพ์</button><button type="button" className={buttonClass} disabled={disabled} aria-pressed={camera} onClick={() => setCamera(true)}>กล้อง</button></div>
+    {disabled && <p role="status">พักรับสแกนระหว่างตรวจสอบ/บันทึก</p>}
+    {camera ? <CheckinCamera paused={disabled} onScan={value => { void scan(value, "CAMERA"); }} /> : <form ref={formRef} className="flex gap-2" onSubmit={e => { e.preventDefault(); void scan(code); }}><input ref={inputRef} aria-label={label} aria-disabled={disabled} readOnly={disabled} className={inputClass} autoComplete="off" maxLength={100} value={code} onChange={e => { if (!latest.current.disabled && !processing.current) setCode(e.target.value); }} placeholder="คลิกที่นี่ แล้วสแกนหรือพิมพ์รหัส" /><button className={buttonClass} disabled={disabled || !code.trim()}>ตรวจสอบ</button></form>}
     <p className="text-xs text-blu-steel">USB ส่ง Enter ท้ายรหัส • กันอ่านรหัสเดิมซ้ำ 3 วินาที • การสแกนไม่ยืนยันการแจก/แลกสิทธิ์เอง</p>
   </section>;
 }

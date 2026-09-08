@@ -2,6 +2,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setupMock } from "./mock-test-harness.mjs";
 const json = value => JSON.parse(JSON.stringify(value));
+const DAY = 86400000;
+const packageFor = s => s.load("mock-data").mockPackages.find(p => p.id === 7);
+async function extraFixture() {
+  const s = await fixture();
+  const d = { ...s.definition, benefit: "EXTRA_DAYS", amount: 5 };
+  await s.saveDefinition(d, s.definition);
+  s.definition = d;
+  const [g] = await issue(s);
+  return { ...s, coupon: g };
+}
 async function fixture(kind = "COUPON", options = {}) {
   const s = setupMock(options);
   const api = s.load("benefits");
@@ -14,6 +24,137 @@ async function issue(s, codes = ["BLU-1001"], mode = "SELECTED") {
   await s.commitGrant(plan);
   return s.readBenefits().grants;
 }
+
+test("v1 membership defaults and Bangkok end-of-day defaults are backwards compatible", async () => {
+  const s = await fixture();
+  const old = json(s.readBenefits()); delete old.memberships;
+  assert.deepEqual(json(s.parseBenefits(JSON.stringify(old)).memberships), []);
+  assert.equal(s.readMembership("BLU-1001"), null);
+  assert.equal(s.newDefinition("COUPON").expiresAt, "2026-10-07T23:59:59+07:00");
+  s.clock.now = Date.parse("2026-12-31T20:00:00Z");
+  assert.equal(s.newDefinition("PROMO").expiresAt, "2027-01-31T23:59:59+07:00");
+});
+test("package purchase creates real membership, stacks active/expired dates and never invents friend coupons", async () => {
+  const s = await fixture(); const pkg = packageFor(s);
+  const start = s.clock.now; const writes = s.writes.length;
+  await s.purchaseMockPackage("BLU-1001", pkg, null);
+  assert.equal(s.writes.length, writes + 1);
+  assert.deepEqual(json(s.readMembership("BLU-1001")), {
+    memberCode: "BLU-1001", startedAt: new Date(start).toISOString(), expiresAt: new Date(start + 30 * DAY).toISOString(),
+    name: pkg.name, timeSlot: pkg.timeSlot, totalDays: 30, friendCouponsLeft: 0,
+  });
+  assert.equal(s.readMembership("BLU-1012"), null);
+  s.clock.now += DAY;
+  await s.purchaseMockPackage("BLU-1001", pkg, null);
+  assert.equal(Date.parse(s.readMembership("BLU-1001").expiresAt), start + 60 * DAY);
+  s.clock.now = start + 100 * DAY;
+  await s.purchaseMockPackage("BLU-1001", pkg, null);
+  const m = s.readMembership("BLU-1001");
+  assert.equal(Date.parse(m.expiresAt), s.clock.now + 30 * DAY);
+  assert.equal(m.totalDays, 90); assert.equal(m.startedAt, new Date(start).toISOString());
+  assert.equal(setupMock({ storage: s.storage }).load("benefits").readMembership("BLU-1001").expiresAt, m.expiresAt);
+});
+test("canonical package fields, member, assigned promo subtotal and totals cannot be forged", async () => {
+  const s = await fixture("PROMO"); const pkg = packageFor(s); const [g] = await issue(s);
+  const p = s.previewMockPayment(g.code, g.memberCode, pkg.price);
+  const before = s.storage.get(s.BENEFITS_KEY);
+  for (const key of ["id", "price", "name", "timeSlot", "durationDays", "bonusDays", "friendCoupons"]) {
+    await assert.rejects(s.purchaseMockPackage(g.memberCode, { ...pkg, [key]: typeof pkg[key] === "number" ? -1 : "forged" }, p));
+  }
+  for (const changes of [{ memberCode: "BLU-1012" }, { subtotal: pkg.price + 1 }, { total: 0 }, { paymentId: "invalid" }, { grantCode: "FREE5" }]) {
+    await assert.rejects(s.purchaseMockPackage(g.memberCode, pkg, { ...p, ...changes }));
+  }
+  await assert.rejects(s.purchaseMockPackage("BLU-1012", pkg, p));
+  await assert.rejects(s.purchaseMockPackage("BLU-99999", pkg, null));
+  assert.equal(s.storage.get(s.BENEFITS_KEY), before);
+});
+test("purchase consumes promo and creates membership atomically once; failed storage consumes neither", async () => {
+  const s = await fixture("PROMO"); const pkg = packageFor(s); const [g] = await issue(s);
+  const p = s.previewMockPayment(g.code, g.memberCode, pkg.price);
+  const before = s.storage.get(s.BENEFITS_KEY), events = s.events.length;
+  s.failures.write = true;
+  await assert.rejects(s.purchaseMockPackage(g.memberCode, pkg, p), /บันทึก/);
+  assert.equal(s.storage.get(s.BENEFITS_KEY), before); assert.equal(s.events.length, events);
+  s.failures.write = false;
+  const writes = s.writes.length;
+  const results = await Promise.allSettled([s.purchaseMockPackage(g.memberCode, pkg, p), s.purchaseMockPackage(g.memberCode, pkg, p)]);
+  assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
+  assert.equal(s.writes.length, writes + 1);
+  assert.equal(s.readBenefits().grants[0].paidAmount, pkg.price - 100);
+  assert.equal(s.readMembership(g.memberCode).totalDays, 30);
+  const reload = setupMock({ storage: s.storage }).load("benefits");
+  await assert.rejects(reload.purchaseMockPackage(g.memberCode, pkg, p), /ใช้แล้ว/);
+});
+test("purchase captures inputs and re-quotes expiry, suspension and revisions under lock", async () => {
+  for (const change of ["inputs", "expiry", "disable", "revision"]) {
+    const s = await fixture("PROMO"); const pkg = { ...packageFor(s) }; const [g] = await issue(s);
+    const p = s.previewMockPayment(g.code, g.memberCode, pkg.price);
+    if (change === "disable") await s.removeDefinition(s.definition);
+    if (change === "revision") await s.purchaseMockPackage("BLU-1012", pkg, null);
+    const release = s.holdLock(s.BENEFITS_KEY);
+    const work = s.purchaseMockPackage(g.memberCode, pkg, p);
+    if (change === "inputs") { pkg.durationDays = 999; p.total = 0; }
+    if (change === "expiry") s.clock.now = Date.parse(g.definition.expiresAt);
+    release();
+    if (change === "inputs") { await work; assert.equal(s.readMembership(g.memberCode).totalDays, 30); }
+    else { await assert.rejects(work); assert.equal(s.readMembership(g.memberCode), null); assert.equal(s.readBenefits().grants[0].status, "UNUSED"); }
+  }
+});
+test("EXTRA_DAYS requires own membership, including after reload; failure never consumes coupon", async () => {
+  const s = await extraFixture();
+  await s.purchaseMockPackage("BLU-1012", packageFor(s), null);
+  const before = s.storage.get(s.BENEFITS_KEY);
+  await assert.rejects(s.redeemCoupon(s.coupon), /แพ็กเกจ/);
+  assert.equal(s.storage.get(s.BENEFITS_KEY), before);
+  assert.equal(s.readBenefits().grants[0].status, "UNUSED");
+  assert.equal(s.readMembership("BLU-1012").totalDays, 30);
+});
+test("EXTRA_DAYS atomically extends active or expired membership and rejects concurrent/reloaded replay", async () => {
+  for (const expired of [false, true]) {
+    const s = await extraFixture();
+    await s.purchaseMockPackage(s.coupon.memberCode, s.load("mock-data").mockPackages[0], null);
+    const prior = s.readMembership(s.coupon.memberCode);
+    if (expired) s.clock.now += 2 * DAY;
+    const before = s.storage.get(s.BENEFITS_KEY), events = s.events.length;
+    s.failures.write = true;
+    await assert.rejects(s.redeemCoupon(s.coupon), /บันทึก/);
+    assert.equal(s.storage.get(s.BENEFITS_KEY), before); assert.equal(s.events.length, events);
+    s.failures.write = false;
+    const writes = s.writes.length;
+    const results = await Promise.allSettled([s.redeemCoupon(s.coupon), s.redeemCoupon(s.coupon)]);
+    assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
+    assert.equal(s.writes.length, writes + 1);
+    const m = s.readMembership(s.coupon.memberCode);
+    assert.equal(Date.parse(m.expiresAt), Math.max(s.clock.now, Date.parse(prior.expiresAt)) + 5 * DAY);
+    assert.equal(m.totalDays, 6); assert.equal(m.friendCouponsLeft, 0);
+    assert.equal(m.startedAt, prior.startedAt); assert.equal(m.name, prior.name);
+    const reload = setupMock({ storage: s.storage }).load("benefits");
+    await assert.rejects(reload.redeemCoupon(s.coupon), /ใช้แล้ว/);
+  }
+});
+test("EXTRA_DAYS cap rejects old oversized definitions and issued snapshots without migration/reset", async () => {
+  const s = await extraFixture();
+  await s.saveDefinition({ ...s.definition, amount: 3650 }, s.definition);
+  await assert.rejects(s.saveDefinition({ ...s.definition, amount: 3651 }, { ...s.definition, amount: 3650 }), /3650/);
+  for (const target of ["definition", "grant"]) {
+    const old = json(s.readBenefits()); delete old.memberships;
+    (target === "definition" ? old.definitions[0] : old.grants[0].definition).amount = 3651;
+    assert.throws(() => s.parseBenefits(JSON.stringify(old)), /เสียหาย/);
+  }
+});
+test("invalid or duplicate membership data fails closed before coupon consumption", async () => {
+  const s = await extraFixture(); await s.purchaseMockPackage(s.coupon.memberCode, packageFor(s), null);
+  const valid = json(s.readBenefits());
+  for (const mutate of [
+    x => x.memberships.push(x.memberships[0]), x => { x.memberships[0].expiresAt = "bad"; },
+    x => { x.memberships[0].totalDays = 0; }, x => { x.memberships[0].friendCouponsLeft = -1; },
+    x => { x.memberships[0].timeSlot = "ALL"; }, x => { x.memberships[0].expiresAt = x.memberships[0].startedAt; },
+  ]) {
+    const state = json(valid); mutate(state); const raw = JSON.stringify(state); s.storage.set(s.BENEFITS_KEY, raw);
+    await assert.rejects(s.redeemCoupon(s.coupon), /เสียหาย/);
+    assert.equal(s.storage.get(s.BENEFITS_KEY), raw);
+  }
+});
 
 test("CRUD creates, edits, reads and deletes only never-issued definitions", async () => {
   for (const kind of ["PROMO", "COUPON"]) {
