@@ -18,7 +18,7 @@ export type MemberPurchase = z.infer<typeof purchaseSchema>;
 
 const ledgerSchema = z.object({
   id: z.string().min(1).max(100), memberCode: memberCodeSchema, delta: z.number().int().min(-Number.MAX_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
-  balanceAfter: points, type: z.enum(["OPENING_BALANCE", "PURCHASE", "REWARD", "POINT_COUPON"]), referenceId: z.string().min(1).max(150),
+  balanceAfter: points, type: z.enum(["OPENING_BALANCE", "PURCHASE", "REWARD", "POINT_COUPON", "ADMIN_COUPON"]), referenceId: z.string().min(1).max(150),
   description: z.string().trim().min(1).max(300), createdAt: timestamp,
 }).strict();
 export type PointLedgerEntry = z.infer<typeof ledgerSchema>;
@@ -88,7 +88,7 @@ export function parseMemberAccountStore(raw: string | null): MemberAccountStore 
       for (const entry of account.pointLedger) {
         const reference = `${entry.type}:${entry.referenceId}`;
         if (entry.memberCode !== account.memberCode || ledgerIds.has(entry.id) || ledgerReferences.has(reference) ||
-          (entry.type === "OPENING_BALANCE" && entry.delta < 0) || (entry.type === "PURCHASE" && entry.delta < 0) ||
+          (entry.type === "OPENING_BALANCE" && entry.delta < 0) || (entry.type === "PURCHASE" && entry.delta < 0) || (entry.type === "ADMIN_COUPON" && entry.delta < 0) ||
           ((entry.type === "REWARD" || entry.type === "POINT_COUPON") && entry.delta >= 0)) throw Error();
         balance += entry.delta;
         if (balance < 0 || entry.balanceAfter !== balance) throw Error();
@@ -181,6 +181,12 @@ export function recordPurchaseInStore(state: MemberAccountStore, input: Purchase
   addLedger(account, { id: `purchase-${purchase.id}`, memberCode: account.memberCode, delta: purchase.pointsEarned, type: "PURCHASE",
     referenceId: purchase.id, description: `ชำระแพ็กเกจ ${purchase.packageName} ${purchase.paidAmount} บาท`, createdAt: purchase.purchasedAt });
   return purchase;
+}
+
+export function creditAdminCouponPointsInStore(state: MemberAccountStore, memberCode: string, amount: number, referenceId: string, description: string, createdAt: string): PointLedgerEntry {
+  if (!Number.isSafeInteger(amount) || amount <= 0) return fail("จำนวนแต้มคูปองไม่ถูกต้อง");
+  const account = accountFromStore(state, memberCode);
+  return addLedger(account, { id: `admin-coupon-${referenceId}`, memberCode: account.memberCode, delta: amount, type: "ADMIN_COUPON", referenceId, description, createdAt });
 }
 
 export function spendPointsInStore(state: MemberAccountStore, memberCode: string, amount: number, type: "REWARD" | "POINT_COUPON", referenceId: string, description: string, createdAt: string): PointLedgerEntry {

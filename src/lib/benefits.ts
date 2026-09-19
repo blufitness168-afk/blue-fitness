@@ -2,7 +2,7 @@ import { z } from "zod";
 import { mockAdminMembers } from "./admin-mock";
 import { mockPackages, type MockPackage } from "./mock-data";
 import {
-  MEMBER_ACCOUNT_KEY, MEMBER_ACCOUNT_LOCK_KEY, commitLocalStorageTransaction, dispatchMemberAccountUpdated,
+  MEMBER_ACCOUNT_KEY, MEMBER_ACCOUNT_LOCK_KEY, commitLocalStorageTransaction, creditAdminCouponPointsInStore, dispatchMemberAccountUpdated,
   readMemberAccountStore, recordPurchaseInStore, serializeMemberAccountStore, type MemberAccountStore,
 } from "./member-account";
 
@@ -31,6 +31,9 @@ const definitionSchema = z.object({
   // Old v1 values above this limit fail closed, including immutable issued terms.
   if (d.kind === "COUPON" && d.benefit === "EXTRA_DAYS" && d.amount > 3650) {
     ctx.addIssue({ code: "custom", message: "วันแถมต้องไม่เกิน 3650 วัน" });
+  }
+  if (d.kind === "COUPON" && d.couponType === "BONUS_POINTS" && (d.unit !== "POINTS" || d.benefit === "EXTRA_DAYS")) {
+    ctx.addIssue({ code: "custom", message: "คูปองแต้มเพิ่มต้องใช้หน่วยแต้มและรูปแบบสิทธิ์ทั่วไป" });
   }
 });
 export type BenefitDefinition = z.infer<typeof definitionSchema>;
@@ -203,7 +206,7 @@ export function previewCoupon(code: string, now = new Date()): BenefitGrant { re
 export async function redeemCoupon(expected: BenefitGrant): Promise<void> {
   const snapshot = JSON.stringify(expected);
   const code = expected.code;
-  await writeBenefits((s, now) => {
+  await writeBenefits((s, now, accounts) => {
     const g = unusedGrant(s, code, "COUPON", now);
     if (JSON.stringify(g) !== snapshot) return fail("สิทธิ์เปลี่ยนแล้ว กรุณาสแกนใหม่");
     if (g.definition.benefit === "EXTRA_DAYS") {
@@ -211,8 +214,12 @@ export async function redeemCoupon(expected: BenefitGrant): Promise<void> {
       if (!membership) return fail("ไม่พบข้อมูลสมาชิกแพ็กเกจสำหรับเพิ่มวัน กรุณาซื้อแพ็กเกจก่อน");
       extendMembership(membership, g.definition.amount, now);
     }
+    if (g.definition.couponType === "BONUS_POINTS") {
+      if (!accounts) return fail("ไม่พบบัญชีสมาชิกสำหรับเพิ่มแต้ม");
+      creditAdminCouponPointsInStore(accounts, g.memberCode, g.definition.amount, g.id, `ใช้คูปอง ${g.definition.name}`, now.toISOString());
+    }
     g.status = "USED"; g.usedAt = now.toISOString();
-  });
+  }, true);
 }
 /** Reads only the shared benefits state; never seeds membership from legacy/demo UI data. Unknown members return null; corrupt storage throws. */
 export function readMembership(memberCode: string): MockMembership | null {

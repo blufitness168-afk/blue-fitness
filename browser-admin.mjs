@@ -59,8 +59,8 @@ try {
     await page.getByRole('button', { name: /^\+ สร้าง/ }).click();
     await page.getByLabel('ชื่อ', { exact: true }).fill(name);
     await page.getByLabel('รหัสนิยาม', { exact: false }).fill(code);
-    if (coupon) await page.getByLabel('ประเภทคูปอง').selectOption('EXTRA_DAYS');
-    await page.getByLabel(coupon ? 'จำนวนคน / วัน' : 'มูลค่าส่วนลด', { exact: true }).fill(String(amount));
+    if (coupon) await page.getByLabel('รูปแบบสิทธิ์เมื่อใช้').selectOption('EXTRA_DAYS');
+    await page.getByLabel(coupon ? 'จำนวน' : 'มูลค่าส่วนลด', { exact: true }).fill(String(amount));
     await page.getByRole('button', { name: 'บันทึกนิยาม', exact: true }).click();
     await page.getByLabel('ชื่อ', { exact: true }).waitFor({ state: 'detached' });
     const s = await state();
