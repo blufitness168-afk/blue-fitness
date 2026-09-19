@@ -21,7 +21,7 @@ export const financeCategories = [
 
 export type FinanceCategory = (typeof financeCategories)[number];
 export type FinanceType = "INCOME" | "EXPENSE";
-export type FinanceSource = "SEED" | "MANUAL" | "MEMBERSHIP";
+export type FinanceSource = "SEED" | "MANUAL" | "MEMBERSHIP" | "REVERSAL";
 
 const financeRecordSchema = z.object({
   id: z.string().min(1).max(120),
@@ -32,10 +32,15 @@ const financeRecordSchema = z.object({
   note: z.string().trim().max(500),
   memberCode: z.string().regex(/^BLU-\d+$/).optional(),
   memberName: z.string().trim().min(1).max(200).optional(),
-  source: z.enum(["SEED", "MANUAL", "MEMBERSHIP"]),
+  source: z.enum(["SEED", "MANUAL", "MEMBERSHIP", "REVERSAL"]),
+  reversalOf: z.string().min(1).max(120).optional(),
+  reversalReason: z.string().trim().max(500).optional(),
   createdAt: z.string().datetime({ offset: true }),
   updatedAt: z.string().datetime({ offset: true }),
-}).strict().refine((record) => Boolean(record.memberCode) === Boolean(record.memberName), "ข้อมูลสมาชิกไม่ครบ");
+}).strict().superRefine((record, ctx) => {
+  if (Boolean(record.memberCode) !== Boolean(record.memberName)) ctx.addIssue({ code: "custom", message: "ข้อมูลสมาชิกไม่ครบ" });
+  if (record.source === "REVERSAL" && (!record.reversalOf || !record.reversalReason)) ctx.addIssue({ code: "custom", message: "รายการย้อนกลับต้องมีรายการต้นทางและเหตุผล" });
+});
 
 export type FinanceRecord = z.infer<typeof financeRecordSchema>;
 export type EditableFinanceInput = Pick<FinanceRecord, "date" | "type" | "category" | "amount" | "note">;
@@ -184,9 +189,20 @@ export function saveFinanceRecord(input: EditableFinanceInput, existingId?: stri
   return created;
 }
 
-export function deleteFinanceRecord(id: string) {
+export function reverseFinanceRecord(id: string, reason: string): FinanceRecord {
+  const cleanReason = reason.trim();
+  if (!cleanReason) throw new Error("กรุณาระบุเหตุผลที่ย้อนรายการ");
   const store = readStore();
-  const next = store.records.filter((item) => item.id !== id);
-  if (next.length === store.records.length) throw new Error("ไม่พบรายการที่ต้องการลบ หรือเป็นรายรับอัตโนมัติ");
-  writeStore({ ...store, records: next });
+  const current = store.records.find((item) => item.id === id);
+  if (!current || current.source !== "MANUAL") throw new Error("ย้อนกลับได้เฉพาะรายการที่บันทึกเอง");
+  if (store.records.some((item) => item.reversalOf === id)) throw new Error("รายการนี้ถูกย้อนกลับแล้ว");
+  const now = new Date().toISOString();
+  const reversal = financeRecordSchema.parse({
+    id: crypto.randomUUID(), date: now.slice(0, 10), type: current.type === "INCOME" ? "EXPENSE" : "INCOME", category: current.category,
+    amount: current.amount, note: `ย้อนรายการ ${current.id}: ${cleanReason}`, memberCode: current.memberCode, memberName: current.memberName,
+    source: "REVERSAL", reversalOf: current.id, reversalReason: cleanReason, createdAt: now, updatedAt: now,
+  });
+  store.records.unshift(reversal);
+  writeStore(store);
+  return reversal;
 }

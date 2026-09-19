@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, Pencil, Plus, Save, Trash2, X } from "lucide-react";
+import { Download, Pencil, Plus, RotateCcw, Save, X } from "lucide-react";
 import AdminDashboardChart, { type ChartDatum, type ChartSeries } from "@/components/AdminDashboardCharts";
 import {
-  deleteFinanceRecord,
   financeCategories,
+  reverseFinanceRecord,
   FINANCE_EVENT,
   FINANCE_STORAGE_KEY,
   readFinanceRecords,
@@ -91,6 +91,8 @@ export default function FinancePage() {
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [form, setForm] = useState<EditableFinanceInput>(emptyForm);
   const [editingId, setEditingId] = useState<string | undefined>();
+  const [reversalTarget, setReversalTarget] = useState<FinanceRecord | null>(null);
+  const [reversalReason, setReversalReason] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -168,22 +170,24 @@ export default function FinancePage() {
   };
 
   const edit = (record: FinanceRecord) => {
-    if (record.source === "MEMBERSHIP") return;
+    if (record.source !== "MANUAL") return;
     setEditingId(record.id);
     setForm({ date: record.date, type: record.type, category: record.category, amount: record.amount, note: record.note });
     setNotice("");
     document.getElementById("finance-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
-  const remove = (record: FinanceRecord) => {
-    if (record.source === "MEMBERSHIP" || !window.confirm(`ลบรายการ ${record.category} จำนวน ${money(record.amount)} บาทหรือไม่?`)) return;
+  const reverse = () => {
+    if (!reversalTarget) return;
+    setError("");
     try {
-      deleteFinanceRecord(record.id);
-      if (editingId === record.id) resetForm();
-      setNotice("ลบรายการเรียบร้อย");
+      reverseFinanceRecord(reversalTarget.id, reversalReason);
+      setNotice("ย้อนรายการเรียบร้อย และเก็บรายการเดิมไว้ในประวัติ");
+      setReversalTarget(null);
+      setReversalReason("");
       load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "ลบรายการไม่สำเร็จ");
+      setError(cause instanceof Error ? cause.message : "ย้อนรายการไม่สำเร็จ");
     }
   };
 
@@ -271,17 +275,19 @@ export default function FinancePage() {
               {filtered.map((record, index) => <tr key={record.id} className="hover:bg-blu-ice/30">
                 <td className="px-4 py-3 text-blu-steel">{index + 1}</td><td className="whitespace-nowrap px-4 py-3">{thaiDate(record.date)}</td>
                 <td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${record.type === "INCOME" ? "bg-emerald-500/10 text-emerald-600" : "bg-rose-500/10 text-rose-500"}`}>{record.type === "INCOME" ? "รายรับ" : "รายจ่าย"}</span></td>
-                <td className="px-4 py-3 font-semibold">{record.category}{record.source === "MEMBERSHIP" && <span className="ml-1 block text-[9px] font-normal text-blu-steel">อัตโนมัติ</span>}</td>
+                <td className="px-4 py-3 font-semibold">{record.category}{record.source === "MEMBERSHIP" && <span className="ml-1 block text-[9px] font-normal text-blu-steel">อัตโนมัติ</span>}{record.source === "REVERSAL" && <span className="ml-1 block text-[9px] font-normal text-amber-600">ย้อนรายการ</span>}</td>
                 <td className="px-4 py-3">{record.memberName ? <><span>{record.memberName}</span><span className="block font-mono text-[9px] text-blu-steel">{record.memberCode}</span></> : "-"}</td>
                 <td className={`whitespace-nowrap px-4 py-3 text-right font-black ${record.type === "INCOME" ? "text-emerald-600" : "text-rose-500"}`}>{record.type === "INCOME" ? "+" : "-"}{money(record.amount)} ฿</td>
                 <td className="max-w-65 px-4 py-3 text-blu-steel">{record.note || "-"}</td>
-                <td className="px-4 py-3"><div className="flex justify-end gap-1"><button type="button" disabled={record.source === "MEMBERSHIP"} onClick={() => edit(record)} title={record.source === "MEMBERSHIP" ? "รายการอัตโนมัติแก้ไขไม่ได้" : "แก้ไข"} className="rounded-lg p-2 text-blu-slate hover:bg-blu-ice disabled:cursor-not-allowed disabled:opacity-25"><Pencil className="h-4 w-4" /></button><button type="button" disabled={record.source === "MEMBERSHIP"} onClick={() => remove(record)} title={record.source === "MEMBERSHIP" ? "รายการอัตโนมัติลบไม่ได้" : "ลบ"} className="rounded-lg p-2 text-rose-500 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-25"><Trash2 className="h-4 w-4" /></button></div></td>
+                <td className="px-4 py-3"><div className="flex justify-end gap-1">{record.source === "MANUAL" ? <><button type="button" onClick={() => edit(record)} title="แก้ไข" className="rounded-lg p-2 text-blu-slate hover:bg-blu-ice"><Pencil className="h-4 w-4" /></button><button type="button" disabled={records.some((item) => item.reversalOf === record.id)} onClick={() => { setReversalTarget(record); setReversalReason(""); }} title="ย้อนรายการ" className="rounded-lg p-2 text-amber-600 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-25"><RotateCcw className="h-4 w-4" /></button></> : <span className="px-2 py-2 text-[10px] text-blu-steel">ล็อก</span>}</div></td>
               </tr>)}
               {!filtered.length && <tr><td colSpan={8} className="p-10 text-center text-blu-steel">ไม่พบรายการตามตัวกรอง</td></tr>}
             </tbody>
           </table>
         </div>
       </section>
+
+      {reversalTarget && <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center bg-blu-dark/60 p-4"><div role="dialog" aria-modal="true" className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.15em] text-blu-steel">ปรับปรุงรายการการเงิน</p><h2 className="mt-1 text-xl font-black text-blu-dark">ย้อนรายการนี้?</h2></div><button type="button" className="rounded-xl p-2 text-blu-steel hover:bg-blu-ice" onClick={() => setReversalTarget(null)} aria-label="ปิดหน้าต่าง"><X className="h-5 w-5" /></button></div><div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm"><p>รายการเดิม: <strong>{reversalTarget.category}</strong></p><p className="mt-1">จำนวน: <strong>{reversalTarget.type === "INCOME" ? "+" : "-"}{money(reversalTarget.amount)} บาท</strong></p><p className="mt-2 text-xs text-amber-800">ระบบจะสร้างรายการฝั่งตรงข้าม และไม่ลบรายการเดิม</p></div><label className="mt-4 block text-xs font-semibold text-blu-steel">เหตุผลที่ย้อนรายการ<textarea required maxLength={500} rows={3} value={reversalReason} onChange={(event) => setReversalReason(event.target.value)} className="finance-input mt-1 h-auto! py-2" placeholder="เช่น บันทึกยอดผิดจำนวน" /></label><div className="mt-5 flex justify-end gap-2"><button type="button" className="btn-blue rounded-xl px-4 py-2 text-xs" onClick={() => setReversalTarget(null)}>ยกเลิก</button><button type="button" className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-40" disabled={!reversalReason.trim()} onClick={reverse}>ยืนยันย้อนรายการ</button></div></div></div>}
       <style jsx>{`.finance-input { width: 100%; height: 2.5rem; border: 1px solid color-mix(in srgb, var(--blu-sky) 55%, transparent); border-radius: .75rem; background: white; padding: 0 .75rem; font-size: .75rem; outline: none; } .finance-input:focus { border-color: var(--blu-slate); }`}</style>
     </div>
   );
