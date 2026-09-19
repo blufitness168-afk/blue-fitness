@@ -1,5 +1,5 @@
-import BenefitsAdmin from "@/components/BenefitsAdmin";
+import PromoCodesAdmin from "@/components/PromoCodesAdmin";
 
 export default function PromoCodesPage() {
-  return <BenefitsAdmin kind="PROMO" />;
+  return <PromoCodesAdmin />;
 }

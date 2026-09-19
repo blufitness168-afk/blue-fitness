@@ -59,10 +59,48 @@ const stateSchema = z.object({
 }).strict();
 export type BenefitsState = z.infer<typeof stateSchema>;
 export type GrantPlan = { revision: number; batchId: string; definitionId: string; mode: "SELECTED" | "ALL"; memberCodes: string[]; newCodes: string[]; skipped: number };
+
+// Demo campaigns make the admin screens useful on a fresh browser while keeping production wiring unchanged.
+const PROMO_DEMO_A: BenefitDefinition = {
+  id: "00000000-0000-4000-8000-000000000001", kind: "PROMO", name: "สมาชิกใหม่ ลด 100 บาท", code: "WELCOME100", active: true,
+  expiresAt: "2026-12-31T23:59:59+07:00", quota: 100, maxUses: 100, discountType: "FIXED", amount: 100, minSpend: 500,
+  couponType: "FREE", unit: "BAHT", maxCondition: 0, conditionUnit: "BAHT", perPerson: 1, validDays: 30, noFixedExpiry: false,
+  benefit: "BRING_FRIEND", detail: "ส่วนลดสำหรับสมาชิกใหม่ เมื่อซื้อแพ็กเกจตั้งแต่ 500 บาทขึ้นไป",
+};
+const PROMO_DEMO_B: BenefitDefinition = {
+  id: "00000000-0000-4000-8000-000000000002", kind: "PROMO", name: "ต่ออายุสมาชิก ลด 10%", code: "RENEW10", active: true,
+  expiresAt: "2026-11-30T23:59:59+07:00", quota: 50, maxUses: 50, discountType: "PERCENT", amount: 10, minSpend: 900,
+  couponType: "FREE", unit: "BAHT", maxCondition: 0, conditionUnit: "BAHT", perPerson: 1, validDays: 30, noFixedExpiry: false,
+  benefit: "BRING_FRIEND", detail: "ส่วนลดต่ออายุแพ็กเกจ สูงสุด 10% เมื่อซื้อแพ็กเกจตั้งแต่ 900 บาท",
+};
+const PROMO_DEMO_GRANTS: BenefitGrant[] = [
+  { id: "00000000-0000-4000-8000-000000000011", code: "BLU-PC-00000000-0000-4000-8000-000000000011", definition: { ...PROMO_DEMO_A }, memberCode: "BLU-1001", memberName: "สมชาย ใจดี", batchId: "00000000-0000-4000-8000-000000000101", issuedAt: "2026-09-15T02:00:00.000Z", status: "UNUSED" },
+  { id: "00000000-0000-4000-8000-000000000012", code: "BLU-PC-00000000-0000-4000-8000-000000000012", definition: { ...PROMO_DEMO_A }, memberCode: "BLU-1012", memberName: "วิภาดา รักฟิต", batchId: "00000000-0000-4000-8000-000000000101", issuedAt: "2026-09-15T02:00:00.000Z", status: "USED", usedAt: "2026-09-16T03:30:00.000Z", paymentId: "00000000-0000-4000-8000-000000000201", paidAmount: 900 },
+  { id: "00000000-0000-4000-8000-000000000013", code: "BLU-PC-00000000-0000-4000-8000-000000000013", definition: { ...PROMO_DEMO_B }, memberCode: "BLU-1020", memberName: "ธีรภัทร ใจกล้า", batchId: "00000000-0000-4000-8000-000000000102", issuedAt: "2026-09-17T02:00:00.000Z", status: "UNUSED" },
+  { id: "00000000-0000-4000-8000-000000000014", code: "BLU-PC-00000000-0000-4000-8000-000000000014", definition: { ...PROMO_DEMO_B }, memberCode: "BLU-1025", memberName: "กัลยา ศรีสุข", batchId: "00000000-0000-4000-8000-000000000102", issuedAt: "2026-09-17T02:00:00.000Z", status: "USED", usedAt: "2026-09-18T04:15:00.000Z", paymentId: "00000000-0000-4000-8000-000000000202", paidAmount: 2430 },
+];
+const PROMO_DEMO_STATE: BenefitsState = {
+  version: 1, revision: 0, memberships: [], definitions: [PROMO_DEMO_A, PROMO_DEMO_B], grants: PROMO_DEMO_GRANTS,
+  batches: [
+    { id: "00000000-0000-4000-8000-000000000101", definitionId: PROMO_DEMO_A.id, mode: "SELECTED", memberCodes: ["BLU-1001", "BLU-1012"], createdAt: "2026-09-15T02:00:00.000Z" },
+    { id: "00000000-0000-4000-8000-000000000102", definitionId: PROMO_DEMO_B.id, mode: "SELECTED", memberCodes: ["BLU-1020", "BLU-1025"], createdAt: "2026-09-17T02:00:00.000Z" },
+  ],
+};
+function initialBenefitsState(): BenefitsState { return structuredClone(PROMO_DEMO_STATE); }
+function addPromoDemoIfMissing(state: BenefitsState): BenefitsState {
+  if (state.grants.some(grant => grant.definition.kind === "PROMO")) return state;
+  const demo = initialBenefitsState();
+  return {
+    ...state,
+    definitions: [...state.definitions, ...demo.definitions.filter(definition => !state.definitions.some(current => current.id === definition.id || (current.kind === "PROMO" && current.code === definition.code)))],
+    grants: [...state.grants, ...demo.grants],
+    batches: [...state.batches, ...demo.batches.filter(batch => !state.batches.some(current => current.id === batch.id))],
+  };
+}
 const fail = (message: string): never => { throw new Error(message); };
 function unique(values: string[]) { return new Set(values).size === values.length; }
 export function parseBenefits(raw: string | null): BenefitsState {
-  if (raw === null) return { version: 1, revision: 0, definitions: [], grants: [], batches: [], memberships: [] };
+  if (raw === null) return initialBenefitsState();
   try {
     const s = stateSchema.parse(JSON.parse(raw));
     if (!unique(s.memberships.map(m => m.memberCode)) || !unique(s.definitions.map(d => d.id)) || !unique(s.definitions.map(d => `${d.kind}:${d.code}`)) ||
@@ -85,7 +123,7 @@ export function parseBenefits(raw: string | null): BenefitsState {
         b.memberCodes.some(code => !s.grants.some(g => g.batchId === b.id && g.memberCode === code)) ||
         s.grants.filter(g => g.batchId === b.id).length !== b.memberCodes.length) throw Error();
     }
-    return s;
+    return addPromoDemoIfMissing(s);
   } catch { return fail("ข้อมูลสิทธิ์ mock เสียหาย ระบบหยุดทำรายการ กรุณาตรวจสอบ localStorage (ไม่รีเซ็ตสิทธิ์อัตโนมัติ)"); }
 }
 export function readBenefits(): BenefitsState {
