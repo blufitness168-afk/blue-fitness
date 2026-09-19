@@ -12,7 +12,7 @@ export function MockNotice() {
   return <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><strong>Mock • เฉพาะเบราว์เซอร์นี้</strong> — ข้อมูลบันทึกใน localStorage ไม่ใช่ฐานข้อมูลจริง ไม่มี API/Auth สำหรับ production ไม่ซิงก์ข้ามอุปกรณ์ ต้องใช้ HTTPS/localhost และ Web Locks; การล้างข้อมูลทำให้ประวัติ mock หาย</p>;
 }
 
-export default function AdminScanner({ label, disabled = false, onScan }: { label: string; disabled?: boolean; onScan: (code: string, source: "CAMERA" | "USB_MANUAL") => void | Promise<void> }) {
+export default function AdminScanner({ label, disabled = false, autoFocus = false, onScan }: { label: string; disabled?: boolean; autoFocus?: boolean; onScan: (code: string, source: "CAMERA" | "USB_MANUAL") => void | Promise<void> }) {
   const [camera, setCamera] = useState(false);
   const [code, setCode] = useState("");
   const last = useRef({ code: "", time: 0 });
@@ -32,12 +32,12 @@ export default function AdminScanner({ label, disabled = false, onScan }: { labe
       usbRequested.current = false;
       restoreFocus.current = false;
       inputRef.current?.focus();
-    } else if (restoreFocus.current) {
+    } else if (restoreFocus.current || autoFocus) {
       restoreFocus.current = false;
-      // Do not take focus away from another field the operator chose while paused.
-      if (active === document.body || (active && formRef.current?.contains(active))) inputRef.current?.focus();
+      // Auto-scan mode intentionally keeps focus ready for keyboard-wedge scanners.
+      if (autoFocus || active === document.body || (active && formRef.current?.contains(active))) inputRef.current?.focus();
     }
-  }, [disabled, camera, onScan]);
+  }, [disabled, camera, autoFocus, onScan]);
   async function scan(value: string, source: "CAMERA" | "USB_MANUAL" = "USB_MANUAL") {
     const current = latest.current;
     if (current.disabled || processing.current || (source === "CAMERA") !== current.camera) return;

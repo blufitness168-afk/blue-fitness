@@ -21,7 +21,7 @@ export type ServiceRecordInput = Omit<ServiceRecord, "id" | "source">;
 
 const storeSchema = z.object({
   version: z.literal(1),
-  records: z.array(serviceRecordSchema.refine((record) => record.source === "MANUAL")),
+  records: z.array(serviceRecordSchema),
 }).strict();
 
 function seedRecords(): ServiceRecord[] {
@@ -80,9 +80,9 @@ export function readServiceRecords(): ServiceRecord[] {
   return [...unique.values()].sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt));
 }
 
-export function saveServiceRecord(input: ServiceRecordInput): ServiceRecord {
+export function saveServiceRecord(input: ServiceRecordInput, source: ServiceRecord["source"] = "MANUAL"): ServiceRecord {
   const store = readStore();
-  const created = serviceRecordSchema.parse({ ...input, id: crypto.randomUUID(), source: "MANUAL" });
+  const created = serviceRecordSchema.parse({ ...input, id: crypto.randomUUID(), source });
   store.records.unshift(created);
   const serialized = JSON.stringify(storeSchema.parse(store));
   localStorage.setItem(SERVICE_STORAGE_KEY, serialized);
