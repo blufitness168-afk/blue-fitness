@@ -358,6 +358,7 @@ export interface MemberProfile {
   id: number;
   fullName: string;
   nickname?: string;
+  gender: "MALE" | "FEMALE" | "OTHER";
   phone: string;
   avatarUrl?: string;
   memberCode: string;
@@ -381,6 +382,7 @@ export const defaultMockMember: MemberProfile = {
   id: 1,
   fullName: "สมชาย ใจดี",
   nickname: "ชาย",
+  gender: "MALE",
   phone: "081-234-5678",
   avatarUrl: "",
   memberCode: "BLU-1001",

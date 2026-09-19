@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
-import { X, Eye, EyeOff, Lock, User, Phone, HeartHandshake, UploadCloud } from "lucide-react";
+import { X, Eye, EyeOff, Lock, User, HeartHandshake, UploadCloud } from "lucide-react";
 import LanguageToggle from "@/components/LanguageToggle";
 import { useLanguage } from "@/context/LanguageContext";
 
@@ -20,6 +20,7 @@ export default function RegisterPage() {
   // Registration Form Fields
   const [fullName, setFullName] = useState("");
   const [nickname, setNickname] = useState("");
+  const [gender, setGender] = useState<"MALE" | "FEMALE" | "OTHER">("OTHER");
   const [birthDay, setBirthDay] = useState("");
   const [birthMonth, setBirthMonth] = useState("");
   const [password, setPassword] = useState("");
@@ -124,7 +125,7 @@ export default function RegisterPage() {
   };
 
   const handleRegister = async () => {
-    if (!fullName.trim() || !birthDay || !birthMonth || !password) return;
+    if (!fullName.trim() || !gender || !birthDay || !birthMonth || !password) return;
     if (password !== confirmPassword) {
       alert("รหัสผ่านไม่ตรงกัน กรุณาตรวจสอบอีกครั้ง / Passwords do not match");
       return;
@@ -155,6 +156,7 @@ export default function RegisterPage() {
       phone,
       fullName,
       nickname: nickname.trim(),
+      gender,
       birthDay,
       birthMonth,
       password,
@@ -475,7 +477,24 @@ export default function RegisterPage() {
                   />
                 </div>
 
-                {/* 3. Birthday */}
+                {/* 3. Gender */}
+                <div>
+                  <label className="block text-sm font-semibold text-blu-dark mb-1">
+                    เพศ <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    required
+                    value={gender}
+                    onChange={(e) => setGender(e.target.value as "MALE" | "FEMALE" | "OTHER")}
+                    className="w-full px-3.5 py-3 rounded-xl border border-blu-sky/50 bg-blu-ice/30 text-blu-dark text-sm focus:outline-none focus:ring-2 focus:ring-blu-slate focus:border-transparent transition-all cursor-pointer"
+                  >
+                    <option value="MALE">ชาย</option>
+                    <option value="FEMALE">หญิง</option>
+                    <option value="OTHER">อื่นๆ</option>
+                  </select>
+                </div>
+
+                {/* 4. Birthday */}
                 <div>
                   <label className="block text-sm font-semibold text-blu-dark mb-1">
                     {t("reg.bday_label")} <span className="text-rose-500">*</span>
@@ -510,7 +529,7 @@ export default function RegisterPage() {
                   </div>
                 </div>
 
-                {/* 4. Emergency Contact Section */}
+                {/* 5. Emergency Contact Section */}
                 <div className="pt-2 pb-1">
                   <div className="bg-blu-ice/50 rounded-2xl p-4 border border-blu-sky/60 space-y-3">
                     <div className="flex items-center gap-1.5 text-xs font-bold text-blu-slate uppercase tracking-wider">
@@ -663,7 +682,7 @@ export default function RegisterPage() {
                           title="ลบรูปภาพ"
                           className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-rose-500 hover:bg-rose-600 text-white flex items-center justify-center shadow-md transition-transform hover:scale-110 z-10 cursor-pointer"
                         >
-                          <X className="w-3 h-3 stroke-[3]" />
+                          <X className="w-3 h-3 stroke-3" />
                         </button>
                       )}
                     </div>

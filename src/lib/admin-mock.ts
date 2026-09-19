@@ -59,6 +59,7 @@ export interface AdminMemberRow {
   memberCode: string;
   fullName: string;
   nickname?: string;
+  gender: "MALE" | "FEMALE" | "OTHER";
   phone: string;
   points: number;
   package: string;
@@ -74,6 +75,7 @@ export const mockExpiringMembers: AdminMemberRow[] = [
     memberCode: "BLU-1012",
     fullName: "นางสาววิภาดา รักฟิต",
     nickname: "วิว",
+    gender: "FEMALE",
     phone: "089-111-2200",
     points: 42,
     package: "1 เดือน (07:00-22:00)",
@@ -86,6 +88,7 @@ export const mockExpiringMembers: AdminMemberRow[] = [
     memberCode: "BLU-1015",
     fullName: "นายจักรพงษ์ สมบูรณ์",
     nickname: "เจท",
+    gender: "MALE",
     phone: "086-222-3311",
     points: 18,
     package: "3 เดือน (07:00-14:00)",
@@ -98,6 +101,7 @@ export const mockExpiringMembers: AdminMemberRow[] = [
     memberCode: "BLU-1020",
     fullName: "นายธีรภัทร ใจกล้า",
     nickname: "บอส",
+    gender: "MALE",
     phone: "082-555-7788",
     points: 5,
     package: "1 ปี (07:00-22:00)",
@@ -110,6 +114,7 @@ export const mockExpiringMembers: AdminMemberRow[] = [
     memberCode: "BLU-1025",
     fullName: "นางสาวกัลยา ศรีสุข",
     nickname: "กานต์",
+    gender: "FEMALE",
     phone: "090-444-5566",
     points: 63,
     package: "6 เดือน (07:00-22:00)",
@@ -198,16 +203,17 @@ export interface AdminMemberLookup {
   memberCode: string; // ระบบสร้าง เช่น BLU-1001
   cardNumber: string; // เลขบนบัตรแข็ง เช่น CARD-8899
   fullName: string;
+  gender: "MALE" | "FEMALE" | "OTHER";
   points: number;
 }
 
 export const mockAdminMembers: AdminMemberLookup[] = [
-  { id: 1, memberCode: "BLU-1001", cardNumber: "CARD-8899", fullName: "สมชาย ใจดี", points: 25 },
-  { id: 101, memberCode: "BLU-1012", cardNumber: "CARD-1188", fullName: "วิภาดา รักฟิต", points: 42 },
-  { id: 102, memberCode: "BLU-1015", cardNumber: "CARD-2299", fullName: "จักรพงษ์ สมบูรณ์", points: 18 },
-  { id: 103, memberCode: "BLU-1020", cardNumber: "CARD-3300", fullName: "ธีรภัทร ใจกล้า", points: 55 },
-  { id: 104, memberCode: "BLU-1025", cardNumber: "CARD-4411", fullName: "กัลยา ศรีสุข", points: 63 },
-  { id: 105, memberCode: "BLU-1019", cardNumber: "CARD-5522", fullName: "ธนวัฒน์ พึ่งบุญ", points: 31 },
+  { id: 1, memberCode: "BLU-1001", cardNumber: "CARD-8899", fullName: "สมชาย ใจดี", gender: "MALE", points: 25 },
+  { id: 101, memberCode: "BLU-1012", cardNumber: "CARD-1188", fullName: "วิภาดา รักฟิต", gender: "FEMALE", points: 42 },
+  { id: 102, memberCode: "BLU-1015", cardNumber: "CARD-2299", fullName: "จักรพงษ์ สมบูรณ์", gender: "MALE", points: 18 },
+  { id: 103, memberCode: "BLU-1020", cardNumber: "CARD-3300", fullName: "ธีรภัทร ใจกล้า", gender: "MALE", points: 55 },
+  { id: 104, memberCode: "BLU-1025", cardNumber: "CARD-4411", fullName: "กัลยา ศรีสุข", gender: "FEMALE", points: 63 },
+  { id: 105, memberCode: "BLU-1019", cardNumber: "CARD-5522", fullName: "ธนวัฒน์ พึ่งบุญ", gender: "MALE", points: 31 },
 ];
 
 export interface RedemptionRecord {
