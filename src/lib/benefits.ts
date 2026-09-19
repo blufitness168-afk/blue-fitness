@@ -16,10 +16,16 @@ const definitionSchema = z.object({
   id: z.string().uuid(), kind: z.enum(["PROMO", "COUPON"]),
   name: z.string().trim().min(1).max(120), code: z.string().regex(/^[A-Z0-9-]{3,40}$/),
   active: z.boolean(), expiresAt: date, quota: z.number().int().min(1).max(100000),
+  maxUses: z.number().int().min(1).max(100000).default(100),
   discountType: z.enum(["FIXED", "PERCENT"]), amount: money, minSpend: money,
+  couponType: z.enum(["DISCOUNT", "GIFT", "FREE", "BONUS_POINTS", "OTHER"]).default("FREE"),
+  unit: z.enum(["BAHT", "PERCENT", "POINTS"]).default("BAHT"),
+  maxCondition: money.default(0), conditionUnit: z.enum(["BAHT", "POINTS"]).default("BAHT"),
+  perPerson: z.number().int().min(1).max(100).default(1), validDays: z.number().int().min(0).max(3650).default(30),
+  noFixedExpiry: z.boolean().default(false),
   benefit: z.enum(["BRING_FRIEND", "EXTRA_DAYS"]), detail: z.string().trim().min(1).max(300),
 }).strict().superRefine((d, ctx) => {
-  if (d.amount < 1 || (d.kind === "PROMO" && d.discountType === "PERCENT" && d.amount > 100)) {
+  if (d.amount < 1 || (d.kind === "PROMO" && d.discountType === "PERCENT" && d.amount > 100) || (d.kind === "COUPON" && d.unit === "PERCENT" && d.amount > 100)) {
     ctx.addIssue({ code: "custom", message: "จำนวนสิทธิ์/ส่วนลดไม่ถูกต้อง (เปอร์เซ็นต์ไม่เกิน 100)" });
   }
   // Old v1 values above this limit fail closed, including immutable issued terms.
@@ -57,7 +63,7 @@ export function parseBenefits(raw: string | null): BenefitsState {
   try {
     const s = stateSchema.parse(JSON.parse(raw));
     if (!unique(s.memberships.map(m => m.memberCode)) || !unique(s.definitions.map(d => d.id)) || !unique(s.definitions.map(d => `${d.kind}:${d.code}`)) ||
-      !unique(s.grants.map(g => g.id)) || !unique(s.grants.map(g => g.code)) || !unique(s.grants.map(g => `${g.definition.id}:${g.memberCode}`)) ||
+      !unique(s.grants.map(g => g.id)) || !unique(s.grants.map(g => g.code)) ||
       !unique(s.batches.map(b => b.id)) || !unique(s.grants.flatMap(g => g.paymentId ? [g.paymentId] : []))) throw Error();
     for (const d of s.definitions) {
       if (s.grants.filter(g => g.definition.id === d.id).length > d.quota) throw Error();
@@ -72,7 +78,7 @@ export function parseBenefits(raw: string | null): BenefitsState {
         (g.status === "USED" && g.definition.kind === "PROMO" ? !g.paymentId || g.paidAmount === undefined : g.paymentId !== undefined || g.paidAmount !== undefined)) throw Error();
     }
     for (const b of s.batches) {
-      if (!b.memberCodes.length || !unique(b.memberCodes) || !s.definitions.some(d => d.id === b.definitionId) ||
+      if (!b.memberCodes.length || !s.definitions.some(d => d.id === b.definitionId) ||
         b.memberCodes.some(code => !s.grants.some(g => g.batchId === b.id && g.memberCode === code)) ||
         s.grants.filter(g => g.batchId === b.id).length !== b.memberCodes.length) throw Error();
     }
@@ -107,8 +113,9 @@ async function writeBenefits<T>(operation: (state: BenefitsState, now: Date, acc
 }
 export function newDefinition(kind: BenefitKind): BenefitDefinition {
   const bangkokDay = new Date(Date.now() + 30 * DAY_MS + 7 * 3600000).toISOString().slice(0, 10);
-  return { id: crypto.randomUUID(), kind, name: "", code: "", active: true, expiresAt: `${bangkokDay}T23:59:59+07:00`, quota: 100,
-    discountType: "FIXED", amount: 1, minSpend: 0, benefit: "BRING_FRIEND", detail: kind === "PROMO" ? "ส่วนลดแพ็กเกจ (mock)" : "พาเพื่อนมาออกกำลังกาย (mock)" };
+  return { id: crypto.randomUUID(), kind, name: "", code: "", active: true, expiresAt: kind === "COUPON" ? "9999-12-31T23:59:59+07:00" : `${bangkokDay}T23:59:59+07:00`, quota: 100, maxUses: 100,
+    discountType: "FIXED", amount: 1, minSpend: 0, couponType: "FREE", unit: "BAHT", maxCondition: 0, conditionUnit: "BAHT", perPerson: 1, validDays: 30,
+    noFixedExpiry: kind === "COUPON", benefit: "BRING_FRIEND", detail: kind === "PROMO" ? "ส่วนลดแพ็กเกจ (mock)" : "พาเพื่อนมาออกกำลังกาย (mock)" };
 }
 export async function saveDefinition(value: BenefitDefinition, expected: BenefitDefinition | null): Promise<void> {
   const parsed = definitionSchema.safeParse(value);
@@ -120,6 +127,7 @@ export async function saveDefinition(value: BenefitDefinition, expected: Benefit
     if ((old ? JSON.stringify(old) : null) !== snapshot || (old && old.kind !== draft.kind)) return fail("รายการเปลี่ยนแล้ว กรุณาโหลดและแก้ไขใหม่");
     if (s.definitions.some(d => d.id !== draft.id && d.kind === draft.kind && d.code === draft.code)) return fail("รหัสนิยามซ้ำ");
     if (draft.quota < s.grants.filter(g => g.definition.id === draft.id).length) return fail("โควต้าต้องไม่น้อยกว่าจำนวนที่แจกแล้ว");
+    if (draft.maxUses < s.grants.filter(g => g.definition.id === draft.id && g.status === "USED").length) return fail("จำนวนครั้งสูงสุดต้องไม่น้อยกว่าจำนวนที่ใช้แล้ว");
     s.definitions = [...s.definitions.filter(d => d.id !== draft.id), draft];
   });
 }
@@ -148,14 +156,21 @@ function planFor(s: BenefitsState, id: string, codes: string[], mode: GrantPlan[
   const d = usableDefinition(s, id, now);
   if (!codes.length || !unique(codes) || codes.some(c => !mockAdminMembers.some(m => m.memberCode === c))) return fail("กรุณาเลือกสมาชิกที่ถูกต้องอย่างน้อย 1 คน โดยไม่ซ้ำกัน");
   const prior = s.grants.filter(g => g.definition.id === id);
-  const newCodes = codes.filter(c => !prior.some(g => g.memberCode === c));
-  if (!newCodes.length) return fail("สมาชิกที่เลือกได้รับสิทธิ์นี้แล้วทั้งหมด (ไม่แจกซ้ำแม้ใช้แล้ว)");
+  const newCodes = codes.flatMap(code => Array.from({ length: Math.max(0, d.perPerson - prior.filter(g => g.memberCode === code).length) }, () => code));
+  if (!newCodes.length) return fail("สมาชิกที่เลือกได้รับสิทธิ์ครบจำนวนต่อคนแล้วทั้งหมด");
   if (prior.length + newCodes.length > d.quota) return fail("โควต้าแจกไม่พอ กรุณาลดผู้รับหรือแก้ไขโควต้า");
-  return { revision: s.revision, batchId, definitionId: id, mode, memberCodes: [...codes], newCodes, skipped: codes.length - newCodes.length };
+  return { revision: s.revision, batchId, definitionId: id, mode, memberCodes: [...codes], newCodes, skipped: codes.filter(code => prior.filter(g => g.memberCode === code).length >= d.perPerson).length };
 }
-export function previewGrant(id: string, selected: string[], mode: GrantPlan["mode"], now = new Date()): GrantPlan {
-  return planFor(readBenefits(), id, mode === "ALL" ? mockAdminMembers.map(m => m.memberCode) : [...new Set(selected)], mode, crypto.randomUUID(), now);
+export function previewGrant(id: string, selected: string[], mode: GrantPlan["mode"], now = new Date(), allRecipients?: string[]): GrantPlan {
+  return planFor(readBenefits(), id, mode === "ALL" ? [...new Set(allRecipients ?? mockAdminMembers.map(m => m.memberCode))] : [...new Set(selected)], mode, crypto.randomUUID(), now);
 }
+function issuedDefinition(definition: BenefitDefinition, now: Date): BenefitDefinition {
+  if (definition.kind !== "COUPON") return { ...definition };
+  const normalExpiry = now.getTime() + (definition.validDays === 0 ? 10 * 60_000 : definition.validDays * DAY_MS);
+  const fixedExpiry = definition.noFixedExpiry ? Number.POSITIVE_INFINITY : Date.parse(definition.expiresAt);
+  return { ...definition, expiresAt: new Date(Math.min(normalExpiry, fixedExpiry)).toISOString() };
+}
+
 export async function commitGrant(plan: GrantPlan): Promise<number> {
   const snapshot: GrantPlan = JSON.parse(JSON.stringify(plan));
   return writeBenefits((s, now) => {
@@ -167,7 +182,7 @@ export async function commitGrant(plan: GrantPlan): Promise<number> {
     for (const code of snapshot.newCodes) {
       const member = resolveBenefitMember(code);
       const id = crypto.randomUUID();
-      s.grants.push({ id, code: `BLU-${definition.kind === "COUPON" ? "CP" : "PC"}-${id.toUpperCase()}`, definition: { ...definition }, memberCode: member.memberCode,
+      s.grants.push({ id, code: `BLU-${definition.kind === "COUPON" ? "CP" : "PC"}-${id.toUpperCase()}`, definition: issuedDefinition(definition, now), memberCode: member.memberCode,
         memberName: member.fullName, batchId: snapshot.batchId, issuedAt: now.toISOString(), status: "UNUSED" });
     }
     return snapshot.newCodes.length;
@@ -180,6 +195,7 @@ function unusedGrant(s: BenefitsState, code: string, kind: BenefitKind, now: Dat
   // Disabling a definition also suspends outstanding grants. Issued terms otherwise remain immutable.
   const current = s.definitions.find(d => d.id === g.definition.id);
   if (!current?.active || !Number.isFinite(now.getTime()) || Date.parse(g.definition.expiresAt) <= now.getTime()) return fail("สิทธิ์หมดอายุหรือถูกระงับ");
+  if (s.grants.filter(item => item.definition.id === g.definition.id && item.status === "USED").length >= current.maxUses) return fail("โค้ดส่วนลดหรือคูปองครบจำนวนครั้งสูงสุดแล้ว");
   return g;
 }
 export function previewCoupon(code: string, now = new Date()): BenefitGrant { return unusedGrant(readBenefits(), code, "COUPON", now); }
