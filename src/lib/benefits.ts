@@ -79,23 +79,39 @@ const PROMO_DEMO_GRANTS: BenefitGrant[] = [
   { id: "00000000-0000-4000-8000-000000000013", code: "BLU-PC-00000000-0000-4000-8000-000000000013", definition: { ...PROMO_DEMO_B }, memberCode: "BLU-1020", memberName: "ธีรภัทร ใจกล้า", batchId: "00000000-0000-4000-8000-000000000102", issuedAt: "2026-09-17T02:00:00.000Z", status: "UNUSED" },
   { id: "00000000-0000-4000-8000-000000000014", code: "BLU-PC-00000000-0000-4000-8000-000000000014", definition: { ...PROMO_DEMO_B }, memberCode: "BLU-1025", memberName: "กัลยา ศรีสุข", batchId: "00000000-0000-4000-8000-000000000102", issuedAt: "2026-09-17T02:00:00.000Z", status: "USED", usedAt: "2026-09-18T04:15:00.000Z", paymentId: "00000000-0000-4000-8000-000000000202", paidAmount: 2430 },
 ];
+const COUPON_DEMO_A: BenefitDefinition = {
+  id: "00000000-0000-4000-8000-000000000003", kind: "COUPON", name: "คูปองพาเพื่อนฟรี", code: "FRIENDPASS", active: true,
+  expiresAt: "9999-12-31T23:59:59+07:00", quota: 100, maxUses: 100, discountType: "FIXED", amount: 1, minSpend: 0,
+  couponType: "GIFT", unit: "BAHT", maxCondition: 0, conditionUnit: "BAHT", perPerson: 1, validDays: 30, noFixedExpiry: true,
+  benefit: "BRING_FRIEND", detail: "พาเพื่อนเข้าใช้บริการได้ 1 ครั้ง",
+};
+const COUPON_DEMO_B: BenefitDefinition = {
+  id: "00000000-0000-4000-8000-000000000004", kind: "COUPON", name: "คูปองเครื่องดื่มฟรี", code: "DRINKFREE", active: true,
+  expiresAt: "9999-12-31T23:59:59+07:00", quota: 50, maxUses: 50, discountType: "FIXED", amount: 1, minSpend: 0,
+  couponType: "FREE", unit: "BAHT", maxCondition: 0, conditionUnit: "BAHT", perPerson: 1, validDays: 30, noFixedExpiry: true,
+  benefit: "BRING_FRIEND", detail: "รับเครื่องดื่มฟรี 1 รายการ",
+};
+const COUPON_DEMO_GRANTS: BenefitGrant[] = [
+  { id: "00000000-0000-4000-8000-000000000021", code: "BLU-CP-00000000-0000-4000-8000-000000000021", definition: { ...COUPON_DEMO_A, expiresAt: "2026-10-15T02:00:00.000Z", noFixedExpiry: true }, memberCode: "BLU-1001", memberName: "สมชาย ใจดี", batchId: "00000000-0000-4000-8000-000000000103", issuedAt: "2026-09-15T02:00:00.000Z", status: "UNUSED" },
+  { id: "00000000-0000-4000-8000-000000000022", code: "BLU-CP-00000000-0000-4000-8000-000000000022", definition: { ...COUPON_DEMO_B, expiresAt: "2026-10-16T02:00:00.000Z", noFixedExpiry: true }, memberCode: "BLU-1012", memberName: "วิภาดา รักฟิต", batchId: "00000000-0000-4000-8000-000000000104", issuedAt: "2026-09-16T02:00:00.000Z", status: "USED", usedAt: "2026-09-18T04:00:00.000Z" },
+];
 const PROMO_DEMO_STATE: BenefitsState = {
-  version: 1, revision: 0, memberships: [], definitions: [PROMO_DEMO_A, PROMO_DEMO_B], grants: PROMO_DEMO_GRANTS,
+  version: 1, revision: 0, memberships: [], definitions: [PROMO_DEMO_A, PROMO_DEMO_B, COUPON_DEMO_A, COUPON_DEMO_B], grants: [...PROMO_DEMO_GRANTS, ...COUPON_DEMO_GRANTS],
   batches: [
     { id: "00000000-0000-4000-8000-000000000101", definitionId: PROMO_DEMO_A.id, mode: "SELECTED", memberCodes: ["BLU-1001", "BLU-1012"], createdAt: "2026-09-15T02:00:00.000Z" },
     { id: "00000000-0000-4000-8000-000000000102", definitionId: PROMO_DEMO_B.id, mode: "SELECTED", memberCodes: ["BLU-1020", "BLU-1025"], createdAt: "2026-09-17T02:00:00.000Z" },
+    { id: "00000000-0000-4000-8000-000000000103", definitionId: COUPON_DEMO_A.id, mode: "SELECTED", memberCodes: ["BLU-1001"], createdAt: "2026-09-15T02:00:00.000Z" },
+    { id: "00000000-0000-4000-8000-000000000104", definitionId: COUPON_DEMO_B.id, mode: "SELECTED", memberCodes: ["BLU-1012"], createdAt: "2026-09-16T02:00:00.000Z" },
   ],
 };
 function initialBenefitsState(): BenefitsState { return structuredClone(PROMO_DEMO_STATE); }
-function addPromoDemoIfMissing(state: BenefitsState): BenefitsState {
-  if (state.grants.some(grant => grant.definition.kind === "PROMO")) return state;
+function addDemoBenefitsIfMissing(state: BenefitsState): BenefitsState {
   const demo = initialBenefitsState();
-  return {
-    ...state,
-    definitions: [...state.definitions, ...demo.definitions.filter(definition => !state.definitions.some(current => current.id === definition.id || (current.kind === "PROMO" && current.code === definition.code)))],
-    grants: [...state.grants, ...demo.grants],
-    batches: [...state.batches, ...demo.batches.filter(batch => !state.batches.some(current => current.id === batch.id))],
-  };
+  const missingKinds = new Set(state.grants.map(grant => grant.definition.kind));
+  const definitions = demo.definitions.filter(definition => !missingKinds.has(definition.kind) && !state.definitions.some(current => current.id === definition.id || (current.kind === definition.kind && current.code === definition.code)));
+  const grants = demo.grants.filter(grant => !missingKinds.has(grant.definition.kind));
+  const batches = demo.batches.filter(batch => grants.some(grant => grant.batchId === batch.id) && !state.batches.some(current => current.id === batch.id));
+  return { ...state, definitions: [...state.definitions, ...definitions], grants: [...state.grants, ...grants], batches: [...state.batches, ...batches] };
 }
 const fail = (message: string): never => { throw new Error(message); };
 function unique(values: string[]) { return new Set(values).size === values.length; }
@@ -123,7 +139,7 @@ export function parseBenefits(raw: string | null): BenefitsState {
         b.memberCodes.some(code => !s.grants.some(g => g.batchId === b.id && g.memberCode === code)) ||
         s.grants.filter(g => g.batchId === b.id).length !== b.memberCodes.length) throw Error();
     }
-    return addPromoDemoIfMissing(s);
+    return addDemoBenefitsIfMissing(s);
   } catch { return fail("ข้อมูลสิทธิ์ mock เสียหาย ระบบหยุดทำรายการ กรุณาตรวจสอบ localStorage (ไม่รีเซ็ตสิทธิ์อัตโนมัติ)"); }
 }
 export function readBenefits(): BenefitsState {

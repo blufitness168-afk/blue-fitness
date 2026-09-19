@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
 import CheckinCamera from "./CheckinCamera";
 
 export const panelClass = "rounded-2xl border border-blu-sky/50 bg-white p-5 space-y-4";
@@ -55,6 +56,11 @@ export default function AdminScanner({ label, disabled = false, onScan }: { labe
     {camera ? <CheckinCamera paused={disabled} onScan={value => { void scan(value, "CAMERA"); }} /> : <form ref={formRef} className="flex gap-2" onSubmit={e => { e.preventDefault(); void scan(code); }}><input ref={inputRef} aria-label={label} aria-disabled={disabled} readOnly={disabled} className={inputClass} autoComplete="off" maxLength={100} value={code} onChange={e => { if (!latest.current.disabled && !processing.current) setCode(e.target.value); }} placeholder="คลิกที่นี่ แล้วสแกนหรือพิมพ์รหัส" /><button className={buttonClass} disabled={disabled || !code.trim()}>ตรวจสอบ</button></form>}
     <p className="text-xs text-blu-steel">USB ส่ง Enter ท้ายรหัส • กันอ่านรหัสเดิมซ้ำ 3 วินาที • การสแกนไม่ยืนยันการแจก/แลกสิทธิ์เอง</p>
   </section>;
+}
+
+export function AdminScannerModal({ open, title = "สแกนรหัส", label, disabled = false, onClose, onScan }: { open: boolean; title?: string; label: string; disabled?: boolean; onClose: () => void; onScan: (code: string, source: "CAMERA" | "USB_MANUAL") => void | Promise<void> }) {
+  if (!open) return null;
+  return <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center bg-blu-dark/60 p-4"><div role="dialog" aria-modal="true" aria-labelledby="admin-scanner-title" className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl sm:p-6"><div className="mb-4 flex items-start justify-between gap-4"><h2 id="admin-scanner-title" className="text-xl font-black text-blu-dark">{title}</h2><button type="button" className="rounded-xl p-2 text-blu-steel hover:bg-blu-ice" onClick={onClose} disabled={disabled} aria-label="ปิดหน้าต่าง"><X className="h-5 w-5" /></button></div><AdminScanner label={label} disabled={disabled} onScan={onScan} /></div></div>;
 }
 
 export function Confirmation({ children, busy, onConfirm, onCancel, label = "ยืนยันรายการ" }: { children: React.ReactNode; busy: boolean; onConfirm: () => void; onCancel: () => void; label?: string }) {

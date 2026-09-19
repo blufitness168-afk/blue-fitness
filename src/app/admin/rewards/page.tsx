@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, Gift, History, PackageCheck, Pencil, Plus, Power, RefreshCw, Search, X } from "lucide-react";
-import { buttonClass, inputClass, MockNotice, panelClass } from "@/components/AdminScanner";
+import { AdminScannerModal, buttonClass, inputClass, MockNotice, panelClass } from "@/components/AdminScanner";
 import type { RedemptionRecord } from "@/lib/admin-mock";
 import { combinedMembershipHistory, readAdminMembers, type AdminMember } from "@/lib/admin-members";
 import { confirmDeskAction, DESK_UPDATED_EVENT, lookupRewardCode, readDeskRewards, type DeskAction } from "@/lib/front-desk";
@@ -69,6 +69,7 @@ export default function AdminRewardsPage() {
   const [draft, setDraft] = useState<RewardItem | null>(null);
   const [expected, setExpected] = useState<RewardItem | null>(null);
   const [action, setAction] = useState<DeskAction | null>(null);
+  const [scannerOpen, setScannerOpen] = useState(false);
   const [statusTarget, setStatusTarget] = useState<RewardItem | null>(null);
   const [busy, setBusy] = useState(false);
   const writing = useRef(false);
@@ -133,6 +134,17 @@ export default function AdminRewardsPage() {
     }
   }
 
+  function scanReward(code: string) {
+    if (writing.current || !ready) return;
+    try {
+      setAction(lookupRewardCode(code));
+      setScannerOpen(false);
+      setMessage("");
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "ไม่พบรหัสการแลกของรางวัล");
+    }
+  }
+
   const memberMap = useMemo(() => new Map(members.map((member) => [member.memberCode, member])), [members]);
   const historyFiltered = useMemo(() => records.filter((record) => {
     const type = memberType(memberMap.get(record.memberCode));
@@ -186,7 +198,7 @@ export default function AdminRewardsPage() {
           <div className="flex items-center gap-2 text-blu-dark"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blu-yellow/20 text-blu-dark"><History className="h-5 w-5" /></span><h2 className="text-lg font-black">1. ประวัติการรับของ</h2></div>
           <p className="mt-2 text-xs text-blu-steel">รายการจะแสดง “รอรับของ” เป็นค่าเริ่มต้น พนักงานกดยืนยันเมื่อส่งมอบให้ลูกค้าแล้ว</p>
         </div>
-        <button type="button" className={`${buttonClass} inline-flex items-center gap-1`} disabled={!historyFiltered.length} onClick={exportCsv}><Download className="h-4 w-4" /> Export CSV</button>
+        <div className="flex flex-wrap items-center gap-2"><button type="button" className={`${buttonClass} inline-flex items-center gap-1`} disabled={disabled} onClick={() => setScannerOpen(true)}>สแกน / กรอกรหัสรับของ</button><button type="button" className={`${buttonClass} inline-flex items-center gap-1`} disabled={!historyFiltered.length} onClick={exportCsv}><Download className="h-4 w-4" /> Export CSV</button></div>
       </div>
 
       <div className="mt-5 rounded-2xl border border-blu-sky/40 bg-blu-ice/35 p-4"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><Field label="สมาชิก / ชื่อ"><input className={inputClass} value={filters.memberCode} onChange={(event) => setFilters({ ...filters, memberCode: event.target.value })} placeholder="BLU-… หรือชื่อ" /></Field><Field label="ประเภทสมาชิก"><select className={inputClass} value={filters.memberType} onChange={(event) => setFilters({ ...filters, memberType: event.target.value })}><option value="ALL">ทั้งหมด</option><option value="DAILY">รายวัน</option><option value="MONTHLY">รายเดือน</option><option value="3_MONTHS">3 เดือน</option><option value="6_MONTHS">6 เดือน</option><option value="12_MONTHS">12 เดือน</option><option value="OTHER">อื่นๆ</option></select></Field><Field label="ชื่อของรางวัล"><select className={inputClass} value={filters.rewardId} onChange={(event) => setFilters({ ...filters, rewardId: event.target.value })}><option value="ALL">ทั้งหมด</option>{rewards.map((reward) => <option key={reward.id} value={reward.id}>{reward.title}</option>)}</select></Field><Field label="สถานะ"><select className={inputClass} value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value as StatusFilter })}><option value="PENDING">รอรับของ</option><option value="COMPLETED">รับแล้ว</option><option value="ALL">ทั้งหมด</option></select></Field><Field label="รหัสการแลก"><input className={inputClass} value={filters.rewardCode} onChange={(event) => setFilters({ ...filters, rewardCode: event.target.value })} placeholder="BLU-RW-…" /></Field></div><button type="button" onClick={() => setFilters({ ...initialFilters })} className="mt-3 text-xs font-bold text-blu-slate underline">คืนค่าตัวกรองเริ่มต้น</button></div>
@@ -212,6 +224,7 @@ export default function AdminRewardsPage() {
       <p className="mt-3 text-[10px] text-blu-steel">สต็อกคงเหลือ = สต็อกรวม − จำนวนรายการที่จองหรือรับแล้ว · รางวัลที่เคยแลกจะปิดใช้งานแทนการลบเพื่อเก็บประวัติ</p>
     </section>
 
+    <AdminScannerModal open={scannerOpen} title="สแกนหรือกรอกรหัสรับของรางวัล" label="สแกนหรือกรอกรหัสการแลก BLU-RW-…" disabled={disabled} onClose={() => setScannerOpen(false)} onScan={scanReward} />
     {action && <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center bg-blu-dark/60 p-4"><div role="dialog" aria-modal="true" aria-labelledby="reward-confirm-title" className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.15em] text-blu-steel">ยืนยันการส่งมอบ</p><h2 id="reward-confirm-title" className="mt-1 text-xl font-black text-blu-dark">ส่งมอบของรางวัลให้สมาชิก</h2></div><button type="button" className="rounded-xl p-2 text-blu-steel hover:bg-blu-ice" onClick={cancelAction} disabled={busy} aria-label="ปิดหน้าต่าง"><X className="h-5 w-5" /></button></div><div className="mt-5 space-y-3 rounded-2xl border border-blu-sky/40 bg-blu-ice/40 p-4 text-sm"><p>สมาชิก: <strong>{action.memberName}</strong> ({action.memberCode})</p><p>ของรางวัล: <strong>{action.title}</strong></p><p>รหัสการแลก: <span className="break-all font-mono text-xs">{action.code}</span></p><p className="text-xs text-blu-steel">{action.detail}</p></div><p className="mt-4 text-xs text-blu-steel">เมื่อยืนยันแล้ว สถานะจะเปลี่ยนเป็น “รับแล้ว” และระบบจะไม่หักแต้มซ้ำ</p><div className="mt-6 flex justify-end gap-3"><button type="button" className={buttonClass} onClick={cancelAction} disabled={busy}>ยกเลิก</button><button type="button" className="btn-gold rounded-xl px-4 py-2 font-bold disabled:opacity-40" disabled={busy || !ready} onClick={() => void run(async () => { await confirmDeskAction(action, new Date()); return "ยืนยันส่งมอบของรางวัลแล้ว"; })}>{busy ? "กำลังบันทึก…" : "ยืนยันรับของ"}</button></div></div></div>}
     {statusTarget && <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center bg-blu-dark/60 p-4"><div role="dialog" aria-modal="true" aria-labelledby="reward-status-title" className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.15em] text-blu-steel">ยืนยันการเปลี่ยนสถานะ</p><h2 id="reward-status-title" className="mt-1 text-xl font-black text-blu-dark">{statusTarget.isActive ? "ปิดใช้งานของรางวัล" : "เปิดใช้งานของรางวัล"}</h2></div><button type="button" className="rounded-xl p-2 text-blu-steel hover:bg-blu-ice" onClick={cancelAction} disabled={busy} aria-label="ปิดหน้าต่าง"><X className="h-5 w-5" /></button></div><div className="mt-5 rounded-2xl border border-blu-sky/40 bg-blu-ice/40 p-4 text-sm"><p>ของรางวัล: <strong>{statusTarget.title}</strong></p><p className="mt-2 text-xs text-blu-steel">{statusTarget.isActive ? "สมาชิกจะไม่สามารถแลกรางวัลนี้ใหม่ได้ แต่รายการที่แลกไว้แล้วจะยังคงอยู่ในประวัติ" : "สมาชิกจะสามารถแลกรางวัลนี้ได้อีกครั้ง หากยังมีสต็อกเหลือ"}</p></div><div className="mt-6 flex justify-end gap-3"><button type="button" className={buttonClass} onClick={cancelAction} disabled={busy}>ยกเลิก</button><button type="button" className="btn-gold rounded-xl px-4 py-2 font-bold disabled:opacity-40" disabled={busy || !ready} onClick={() => void run(async () => { const nextActive = !statusTarget.isActive; await saveReward({ ...statusTarget, isActive: nextActive }, statusTarget); return nextActive ? "เปิดใช้งานรางวัลแล้ว" : "ปิดใช้งานรางวัลแล้ว"; })}>{busy ? "กำลังบันทึก…" : statusTarget.isActive ? "ยืนยันปิดใช้งาน" : "ยืนยันเปิดใช้งาน"}</button></div></div></div>}
   </div>;
