@@ -38,7 +38,10 @@ test("package purchase creates real membership, stacks active/expired dates and 
   const s = await fixture(); const pkg = packageFor(s);
   const start = s.clock.now; const writes = s.writes.length;
   await s.purchaseMockPackage("BLU-1001", pkg, null);
-  assert.equal(s.writes.length, writes + 1);
+  assert.equal(s.writes.length, writes + 2); // benefits + member account/points ledger
+  const account = s.load("member-account").readMemberAccount("BLU-1001");
+  assert.equal(account.purchases[0].pointsEarned, Math.floor(pkg.price / 20));
+  assert.equal(account.points, 25 + Math.floor(pkg.price / 20));
   assert.deepEqual(json(s.readMembership("BLU-1001")), {
     memberCode: "BLU-1001", startedAt: new Date(start).toISOString(), expiresAt: new Date(start + 30 * DAY).toISOString(),
     name: pkg.name, timeSlot: pkg.timeSlot, totalDays: 30, friendCouponsLeft: 0,
@@ -79,8 +82,10 @@ test("purchase consumes promo and creates membership atomically once; failed sto
   const writes = s.writes.length;
   const results = await Promise.allSettled([s.purchaseMockPackage(g.memberCode, pkg, p), s.purchaseMockPackage(g.memberCode, pkg, p)]);
   assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
-  assert.equal(s.writes.length, writes + 1);
+  assert.equal(s.writes.length, writes + 2); // benefits + member account/points ledger
   assert.equal(s.readBenefits().grants[0].paidAmount, pkg.price - 100);
+  const account = s.load("member-account").readMemberAccount(g.memberCode);
+  assert.equal(account.purchases[0].pointsEarned, Math.floor((pkg.price - 100) / 20));
   assert.equal(s.readMembership(g.memberCode).totalDays, 30);
   const reload = setupMock({ storage: s.storage }).load("benefits");
   await assert.rejects(reload.purchaseMockPackage(g.memberCode, pkg, p), /ใช้แล้ว/);

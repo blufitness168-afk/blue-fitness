@@ -406,16 +406,14 @@ export const defaultMockMember: MemberProfile = {
       id: "log-1",
       type: "CHECKIN",
       action: "CHECKIN",
-      amount: "+1",
-      note: "สแกนเช็คอินเข้ายิม",
+      note: "สแกนเช็คอินเข้ายิม (ไม่เพิ่มคะแนน)",
       createdAt: "2026-09-01T08:30:00Z",
     },
     {
       id: "log-2",
       type: "CHECKIN",
       action: "CHECKIN",
-      amount: "+1",
-      note: "สแกนเช็คอินเข้ายิม",
+      note: "สแกนเช็คอินเข้ายิม (ไม่เพิ่มคะแนน)",
       createdAt: "2026-08-31T17:15:00Z",
     },
     {

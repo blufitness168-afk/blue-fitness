@@ -1,808 +1,334 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
-  X,
-  Calendar,
-  Phone,
-  CreditCard,
-  CheckCircle2,
-  Clock,
-  ArrowRight,
-  ShieldCheck,
-  HeartHandshake,
-  Tag,
-  Copy,
+
   Check,
-  Ticket,
   ChevronDown,
   ChevronUp,
+  Clock3,
+  Coins,
+  Gift,
+  History,
+  Home,
+  Info,
+  Pencil,
+  Phone,
+  QrCode,
+  ShieldCheck,
+  ShoppingBag,
+  Ticket,
+  UserRound,
+  X,
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
-import { useLanguage } from "@/context/LanguageContext";
-import { MemberProfile, defaultMockMember } from "@/lib/mock-data";
-import { BENEFITS_EVENT, BENEFITS_KEY, readMembership, type MockMembership } from "@/lib/benefits";
+import { BENEFITS_EVENT, BENEFITS_KEY, readBenefits, readMembership, type BenefitGrant, type MockMembership } from "@/lib/benefits";
+import { CHECKIN_STORAGE_KEY, parseCheckinRecords, type CheckinRecord } from "@/lib/checkin";
+import { DESK_UPDATED_EVENT, readDeskRewards } from "@/lib/front-desk";
+import {
+  MEMBER_ACCOUNT_EVENT,
+  MEMBER_ACCOUNT_KEY,
+  readMemberAccount,
+  readPointCouponCatalog,
+  redeemPointCoupon,
+  type MemberAccount,
+  type PointCoupon,
+  type PointCouponOffer,
+} from "@/lib/member-account";
+import { defaultMockMember, type MemberProfile, type RewardItem } from "@/lib/mock-data";
+import { readRewardCatalog, remainingStock, requestMockReward } from "@/lib/reward-catalog";
+import type { RedemptionRecord } from "@/lib/admin-mock";
 
-export default function MemberDashboardPage() {
-  const { t, lang } = useLanguage();
+const thaiMonths = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+type Tab = "home" | "qr" | "coupons" | "points";
+type ProfileDraft = Pick<MemberProfile, "fullName" | "nickname" | "phone" | "birthDay" | "birthMonth" | "emergencyContact">;
+
+const cardClass = "rounded-3xl border border-blu-sky/40 bg-white p-5 shadow-sm";
+const buttonClass = "rounded-xl bg-blu-dark px-4 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40";
+const inputClass = "w-full rounded-xl border border-blu-sky/60 bg-white px-3 py-2.5 text-sm outline-none focus:border-blu-slate focus:ring-2 focus:ring-blu-sky/40";
+
+function dateText(value?: string) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Bangkok" })
+    : value;
+}
+
+function statusText(status: "UNUSED" | "USED", expiresAt: string, suspended = false) {
+  if (status === "USED") return { label: "ใช้แล้ว", className: "bg-slate-100 text-slate-600" };
+  if (suspended) return { label: "ระงับ", className: "bg-amber-100 text-amber-800" };
+  if (Date.parse(expiresAt) <= Date.now()) return { label: "หมดอายุ", className: "bg-rose-100 text-rose-700" };
+  return { label: "ใช้ได้", className: "bg-emerald-100 text-emerald-700" };
+}
+
+function SectionTitle({ icon: Icon, title, action }: { icon: typeof History; title: string; action?: React.ReactNode }) {
+  return <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><Icon className="h-5 w-5 text-blu-slate" /><h2 className="font-black text-blu-dark">{title}</h2></div>{action}</div>;
+}
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return <p className="rounded-2xl border border-dashed border-blu-sky/70 bg-blu-ice/50 p-5 text-center text-sm text-blu-steel">{children}</p>;
+}
+
+export default function MemberAccountPage() {
   const router = useRouter();
+  const [tab, setTab] = useState<Tab>("home");
   const [member, setMember] = useState<MemberProfile | null>(null);
-
-  const [qrModalOpen, setQrModalOpen] = useState(false);
-  const [showAllCoupons, setShowAllCoupons] = useState(false);
-  const [showAllPromos, setShowAllPromos] = useState(false);
-  const [copiedCode, setCopiedCode] = useState<string | null>(null);
-
-  const handleCopyPromo = (code: string) => {
-    navigator.clipboard.writeText(code);
-    setCopiedCode(code);
-    setTimeout(() => setCopiedCode(null), 2000);
-  };
-
+  const [account, setAccount] = useState<MemberAccount | null>(null);
   const [membership, setMembership] = useState<MockMembership | null>(null);
-  const [storageError, setStorageError] = useState("");
-  const [now, setNow] = useState(0);
+  const [benefits, setBenefits] = useState<BenefitGrant[]>([]);
+  const [suspendedBenefitIds, setSuspendedBenefitIds] = useState<string[]>([]);
+  const [checkins, setCheckins] = useState<CheckinRecord[]>([]);
+  const [rewards, setRewards] = useState<RewardItem[]>([]);
+  const [redemptions, setRedemptions] = useState<RedemptionRecord[]>([]);
+  const [couponOffers, setCouponOffers] = useState<PointCouponOffer[]>([]);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<ProfileDraft | null>(null);
+  const [pendingDraft, setPendingDraft] = useState<{ memberCode: string; draft: ProfileDraft } | null>(null);
+  const [otp, setOtp] = useState("");
+  const [otpError, setOtpError] = useState("");
+  const [showPurchases, setShowPurchases] = useState(false);
+  const [showCheckins, setShowCheckins] = useState(false);
+  const [showCouponHistory, setShowCouponHistory] = useState(false);
+  const [showPointHistory, setShowPointHistory] = useState(false);
 
-  useEffect(() => {
-    const refresh = () => {
-      try {
-        const saved = localStorage.getItem("blu_member");
-        const profile = saved === null ? defaultMockMember : JSON.parse(saved);
-        if (!profile || typeof profile.memberCode !== "string" || !/^BLU-\d+$/.test(profile.memberCode) || typeof profile.fullName !== "string") throw new Error("ข้อมูลโปรไฟล์สมาชิกไม่ถูกต้อง กรุณาตรวจสอบ blu_member");
-        const current = readMembership(profile.memberCode);
-        setMember(profile);
-        setMembership(current);
-        setNow(Date.now());
-        setStorageError("");
-      } catch (cause) {
-        setMembership(null);
-        setStorageError(cause instanceof Error ? cause.message : "อ่านข้อมูลสมาชิกไม่ได้");
+  const refresh = useCallback(() => {
+    try {
+      const saved = localStorage.getItem("blu_member");
+      const parsed = saved === null ? defaultMockMember : JSON.parse(saved);
+      if (!parsed || typeof parsed !== "object") throw new Error("ข้อมูลโปรไฟล์สมาชิกไม่ถูกต้อง");
+      const profile = { ...defaultMockMember, ...parsed } as MemberProfile;
+      if (typeof profile.memberCode !== "string" || !/^BLU-\d+$/.test(profile.memberCode) || typeof profile.fullName !== "string" ||
+        !profile.fullName.trim() || typeof profile.phone !== "string" || typeof profile.birthDay !== "string" || typeof profile.birthMonth !== "string") {
+        throw new Error("ข้อมูลโปรไฟล์สมาชิกไม่ถูกต้อง");
       }
-    };
-    // Hydrate browser-only mock storage; never seed membership from the legacy card template.
-    refresh();
-    const sync = (event: StorageEvent) => {
-      if (event.key === BENEFITS_KEY || event.key === "blu_member" || event.key === null) refresh();
-    };
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    window.addEventListener("storage", sync);
-    window.addEventListener(BENEFITS_EVENT, refresh);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("storage", sync);
-      window.removeEventListener(BENEFITS_EVENT, refresh);
-    };
+      const benefitState = readBenefits();
+      setMember(profile);
+      setAccount(readMemberAccount(profile.memberCode));
+      setMembership(readMembership(profile.memberCode));
+      setBenefits(benefitState.grants.filter(grant => grant.memberCode === profile.memberCode));
+      setSuspendedBenefitIds(benefitState.definitions.filter(definition => !definition.active).map(definition => definition.id));
+      setCheckins(parseCheckinRecords(localStorage.getItem(CHECKIN_STORAGE_KEY)).filter(record => record.memberCode === profile.memberCode));
+      setRewards(readRewardCatalog().filter(reward => reward.isActive));
+      setRedemptions(readDeskRewards().filter(record => record.memberCode === profile.memberCode));
+      setCouponOffers(readPointCouponCatalog());
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "อ่านข้อมูลบัญชีไม่ได้");
+    }
   }, []);
 
-  const remaining = membership ? Math.max(0, Date.parse(membership.expiresAt) - now) : 0;
-  const timeLeft = membership ? {
-    days: Math.floor(remaining / 86400000),
-    hours: Math.floor(remaining / 3600000) % 24,
-    minutes: Math.floor(remaining / 60000) % 60,
-    seconds: Math.floor(remaining / 1000) % 60,
-  } : { days: 45, hours: 14, minutes: 32, seconds: 45 };
+  useEffect(() => {
+    // Hydrate the browser-only mock stores after the client mounts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    refresh();
+    const storage = (event: StorageEvent) => {
+      if ([null, "blu_member", BENEFITS_KEY, CHECKIN_STORAGE_KEY, MEMBER_ACCOUNT_KEY].includes(event.key)) refresh();
+    };
+    window.addEventListener("storage", storage);
+    window.addEventListener(BENEFITS_EVENT, refresh);
+    window.addEventListener(MEMBER_ACCOUNT_EVENT, refresh);
+    window.addEventListener(DESK_UPDATED_EVENT, refresh);
+    return () => {
+      window.removeEventListener("storage", storage);
+      window.removeEventListener(BENEFITS_EVENT, refresh);
+      window.removeEventListener(MEMBER_ACCOUNT_EVENT, refresh);
+      window.removeEventListener(DESK_UPDATED_EVENT, refresh);
+    };
+  }, [refresh]);
 
-  const handleLogout = () => {
+  const purchases = useMemo(() => [...(account?.purchases ?? [])].sort((a, b) => Date.parse(b.purchasedAt) - Date.parse(a.purchasedAt)), [account]);
+  const memberCheckins = useMemo(() => [...checkins].sort((a, b) => Date.parse(b.checkedAt) - Date.parse(a.checkedAt)), [checkins]);
+  const couponHistory = useMemo(() => [
+    ...benefits.map(grant => ({ id: grant.id, title: grant.definition.name, detail: grant.status === "USED" ? `ใช้เมื่อ ${dateText(grant.usedAt)}` : `ได้รับเมื่อ ${dateText(grant.issuedAt)}`, date: grant.usedAt ?? grant.issuedAt })),
+    ...(account?.pointCoupons ?? []).map(coupon => ({ id: coupon.id, title: coupon.title, detail: `แลกด้วย ${coupon.pointsSpent} คะแนน`, date: coupon.redeemedAt })),
+  ].sort((a, b) => Date.parse(b.date) - Date.parse(a.date)), [account, benefits]);
+  const adminCoupons = benefits.filter(grant => grant.definition.kind === "COUPON");
+  const adminPromos = benefits.filter(grant => grant.definition.kind === "PROMO");
+  const pointCoupons = account?.pointCoupons ?? [];
+
+  const logout = () => {
     localStorage.removeItem("blu_member");
     router.push("/");
   };
 
-  if (storageError) {
-    return <main className="mx-auto max-w-lg space-y-4 px-4 py-24 text-blu-dark"><p role="alert">{storageError}</p><p>ไม่แสดงแพ็กเกจตัวอย่างแทนข้อมูลที่อ่านไม่สำเร็จ</p><button className="underline" onClick={() => window.location.reload()}>โหลดใหม่</button><Link className="block underline" href="/">กลับหน้าแรก</Link></main>;
-  }
-
-  if (!member) {
-    return (
-      <div className="min-h-screen bg-blu-ice flex items-center justify-center text-blu-dark">
-        <div className="w-8 h-8 border-3 border-blu-slate border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  const daysLeft = Math.ceil(remaining / 86400000);
-  const activePackage = membership ? {
-    ...membership,
-    usedDays: Math.max(0, Math.min(membership.totalDays, membership.totalDays - daysLeft)),
-    daysLeft,
-    expireDate: new Date(membership.expiresAt).toLocaleString(lang === "en" ? "en-GB" : "th-TH", { timeZone: "Asia/Bangkok" }),
-  } : {
-    name: lang === "en" ? "BLU 07:00-22:00 (3 Months Pass)" : "BLU 07:00-22:00 (ราย 3 เดือน)",
-    timeSlot: "07:00 - 22:00 น.",
-    usedDays: 45,
-    totalDays: 90,
-    daysLeft: 45,
-    expireDate: lang === "en" ? "12 Oct 2026" : "12 ต.ค. 2026",
-    friendCouponsLeft: 5,
+  const openEdit = () => {
+    if (!member) return;
+    setDraft({
+      fullName: member.fullName,
+      nickname: member.nickname ?? "",
+      phone: member.phone,
+      birthDay: member.birthDay,
+      birthMonth: member.birthMonth,
+      emergencyContact: member.emergencyContact ?? { name: "", phone: "", relation: "" },
+    });
+    setEditing(true);
+    setMessage("");
   };
 
-  return (
-    <main className="min-h-screen bg-blu-ice text-blu-dark pb-16">
-      {/* ═══════════════════════════════════════════════
-          NAVBAR (Same component as home)
-      ═══════════════════════════════════════════════ */}
-      <Navbar member={member} onLogout={handleLogout} />
+  const saveProfile = (next: ProfileDraft, expectedMemberCode = member?.memberCode) => {
+    if (!member || member.memberCode !== expectedMemberCode) {
+      setOtpError("บัญชีสมาชิกเปลี่ยนระหว่างยืนยัน กรุณาปิดหน้าต่างและแก้ไขข้อมูลใหม่");
+      return;
+    }
+    const updated = { ...member, ...next, avatarUrl: member.avatarUrl };
+    localStorage.setItem("blu_member", JSON.stringify(updated));
+    setMember(updated);
+    setEditing(false);
+    setPendingDraft(null);
+    setOtp("");
+    setOtpError("");
+    setMessage("บันทึกข้อมูลส่วนตัวแล้ว");
+  };
 
-      {/* ═══════════════════════════════════════════════
-          MAIN CONTAINER
-      ═══════════════════════════════════════════════ */}
-      <div className="max-w-lg mx-auto px-4 pt-24 space-y-6">
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm" role="status">
-          {membership
-            ? (remaining > 0 ? "แพ็กเกจ mock ที่บันทึกในเบราว์เซอร์นี้ • เวลาคงเหลืออิงวันหมดอายุที่บันทึก" : "แพ็กเกจ mock หมดอายุแล้ว")
-            : "ยังไม่มีแพ็กเกจที่บันทึก — บัตร แพ็กเกจ และเวลาคงเหลือด้านล่างเป็นแม่แบบ mock เดิม ไม่ใช่สิทธิ์เข้าใช้ และไม่ใช้เป็นฐานเพิ่มวัน"}
-          <p>ข้อมูลทดลองเท่านั้น ไม่มีการยืนยันสิทธิ์จาก backend</p>
-          <Link className="mr-4 underline" href="/#packages">ซื้อ / ต่ออายุแพ็กเกจ mock</Link>
-          <Link className="underline" href="/member/benefits">กระเป๋าสิทธิ์ที่ได้รับแจก</Link>
-        </div>
+  const submitProfile = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!member || !draft) return;
+    const cleanPhone = draft.phone.replace(/\D/g, "");
+    if (cleanPhone.length < 9 || cleanPhone.length > 10) return setMessage("กรุณากรอกเบอร์โทร 9–10 หลัก");
+    const cleanDraft = { ...draft, phone: cleanPhone };
+    if (cleanPhone !== member.phone.replace(/\D/g, "")) {
+      setPendingDraft({ memberCode: member.memberCode, draft: cleanDraft });
+      setOtp("");
+      setOtpError("");
+      setMessage("ส่ง OTP จำลองแล้ว ใช้รหัส 123456");
+      return;
+    }
+    saveProfile(cleanDraft);
+  };
 
-        {/* ═══════════════════════════════════════════════
-            1. REALISTIC BLU FITNESS PHYSICAL CARD REPLICA
-        ═══════════════════════════════════════════════ */}
-        <section className="relative">
-          {/* Card Body */}
-          <div className="relative aspect-[1.58/1] w-full bg-white rounded-2xl overflow-hidden border border-blu-sky/40 shadow-lg flex select-none">
+  const verifyOtp = () => {
+    if (!pendingDraft) return;
+    if (otp !== "123456") return setOtpError("OTP ไม่ถูกต้อง สำหรับ Mock ใช้ 123456");
+    saveProfile(pendingDraft.draft, pendingDraft.memberCode);
+  };
 
-            {/* ── Left Edge Animated Live Blue/Gold Shimmer Accent (Anti-Fraud Downward Flow) ── */}
-            <div className="absolute inset-y-0 left-0 w-2.5 sm:w-3 bg-[linear-gradient(180deg,_#0c3756_0%,_#3a728e_20%,_#ffd700_50%,_#3a728e_80%,_#0c3756_100%)] animate-flow-down rounded-l-2xl z-20 shadow-xs" />
+  const redeemProduct = async (reward: RewardItem) => {
+    if (!member || busy) return;
+    setBusy(true); setMessage("");
+    try {
+      await requestMockReward(reward, member.memberCode);
+      setMessage(`แลก ${reward.title} สำเร็จ แสดงรหัสรับสินค้าที่ประวัติด้านล่าง`);
+      refresh();
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : "แลกรางวัลไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
 
-            {/* ── Left 58%: White & Stacked Large Logo & Clean Single-Line Fields ── */}
-            <div className="flex-1 pl-6 pr-3 py-3.5 sm:pl-8 sm:pr-4 sm:py-4 flex flex-col justify-between relative bg-white">
+  const redeemCouponOffer = async (offer: PointCouponOffer) => {
+    if (!member || busy) return;
+    setBusy(true); setMessage("");
+    try {
+      await redeemPointCoupon(member.memberCode, offer);
+      setMessage(`แลก ${offer.title} สำเร็จ คูปองอยู่ในเมนูคูปองแล้ว`);
+      refresh();
+      setTab("coupons");
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : "แลกคูปองไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
 
-              {/* Stacked Large Brand Logo */}
-              <div className="flex flex-col items-start z-10">
-                <div className="relative w-[136px] h-[136px] sm:w-[154px] sm:h-[154px] -ml-2 -mt-3">
-                  <Image
-                    src="/logo.jpg"
-                    alt="Blu Fitness Logo"
-                    fill
-                    sizes="350px"
-                    className="object-contain"
-                    priority
-                  />
-                </div>
-                <div className="-mt-4 sm:-mt-5 relative z-20">
-                  <div className="text-4xl sm:text-5xl font-black tracking-tight text-blu-slate leading-none drop-shadow-xs">
-                    BLU
-                  </div>
-                  <div className="text-sm sm:text-base font-black tracking-[0.24em] text-blu-dark uppercase mt-0.5">
-                    FITNESS
-                  </div>
-                </div>
+  if (!member || !account) return <main className="flex min-h-screen items-center justify-center bg-blu-ice p-6 text-blu-dark">{error ? <div className={cardClass}><p role="alert">{error}</p><button className={`${buttonClass} mt-4`} onClick={refresh}>ลองใหม่</button></div> : <div className="h-9 w-9 animate-spin rounded-full border-4 border-blu-slate border-t-transparent" />}</main>;
+
+  return <main className="min-h-screen bg-blu-ice pb-28 text-blu-dark">
+    <Navbar member={member} onLogout={logout} />
+    <div className="mx-auto max-w-lg space-y-5 px-4 pt-24">
+      <header className="flex items-center justify-between gap-3">
+        <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-blu-steel">My Account</p><h1 className="text-2xl font-black">{({ home: "หน้าหลัก", qr: "QR Code", coupons: "คูปอง", points: "คะแนน" } as const)[tab]}</h1></div>
+        <span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-[11px] font-bold text-amber-800">Mock / เครื่องนี้</span>
+      </header>
+
+      {message && <div role="status" className="flex items-start justify-between gap-3 rounded-2xl bg-blu-dark p-4 text-sm text-white"><span>{message}</span><button aria-label="ปิดข้อความ" onClick={() => setMessage("")}><X className="h-4 w-4" /></button></div>}
+      {error && <p role="alert" className="rounded-2xl bg-rose-100 p-4 text-sm text-rose-800">{error}</p>}
+
+      {tab === "home" && <div className="space-y-5">
+        <section className={`${cardClass} overflow-hidden p-0`}>
+          <div className="bg-gradient-to-br from-blu-dark via-blu-navy to-blu-slate p-5 text-white">
+            <div className="flex items-center gap-4">
+              <div className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-white/80 bg-blu-slate text-2xl font-black shadow-lg">
+                {member.avatarUrl ? <Image src={member.avatarUrl} alt={member.fullName} fill sizes="80px" className="object-cover" /> : member.fullName.charAt(0)}
               </div>
-
-              {/* Member & Date Underlined Fields */}
-              <div className="space-y-2 sm:space-y-2.5 z-10">
-                {/* Member Name (1 Line) */}
-                <div>
-                  <div className="flex items-baseline gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                    <span className="font-extrabold text-blu-dark shrink-0">{t("member.member_label")}:</span>
-                    <span className="font-black text-blu-slate truncate">
-                      {member.fullName}
-                    </span>
-                  </div>
-                  <div className="h-[1.5px] bg-blu-slate w-full mt-0.5 opacity-80" />
-                </div>
-
-                {/* Date (1 Line with Live Ticking Seconds & Pulsing Dot) */}
-                <div>
-                  <div className="flex items-baseline justify-between text-xs sm:text-sm whitespace-nowrap gap-1">
-                    <div className="flex items-baseline gap-1">
-                      <span className="font-extrabold text-blu-dark shrink-0">{t("member.date_label")}:</span>
-                      <span className="font-black text-blu-slate font-mono">
-                        {activePackage.usedDays}/{activePackage.totalDays} {t("member.days_unit")}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1 text-[10px] sm:text-[11px] text-emerald-600 font-extrabold shrink-0 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200">
-                      <span className="relative flex h-1.5 w-1.5">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
-                      </span>
-                      <span className="font-mono">
-                        {lang === "en"
-                          ? `${timeLeft.days}d ${String(timeLeft.hours).padStart(2, "0")}:${String(timeLeft.minutes).padStart(2, "0")}:${String(timeLeft.seconds).padStart(2, "0")}`
-                          : `${timeLeft.days}วัน ${String(timeLeft.hours).padStart(2, "0")}:${String(timeLeft.minutes).padStart(2, "0")}:${String(timeLeft.seconds).padStart(2, "0")}`}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="h-[1.5px] bg-blu-slate w-full mt-0.5 opacity-80" />
-                </div>
-              </div>
+              <div className="min-w-0 flex-1"><div className="flex items-center gap-1"><h2 className="truncate text-xl font-black">{member.fullName}</h2><ShieldCheck className="h-4 w-4 text-blu-yellow" /></div><p className="font-mono text-xs text-blu-sky">{member.memberCode}</p><p className="mt-1 text-xs text-white/75">รูปโปรไฟล์เปลี่ยนได้โดยติดต่อเจ้าหน้าที่เท่านั้น</p></div>
             </div>
-
-            {/* ── Right 40%: Metallic Deep Blue Tab (Subtle Diagonal Metallic Sheen & Pure QR) ── */}
-            <div
-              onClick={() => setQrModalOpen(true)}
-              className="w-[40%] bg-[linear-gradient(135deg,_#0c3756_0%,_#1f5372_30%,_#3a728e_50%,_#1f5372_70%,_#0c3756_100%)] p-3 sm:p-4 flex flex-col items-center justify-center text-center text-white relative cursor-pointer hover:brightness-110 transition-all border-l border-blu-slate"
-              title="แตะเพื่อขยาย QR Code"
-            >
-              {/* Direct QR Code with Transparent Background (Printed on Blue Metal) */}
-              <div className="transition-transform hover:scale-105 z-10">
-                <QRCodeSVG
-                  value={member.memberCode || "BLU-1001"}
-                  size={150}
-                  level="H"
-                  bgColor="transparent"
-                  fgColor="#0c3756"
-                  marginSize={0}
-                  className="w-24 h-24 sm:w-30 sm:h-30 drop-shadow-xs"
-                />
-              </div>
-            </div>
-
+          </div>
+          <div className="space-y-3 p-5 text-sm">
+            <div className="flex justify-between gap-3"><span className="text-blu-steel">แพ็กเกจปัจจุบัน</span><strong className="text-right">{membership?.name ?? "ยังไม่มีแพ็กเกจ"}</strong></div>
+            <div className="flex justify-between gap-3"><span className="text-blu-steel">วันหมดอายุ</span><strong>{membership ? dateText(membership.expiresAt) : "—"}</strong></div>
+            <div className="flex justify-between gap-3"><span className="text-blu-steel">สมัครครั้งแรก</span><strong>{dateText(member.registeredAt)}</strong></div>
+            <button className={`${buttonClass} mt-2 flex w-full items-center justify-center gap-2`} onClick={openEdit}><Pencil className="h-4 w-4" />แก้ไขข้อมูลส่วนตัว</button>
           </div>
         </section>
 
-        {/* ═══════════════════════════════════════════════
-            2. BLU POINT 10-SLOT STAMP CARD (Luxury Navy & Gold Theme - Sharp Corners)
-        ═══════════════════════════════════════════════ */}
-        <section className="bg-gradient-to-br from-blu-dark via-blu-navy to-blu-dark text-white rounded-none p-5 border-2 border-blu-yellow/50 shadow-xl space-y-4 relative overflow-hidden">
-          {/* Header Row: BLU POINT (Gold) & Total Points Summary (Right) */}
-          <div className="flex items-center justify-between pb-3.5 border-b border-white/15">
-            <h3 className="text-base sm:text-lg font-black tracking-wider text-blu-yellow uppercase">
-              {t("points.title")}
-            </h3>
-            <div className="font-mono font-black text-sm sm:text-base">
-              <span className="text-blu-yellow text-xl sm:text-2xl font-black">{member.points ?? 35}</span>
-              <span className="text-blu-sky/80 font-bold ml-1">{t("points.of_100")}</span>
-            </div>
-          </div>
+        {adminPromos.length > 0 && <section className={`${cardClass} border-amber-300 bg-gradient-to-br from-amber-50 to-white`}><SectionTitle icon={Gift} title="คูปองแนะนำจาก Admin" /><div className="mt-4 space-y-3">{adminPromos.filter(grant => grant.status === "UNUSED").slice(0, 2).map(grant => <div key={grant.id} className="rounded-2xl bg-white p-4 shadow-sm"><strong>{grant.definition.name}</strong><p className="mt-1 text-xs text-blu-steel">{grant.definition.detail}</p><button className="mt-2 text-xs font-bold text-blu-slate underline" onClick={() => setTab("coupons")}>เปิดคูปอง</button></div>)}</div></section>}
 
-          {/* 10-Slot Stamp Grid (5 columns x 2 rows) */}
-          <div className="grid grid-cols-5 gap-2 sm:gap-3">
-            {Array.from({ length: 10 }).map((_, i) => {
-              const slotNum = i + 1;
-              const slotStart = i * 10;
-              const slotEnd = slotNum * 10;
-              const currentPts = member.points ?? 35;
-              let fill = 0;
-              if (currentPts >= slotEnd) {
-                fill = 100;
-              } else if (currentPts > slotStart) {
-                fill = Math.round(((currentPts - slotStart) / 10) * 100);
-              }
-              const gradId = `db-stamp-gold-${slotNum}`;
-              return (
-                <div
-                  key={i}
-                  className={`aspect-square rounded-none flex flex-col items-center justify-center p-1 relative transition-all ${fill === 100
-                      ? "bg-blu-yellow/15 border-2 border-blu-yellow shadow-[0_0_12px_rgba(255,215,0,0.25)]"
-                      : fill > 0
-                        ? "bg-white/10 border border-blu-yellow/70"
-                        : "bg-white/5 border border-white/10"
-                    }`}
-                >
-                  <span className={`absolute top-1 left-1.5 text-[8px] sm:text-[9px] font-mono font-bold ${fill > 0 ? "text-blu-yellow" : "text-white/30"
-                    }`}>
-                    {slotNum * 10}
-                  </span>
-                  <svg
-                    viewBox="0 0 44 44"
-                    className="w-full h-full p-0.5 sm:p-1 max-w-[58px] max-h-[58px] drop-shadow-xs"
-                  >
-                    <defs>
-                      <linearGradient id={gradId} gradientUnits="userSpaceOnUse" x1="0" y1="22" x2="44" y2="22">
-                        <stop offset={`${fill}%`} stopColor="#ffd700" />
-                        <stop offset={`${fill}%`} stopColor="#3a728e" />
-                      </linearGradient>
-                    </defs>
-                    {/* 45-Degree Diagonal Large Dumbbell with Separated Plate Gaps */}
-                    <g transform="rotate(-45 22 22)" fill={`url(#${gradId})`}>
-                      {/* Central Grip Bar */}
-                      <rect x="12.5" y="18" width="19" height="8" rx="4" />
-                      {/* Left Inner Plate */}
-                      <rect x="5.5" y="10" width="5.5" height="24" rx="2.5" />
-                      {/* Left Outer Plate (with 1.5px gap) */}
-                      <rect x="0" y="13" width="4" height="18" rx="2" />
-                      {/* Right Inner Plate */}
-                      <rect x="33" y="10" width="5.5" height="24" rx="2.5" />
-                      {/* Right Outer Plate (with 1.5px gap) */}
-                      <rect x="40" y="13" width="4" height="18" rx="2" />
-                    </g>
-                  </svg>
-                </div>
-              );
-            })}
-          </div>
+        <HistoryBlock title="ประวัติการซื้อ" icon={ShoppingBag} expanded={showPurchases} setExpanded={setShowPurchases} total={purchases.length}>
+          {(showPurchases ? purchases : purchases.slice(0, 3)).map(item => <div key={item.id} className="flex justify-between gap-3 border-b border-blu-sky/20 py-3 last:border-0"><div><strong className="text-sm">{item.packageName}</strong><p className="text-xs text-blu-steel">{dateText(item.purchasedAt)} • ได้ {item.pointsEarned} คะแนน</p></div><strong className="whitespace-nowrap">฿{item.paidAmount.toLocaleString()}</strong></div>)}
+          {!purchases.length && <Empty>ยังไม่มีประวัติการซื้อบนเครื่องนี้</Empty>}
+        </HistoryBlock>
 
-          {/* Bottom Action: Redeem Rewards → /member/rewards */}
-          <div className="pt-1 text-center">
-            <Link
-              href="/member/rewards"
-              className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-blu-yellow hover:text-[#ffe55b] transition-colors underline underline-offset-4 decoration-blu-yellow/70"
-            >
-              <span>{t("points.redeem")}</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-        </section>
+        <HistoryBlock title="ประวัติการใช้คูปอง" icon={Ticket} expanded={showCouponHistory} setExpanded={setShowCouponHistory} total={couponHistory.length}>
+          {(showCouponHistory ? couponHistory : couponHistory.slice(0, 3)).map(item => <div key={item.id} className="border-b border-blu-sky/20 py-3 last:border-0"><strong className="text-sm">{item.title}</strong><p className="text-xs text-blu-steel">{item.detail}</p></div>)}
+          {!couponHistory.length && <Empty>ยังไม่มีประวัติคูปอง</Empty>}
+        </HistoryBlock>
 
-        <p className="rounded-xl bg-amber-50 p-3 text-xs text-blu-dark">คูปองและโค้ดบนแม่แบบด้านล่างเป็นตัวอย่างเดิม ไม่ใช่สิทธิ์ที่ได้รับแจกและใช้ซื้อแพ็กเกจไม่ได้ — <Link className="underline" href="/member/benefits">ดูสิทธิ์ที่ได้รับแจกในกระเป๋า</Link></p>
+        <HistoryBlock title="ข้อมูลการเข้าใช้บริการ" icon={Clock3} expanded={showCheckins} setExpanded={setShowCheckins} total={memberCheckins.length}>
+          {(showCheckins ? memberCheckins : memberCheckins.slice(0, 3)).map(item => <div key={item.id} className="flex justify-between border-b border-blu-sky/20 py-3 text-sm last:border-0"><span>เช็กอินเข้าใช้บริการ</span><span className="text-xs text-blu-steel">{dateText(item.checkedAt)}</span></div>)}
+          {!memberCheckins.length && <Empty>ยังไม่มีประวัติเช็กอินบนเครื่องนี้</Empty>}
+        </HistoryBlock>
+      </div>}
 
-        {/* ═══════════════════════════════════════════════
-            3. LUXURY NAVY & GOLD FRIEND PASS TICKET (No Redirect)
-        ═══════════════════════════════════════════════ */}
-        <section>
-          <div className="relative w-full max-w-md mx-auto hover:scale-[1.01] transition-transform select-none cursor-pointer">
-            {/* 100% True Transparent Vector Ticket Graphic */}
-            <svg
-              viewBox="0 0 460 230"
-              className="w-full h-auto drop-shadow-xl"
-            >
-              <defs>
-                {/* Deep Royal Navy Gradient */}
-                <linearGradient id="navyTicketGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#1f5372" />
-                  <stop offset="50%" stopColor="#0c3756" />
-                  <stop offset="100%" stopColor="#061c2d" />
-                </linearGradient>
+      {tab === "qr" && <section className={`${cardClass} overflow-hidden p-0`}>
+        <div className="bg-gradient-to-br from-blu-dark via-blu-navy to-blu-slate px-5 py-7 text-center text-white"><QrCode className="mx-auto mb-2 h-7 w-7 text-blu-yellow" /><h2 className="text-xl font-black">QR สำหรับเข้าใช้บริการ</h2><p className="mt-1 text-xs text-blu-sky">แสดงให้เจ้าหน้าที่สแกนที่เคาน์เตอร์</p></div>
+        <div className="flex flex-col items-center p-7"><div className="rounded-3xl border-4 border-blu-dark bg-white p-5 shadow-xl"><QRCodeSVG value={member.memberCode} size={230} level="H" title={`รหัสสมาชิก ${member.memberCode}`} /></div><h3 className="mt-5 text-xl font-black">{member.fullName}</h3><p className="font-mono text-sm font-bold text-blu-slate">{member.memberCode}</p><div className="mt-5 flex gap-2 rounded-2xl bg-blu-ice p-3 text-xs text-blu-steel"><Info className="h-4 w-4 shrink-0" /><p>QR นี้เป็นรหัสสมาชิกสำหรับเช็กอินเท่านั้น ไม่ใช่ QR คูปองหรือรหัสรับสินค้า</p></div></div>
+      </section>}
 
-                {/* Metallic Gold Sheen Gradient */}
-                <linearGradient id="goldTicketGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#f59e0b" />
-                  <stop offset="25%" stopColor="#ffd700" />
-                  <stop offset="50%" stopColor="#fff3b0" />
-                  <stop offset="75%" stopColor="#ffd700" />
-                  <stop offset="100%" stopColor="#d97706" />
-                </linearGradient>
-              </defs>
+      {tab === "coupons" && <div className="space-y-5">
+        {membership && membership.friendCouponsLeft > 0 && <section className={`${cardClass} border-blu-yellow/70 bg-gradient-to-br from-blu-dark to-blu-navy text-white`}><div className="flex justify-between gap-3"><div><p className="text-xs font-bold text-blu-yellow">สิทธิ์จากแพ็กเกจ</p><h2 className="mt-1 text-xl font-black">คูปองพาเพื่อน</h2><p className="text-sm text-blu-sky">คงเหลือ {membership.friendCouponsLeft} ครั้ง</p></div><Ticket className="h-10 w-10 text-blu-yellow" /></div><p className="mt-4 text-xs text-white/70">แสดงบัตรสมาชิกและติดต่อเจ้าหน้าที่เพื่อใช้สิทธิ์</p></section>}
+        {adminCoupons.map(coupon => <AdminCouponCard key={coupon.id} coupon={coupon} source="Admin แจก" suspended={suspendedBenefitIds.includes(coupon.definition.id)} />)}
+        {adminPromos.map(coupon => <AdminCouponCard key={coupon.id} coupon={coupon} source="โปรสมาชิก" suspended={suspendedBenefitIds.includes(coupon.definition.id)} />)}
+        {pointCoupons.map(coupon => <PointCouponCard key={coupon.id} coupon={coupon} />)}
+        {!membership?.friendCouponsLeft && !adminCoupons.length && !adminPromos.length && !pointCoupons.length && <section className={cardClass}><Empty>ยังไม่มีคูปองในกระเป๋า<br />คูปองจาก Admin หรือคูปองที่แลกด้วยคะแนนจะแสดงที่นี่</Empty></section>}
+      </div>}
 
-              {/* Main Ticket Base with Sharp 90° Corners & Side Notches */}
-              <path
-                d="M 16 12 L 444 12 L 444 32 A 5 5 0 0 0 444 44 L 444 54 A 5 5 0 0 0 444 66 L 444 90 A 25 25 0 0 0 444 140 L 444 164 A 5 5 0 0 0 444 176 L 444 186 A 5 5 0 0 0 444 198 L 444 218 L 16 218 L 16 198 A 5 5 0 0 0 16 186 L 16 176 A 5 5 0 0 0 16 164 L 16 140 A 25 25 0 0 0 16 90 L 16 66 A 5 5 0 0 0 16 54 L 16 44 A 5 5 0 0 0 16 32 L 16 12 Z"
-                fill="url(#navyTicketGrad)"
-              />
+      {tab === "points" && <div className="space-y-5">
+        <section className="overflow-hidden rounded-3xl border-2 border-blu-yellow/50 bg-gradient-to-br from-blu-dark via-blu-navy to-blu-dark p-5 text-white shadow-xl"><div className="flex items-start justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-blu-sky">คะแนนสะสมของฉัน</p><div className="mt-1 text-4xl font-black text-blu-yellow">{account.points.toLocaleString()} <span className="text-sm text-white">คะแนน</span></div></div><Coins className="h-10 w-10 text-blu-yellow" /></div><div className="mt-5 rounded-2xl bg-white/10 p-3 text-xs text-blu-sky"><strong className="text-white">เงื่อนไข:</strong> ทุกยอดชำระจริงหลังหักส่วนลด 20 บาท = 1 คะแนน เศษไม่ครบ 20 บาทปัดทิ้ง • เช็กอินไม่เพิ่มคะแนน</div></section>
 
-              {/* Inner Luxury Gold Border with Sharp 90° Corners (Curves only Around Notches) */}
-              <path
-                d="M 34 26 L 426 26 L 426 84 A 26 26 0 0 0 426 146 L 426 204 L 34 204 L 34 146 A 26 26 0 0 0 34 84 L 34 26 Z"
-                fill="none"
-                stroke="url(#goldTicketGrad)"
-                strokeWidth="3.5"
-              />
-            </svg>
+        <section className={cardClass}><SectionTitle icon={ShoppingBag} title="แลกสินค้า" /><div className="mt-4 grid grid-cols-2 gap-3">{rewards.map(reward => { const stock = remainingStock(reward, redemptions); const redeemed = redemptions.some(record => record.rewardId === reward.id); const canRedeem = account.points >= reward.pointCost && stock > 0 && !redeemed; return <article key={reward.id} className="overflow-hidden rounded-2xl border border-blu-sky/40"><div className="relative aspect-[4/3] bg-blu-ice"><Image unoptimized src={reward.imageUrl} alt={reward.title} fill sizes="220px" className="object-cover" /></div><div className="space-y-2 p-3"><h3 className="line-clamp-2 text-xs font-bold">{reward.title}</h3><p className="text-xs font-black text-blu-slate">{reward.pointCost} คะแนน</p><button className={`${buttonClass} w-full px-2 py-2 text-xs`} disabled={!canRedeem || busy} onClick={() => void redeemProduct(reward)}>{redeemed ? "แลกแล้ว" : stock < 1 ? "สินค้าหมด" : account.points < reward.pointCost ? "คะแนนไม่พอ" : "แลกสินค้า"}</button></div></article>; })}</div></section>
 
-            {/* Centered Golden & White Typography Inside Ticket Frame */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-center z-10 px-8 sm:px-12 py-3">
-              <div className="space-y-1">
-                <span className="inline-block text-[10px] sm:text-[11px] font-black tracking-widest text-blu-yellow uppercase drop-shadow-sm">
-                  {t("coupon.vip_pass")}
-                </span>
+        <section className={cardClass}><SectionTitle icon={Ticket} title="แลกคูปอง" /><div className="mt-4 space-y-3">{couponOffers.map(offer => { const held = pointCoupons.some(coupon => coupon.offerId === offer.id && coupon.status === "UNUSED" && Date.parse(coupon.expiresAt) > Date.now()); return <article key={offer.id} className="flex items-center justify-between gap-3 rounded-2xl bg-blu-ice p-4"><div><strong className="text-sm">{offer.title}</strong><p className="text-xs text-blu-steel">{offer.detail} • อายุ {offer.validDays} วัน</p><p className="mt-1 text-xs font-black text-blu-slate">{offer.pointCost} คะแนน</p></div><button className={buttonClass} disabled={busy || held || account.points < offer.pointCost} onClick={() => void redeemCouponOffer(offer)}>{held ? "มีแล้ว" : "แลก"}</button></article>; })}</div></section>
 
-                <h4 className="text-2xl sm:text-3xl font-black text-white tracking-tight uppercase leading-none drop-shadow-md">
-                  {t("coupon.title")}
-                </h4>
+        <HistoryBlock title="ประวัติรับและใช้คะแนน" icon={History} expanded={showPointHistory} setExpanded={setShowPointHistory} total={account.pointLedger.length}>
+          {[...account.pointLedger].reverse().slice(0, showPointHistory ? undefined : 5).map(entry => <div key={entry.id} className="flex items-center justify-between gap-3 border-b border-blu-sky/20 py-3 last:border-0"><div><strong className="text-sm">{entry.description}</strong><p className="text-xs text-blu-steel">{dateText(entry.createdAt)} • คงเหลือ {entry.balanceAfter}</p></div><strong className={entry.delta >= 0 ? "text-emerald-600" : "text-rose-600"}>{entry.delta >= 0 ? "+" : ""}{entry.delta}</strong></div>)}
+        </HistoryBlock>
 
-                <p className="text-xs sm:text-sm font-bold text-blu-sky mt-1">
-                  {t("coupon.subtitle")}{" "}
-                  <span className="text-blu-yellow text-base sm:text-lg font-black">
-                    {member.coupons?.friend_pass?.remaining ?? 5}
-                  </span>{" "}
-                  {t("coupon.passes")}
-                </p>
+        {redemptions.length > 0 && <section className={cardClass}><SectionTitle icon={Gift} title="รหัสรับสินค้า" /><div className="mt-4 space-y-3">{redemptions.map(record => <details key={record.id} className="rounded-2xl bg-blu-ice p-4"><summary className="cursor-pointer text-sm font-bold">{record.rewardTitle} • {record.status === "PENDING" ? "รอรับ" : "รับแล้ว"}</summary><div className="mt-4 flex flex-col items-center"><QRCodeSVG value={record.rewardCode} size={150} title={record.rewardTitle} /><p className="mt-2 break-all text-center font-mono text-[10px]">{record.rewardCode}</p></div></details>)}</div></section>}
+      </div>}
+    </div>
 
-                <div className="pt-1">
-                  <span className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-black text-blu-yellow underline underline-offset-4 decoration-blu-yellow/70 hover:text-[#ffe55b]">
-                    <span>{t("coupon.open")}</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
+    <nav aria-label="เมนูบัญชีสมาชิก" className="fixed inset-x-0 bottom-0 z-40 border-t border-blu-sky/30 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_30px_rgba(12,55,86,0.12)] backdrop-blur-lg"><div className="mx-auto grid max-w-lg grid-cols-4">{([
+      ["home", Home, "หน้าหลัก"], ["qr", QrCode, "QR Code"], ["coupons", Ticket, "คูปอง"], ["points", Coins, "คะแนน"],
+    ] as const).map(([key, Icon, label]) => <button key={key} aria-current={tab === key ? "page" : undefined} onClick={() => { setTab(key); window.scrollTo({ top: 0, behavior: "smooth" }); }} className={`flex flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-bold transition ${tab === key ? "bg-blu-dark text-blu-yellow" : "text-blu-steel hover:bg-blu-ice"}`}><Icon className="h-5 w-5" /><span>{label}</span></button>)}</div></nav>
 
-          {/* Bottom Button / Toggle: Show All Coupons */}
-          <div className="pt-2 text-center">
-            <button
-              type="button"
-              onClick={() => setShowAllCoupons(!showAllCoupons)}
-              className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-blu-slate hover:text-blu-dark transition-colors cursor-pointer select-none"
-            >
-              <span>{showAllCoupons ? t("coupon.show_less") : t("coupon.show_all")}</span>
-              {showAllCoupons ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </button>
-          </div>
+    {editing && draft && <div className="fixed inset-0 z-[60] flex items-end justify-center bg-blu-dark/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onMouseDown={event => { if (event.target === event.currentTarget) setEditing(false); }}><form onSubmit={submitProfile} className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl"><div className="flex items-center justify-between"><div><h2 className="text-xl font-black">แก้ไขข้อมูลส่วนตัว</h2><p className="text-xs text-blu-steel">เปลี่ยนเบอร์โทรต้องยืนยัน OTP</p></div><button type="button" aria-label="ปิด" onClick={() => setEditing(false)}><X /></button></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="space-y-1 text-xs font-bold sm:col-span-2">ชื่อ-นามสกุล<input required maxLength={120} className={inputClass} value={draft.fullName} onChange={e => setDraft({ ...draft, fullName: e.target.value })} /></label><label className="space-y-1 text-xs font-bold">ชื่อเล่น<input maxLength={50} className={inputClass} value={draft.nickname ?? ""} onChange={e => setDraft({ ...draft, nickname: e.target.value })} /></label><label className="space-y-1 text-xs font-bold">เบอร์โทร<input required inputMode="numeric" className={inputClass} value={draft.phone} onChange={e => setDraft({ ...draft, phone: e.target.value.replace(/\D/g, "").slice(0, 10) })} /></label><label className="space-y-1 text-xs font-bold">วันเกิด<input required type="number" min={1} max={31} className={inputClass} value={draft.birthDay} onChange={e => setDraft({ ...draft, birthDay: e.target.value })} /></label><label className="space-y-1 text-xs font-bold">เดือนเกิด<select required className={inputClass} value={draft.birthMonth} onChange={e => setDraft({ ...draft, birthMonth: e.target.value })}><option value="">เลือกเดือน</option>{thaiMonths.map(month => <option key={month}>{month}</option>)}</select></label><div className="sm:col-span-2 rounded-2xl bg-blu-ice p-4"><p className="mb-3 text-xs font-black">ผู้ติดต่อฉุกเฉิน</p><div className="grid gap-3 sm:grid-cols-3"><input aria-label="ชื่อผู้ติดต่อฉุกเฉิน" placeholder="ชื่อ" className={inputClass} value={draft.emergencyContact?.name ?? ""} onChange={e => setDraft({ ...draft, emergencyContact: { ...(draft.emergencyContact ?? { phone: "", relation: "" }), name: e.target.value } })} /><input aria-label="ความสัมพันธ์" placeholder="ความสัมพันธ์" className={inputClass} value={draft.emergencyContact?.relation ?? ""} onChange={e => setDraft({ ...draft, emergencyContact: { ...(draft.emergencyContact ?? { name: "", phone: "" }), relation: e.target.value } })} /><input aria-label="เบอร์ผู้ติดต่อฉุกเฉิน" inputMode="numeric" placeholder="เบอร์โทร" className={inputClass} value={draft.emergencyContact?.phone ?? ""} onChange={e => setDraft({ ...draft, emergencyContact: { ...(draft.emergencyContact ?? { name: "", relation: "" }), phone: e.target.value.replace(/\D/g, "").slice(0, 10) } })} /></div></div><div className="sm:col-span-2 flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900"><UserRound className="h-5 w-5 shrink-0" />รูปโปรไฟล์ไม่สามารถแก้ไขเองได้ กรุณาติดต่อเจ้าหน้าที่</div></div><button className={`${buttonClass} mt-5 w-full`}>บันทึกข้อมูล</button></form></div>}
 
-          {/* None State (When Show All is expanded) */}
-          {showAllCoupons && (
-            <div className="mt-3 p-4 rounded-2xl bg-white/90 border-2 border-dashed border-blu-sky/80 text-center text-xs text-blu-steel space-y-1 animate-in fade-in slide-in-from-top-2 duration-200 shadow-xs">
-              <Ticket className="w-6 h-6 mx-auto text-blu-steel/50 mb-0.5" />
-              <p className="font-bold text-blu-dark text-xs sm:text-sm">{t("coupon.none")}</p>
-              <p className="text-[10px] text-blu-steel">
-                {lang === "en" ? "Check back later for new member vouchers" : "รอติดตามคูปองและสิทธิพิเศษใหม่ๆ เร็วๆ นี้"}
-              </p>
-            </div>
-          )}
-        </section>
+    {pendingDraft && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-blu-dark/80 p-4 backdrop-blur-sm"><div className="w-full max-w-sm rounded-3xl bg-white p-6 text-center shadow-2xl"><Phone className="mx-auto h-10 w-10 text-blu-slate" /><h2 className="mt-3 text-xl font-black">ยืนยันเบอร์โทรใหม่</h2><p className="mt-1 text-sm text-blu-steel">กรอกรหัส OTP ที่ส่งไปยัง {pendingDraft.draft.phone}</p><p className="mt-3 rounded-xl bg-amber-50 p-2 text-xs text-amber-800">Mock OTP: <strong>123456</strong></p><input autoFocus inputMode="numeric" maxLength={6} aria-label="OTP" className={`${inputClass} mt-4 text-center font-mono text-xl tracking-[0.4em]`} value={otp} onChange={e => { setOtp(e.target.value.replace(/\D/g, "").slice(0, 6)); setOtpError(""); }} />{otpError && <p role="alert" className="mt-3 rounded-xl bg-rose-100 p-2 text-xs text-rose-700">{otpError}</p>}<div className="mt-4 grid grid-cols-2 gap-3"><button className="rounded-xl border border-blu-sky px-4 py-2.5 text-sm font-bold" onClick={() => { setPendingDraft(null); setOtp(""); setOtpError(""); }}>ยกเลิก</button><button className={buttonClass} disabled={otp.length !== 6} onClick={verifyOtp}><Check className="mr-1 inline h-4 w-4" />ยืนยัน</button></div></div></div>}
+  </main>;
+}
 
-        {/* ═══════════════════════════════════════════════
-            4. VIBRANT RUBY RED SCALLOPED STAMP DISCOUNT TAG (Anti-Screenshot Red Contrast)
-        ═══════════════════════════════════════════════ */}
-        <section>
-          <div className="relative w-full max-w-md mx-auto hover:scale-[1.01] transition-transform select-none">
-            {/* 100% True Transparent Vector Scalloped Stamp Tag Graphic */}
-            <svg
-              viewBox="0 0 460 220"
-              className="w-full h-auto drop-shadow-xl"
-            >
-              <defs>
-                {/* Vibrant Coral Ruby Red Gradient */}
-                <linearGradient id="rubyStampGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#ff2e63" />
-                  <stop offset="50%" stopColor="#e11d48" />
-                  <stop offset="100%" stopColor="#be123c" />
-                </linearGradient>
+function HistoryBlock({ title, icon, expanded, setExpanded, total, children }: { title: string; icon: typeof History; expanded: boolean; setExpanded: (value: boolean) => void; total: number; children: React.ReactNode }) {
+  return <section className={cardClass}><SectionTitle icon={icon} title={title} action={total > 3 ? <button className="flex items-center gap-1 text-xs font-bold text-blu-slate" onClick={() => setExpanded(!expanded)}>{expanded ? "ย่อรายการ" : "ดูทั้งหมด"}{expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button> : undefined} /><div className="mt-3">{children}</div></section>;
+}
 
-                {/* Soft Gold/White Tag Accent */}
-                <linearGradient id="whiteTagGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#ffffff" />
-                  <stop offset="100%" stopColor="#fef08a" />
-                </linearGradient>
-              </defs>
+function AdminCouponCard({ coupon, source, suspended }: { coupon: BenefitGrant; source: string; suspended: boolean }) {
+  const status = statusText(coupon.status, coupon.definition.expiresAt, suspended);
+  return <section className={cardClass}><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold text-blu-slate">{source}</p><h2 className="mt-1 text-lg font-black">{coupon.definition.name}</h2></div><span className={`rounded-full px-3 py-1 text-xs font-bold ${status.className}`}>{status.label}</span></div><p className="mt-2 text-sm text-blu-steel">{coupon.definition.detail}</p><p className="mt-1 text-xs text-blu-steel">หมดอายุ {dateText(coupon.definition.expiresAt)}</p><div className="mt-4 flex flex-col items-center rounded-2xl bg-blu-ice p-4"><QRCodeSVG value={coupon.code} size={150} title={coupon.definition.name} /><p className="mt-2 break-all text-center font-mono text-[10px]">{coupon.code}</p></div></section>;
+}
 
-              {/* Scalloped Postage Stamp Border Base */}
-              <path
-                d="M 20 20 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 Z"
-                fill="url(#rubyStampGrad)"
-              />
-
-              {/* Inner Dashed White Ticket Border */}
-              <rect
-                x="36"
-                y="34"
-                width="388"
-                height="152"
-                rx="14"
-                fill="none"
-                stroke="white"
-                strokeWidth="2.5"
-                strokeDasharray="7 4"
-                opacity="0.9"
-              />
-
-              {/* Top Tag Punch Hole */}
-              <circle cx="230" cy="42" r="5" fill="#f0fcfe" stroke="white" strokeWidth="1.5" />
-            </svg>
-
-            {/* Typography & Code Box Inside Scalloped Tag */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-center z-10 px-8 sm:px-12 py-2">
-              <div className="space-y-1">
-                {/* Limited Time Badge */}
-                <div className="inline-flex items-center gap-1 bg-white/20 px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-black tracking-widest text-white uppercase backdrop-blur-xs">
-                  <span>✦ {lang === "en" ? "LIMITED TIME OFFER" : "ส่วนลดพิเศษจำกัดเวลา"} ✦</span>
-                </div>
-
-                {/* Big Discount Title */}
-                <div className="flex items-center justify-center gap-2">
-                  <span className="line-through text-white/60 text-xs sm:text-sm font-bold">฿1,000</span>
-                  <h4 className="text-3xl sm:text-4xl font-black text-white tracking-tight uppercase leading-none drop-shadow-md">
-                    {t("promo.title")}
-                  </h4>
-                </div>
-
-                <p className="text-[11px] sm:text-xs font-bold text-white/90">
-                  {t("promo.desc")}
-                </p>
-
-                {/* Promo Code Box + Copy CTA */}
-                <div className="pt-1 flex items-center justify-center gap-2">
-                  <div className="bg-white text-rose-600 px-3 py-1 rounded-lg flex items-center gap-1.5 font-mono font-black text-xs sm:text-sm tracking-wider shadow-md">
-                    <Tag className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                    <span>FITNESS10</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleCopyPromo("FITNESS10")}
-                    className="bg-blu-yellow hover:bg-[#ffe433] text-blu-dark px-3 py-1 rounded-lg text-xs font-black flex items-center gap-1 shadow-md hover:shadow-lg transition-all cursor-pointer"
-                  >
-                    {copiedCode === "FITNESS10" ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-800" />
-                        <span>{t("promo.copied")}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5 text-blu-dark" />
-                        <span>{t("promo.copy")}</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                <div className="text-[10px] text-white/80 font-medium pt-0.5">
-                  {t("promo.valid_thru")}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Second Scalloped Stamp Tag (BLU50 - 50 THB OFF) shown on Show All */}
-          {showAllPromos && (
-            <div className="relative w-full max-w-md mx-auto hover:scale-[1.01] transition-transform select-none mt-3.5 animate-in fade-in slide-in-from-top-2 duration-300">
-              <svg
-                viewBox="0 0 460 220"
-                className="w-full h-auto drop-shadow-xl"
-              >
-                <defs>
-                  {/* Sunset Amber-Crimson Gradient */}
-                  <linearGradient id="amberRubyStampGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#f97316" />
-                    <stop offset="50%" stopColor="#ea580c" />
-                    <stop offset="100%" stopColor="#c2410c" />
-                  </linearGradient>
-                </defs>
-
-                {/* Scalloped Postage Stamp Border Base */}
-                <path
-                  d="M 20 20 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 4 0 a 6 6 0 0 0 12 0 l 4 0 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l 0 4 a 6 6 0 0 0 0 12 l 0 4 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l -4 0 a 6 6 0 0 0 -12 0 l -4 0 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 l 0 -4 a 6 6 0 0 0 0 -12 l 0 -4 Z"
-                  fill="url(#amberRubyStampGrad)"
-                />
-
-                {/* Inner Dashed White Ticket Border */}
-                <rect
-                  x="36"
-                  y="34"
-                  width="388"
-                  height="152"
-                  rx="14"
-                  fill="none"
-                  stroke="white"
-                  strokeWidth="2.5"
-                  strokeDasharray="7 4"
-                  opacity="0.9"
-                />
-
-                {/* Top Tag Punch Hole */}
-                <circle cx="230" cy="42" r="5" fill="#f0fcfe" stroke="white" strokeWidth="1.5" />
-              </svg>
-
-              {/* Typography & Code Box Inside Scalloped Tag */}
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-center z-10 px-8 sm:px-12 py-2">
-                <div className="space-y-1">
-                  {/* Limited Time Badge */}
-                  <div className="inline-flex items-center gap-1 bg-white/20 px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-black tracking-widest text-white uppercase backdrop-blur-xs">
-                    <span>✦ {lang === "en" ? "ALL PASSES DISCOUNT" : "ส่วนลดพิเศษทุกแพ็กเกจ"} ✦</span>
-                  </div>
-
-                  {/* Big Discount Title */}
-                  <div className="flex items-center justify-center gap-2">
-                    <span className="line-through text-white/60 text-xs sm:text-sm font-bold">฿100</span>
-                    <h4 className="text-3xl sm:text-4xl font-black text-white tracking-tight uppercase leading-none drop-shadow-md">
-                      {t("promo.title_50")}
-                    </h4>
-                  </div>
-
-                  <p className="text-[11px] sm:text-xs font-bold text-white/90">
-                    {t("promo.desc_50")}
-                  </p>
-
-                  {/* Promo Code Box + Copy CTA */}
-                  <div className="pt-1 flex items-center justify-center gap-2">
-                    <div className="bg-white text-orange-600 px-3 py-1 rounded-lg flex items-center gap-1.5 font-mono font-black text-xs sm:text-sm tracking-wider shadow-md">
-                      <Tag className="w-3.5 h-3.5 text-orange-600 shrink-0" />
-                      <span>BLU50</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleCopyPromo("BLU50")}
-                      className="bg-blu-yellow hover:bg-[#ffe433] text-blu-dark px-3 py-1 rounded-lg text-xs font-black flex items-center gap-1 shadow-md hover:shadow-lg transition-all cursor-pointer"
-                    >
-                      {copiedCode === "BLU50" ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-emerald-800" />
-                          <span>{t("promo.copied")}</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5 text-blu-dark" />
-                          <span>{t("promo.copy")}</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                  <div className="text-[10px] text-white/80 font-medium pt-0.5">
-                    {t("promo.valid_thru")}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Bottom Button / Toggle: Show All Discounts */}
-          <div className="pt-2 text-center">
-            <button
-              type="button"
-              onClick={() => setShowAllPromos(!showAllPromos)}
-              className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-rose-600 hover:text-rose-800 transition-colors cursor-pointer select-none font-extrabold"
-            >
-              <span>{showAllPromos ? t("promo.show_less") : t("promo.show_all")}</span>
-              {showAllPromos ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </button>
-          </div>
-        </section>
-
-        {/* ═══════════════════════════════════════════════
-            5. ACTION BUTTON: RENEW / BUY PACKAGE
-        ═══════════════════════════════════════════════ */}
-        <section>
-          <Link
-            href="/#packages"
-            className="w-full btn-gold py-4 px-6 rounded-2xl text-center font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer"
-          >
-            <CreditCard className="w-5 h-5" />
-            <span>{t("action.renew")}</span>
-          </Link>
-        </section>
-
-        {/* ═══════════════════════════════════════════════
-            4. MEMBER PERSONAL DETAILS (White Card on Gray with Profile Photo)
-        ═══════════════════════════════════════════════ */}
-        <section className="bg-white rounded-2xl p-5 border border-blu-sky/40 shadow-sm space-y-4 text-xs">
-          {/* Header Row: Member Avatar Profile Image + Name & Verified Badge */}
-          <div className="flex items-center justify-between pb-3.5 border-b border-blu-sky/20">
-            <div className="flex items-center gap-3">
-              {/* Member Avatar Photo */}
-              <div className="relative w-13 h-13 rounded-full overflow-hidden bg-gradient-to-br from-blu-slate via-blu-navy to-blu-dark border-2 border-white shadow-sm ring-2 ring-blu-sky/30 flex items-center justify-center shrink-0">
-                {member.avatarUrl ? (
-                  <Image
-                    src={member.avatarUrl}
-                    alt={member.fullName}
-                    fill
-                    className="object-cover"
-                  />
-                ) : (
-                  <span className="text-base font-black text-white">
-                    {member.fullName ? member.fullName.charAt(0) : "ส"}
-                  </span>
-                )}
-              </div>
-
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <h3 className="font-extrabold text-sm sm:text-base text-blu-dark leading-tight">
-                    {member.fullName} {member.nickname && <span className="text-xs font-bold text-blu-slate">({member.nickname})</span>}
-                  </h3>
-                  <ShieldCheck className="w-4 h-4 text-blu-slate shrink-0" />
-                </div>
-                <p className="text-[11px] text-blu-steel font-mono mt-0.5">
-                  {t("details.code")} <span className="font-bold text-blu-dark">{member.memberCode}</span>
-                </p>
-              </div>
-            </div>
-
-            <span className="text-[11px] text-emerald-600 flex items-center gap-1 font-bold bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 shrink-0">
-              <CheckCircle2 className="w-3.5 h-3.5" /> {t("details.verified")}
-            </span>
-          </div>
-
-          <div className="space-y-2.5 text-blu-steel">
-            <div className="flex items-center justify-between">
-              <span className="text-blu-steel flex items-center gap-1.5">
-                <CreditCard className="w-3.5 h-3.5 text-blu-steel/70" /> {t("details.pkg_current")}
-              </span>
-              <span className="font-bold text-blu-dark text-right">
-                {activePackage.name}
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>{lang === "en" ? "Access hours (mock)" : "ช่วงเวลาเข้าใช้ (mock)"}</span>
-              <span className="font-bold text-blu-dark">{activePackage.timeSlot}</span>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <span className="text-blu-steel flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-blu-steel/70" /> {t("details.expire_date")}
-              </span>
-              <span className="font-bold text-blu-slate">
-                {activePackage.expireDate}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <span className="text-blu-steel flex items-center gap-1.5">
-                <Phone className="w-3.5 h-3.5 text-blu-steel/70" /> {t("details.phone")}
-              </span>
-              <span className="font-mono font-bold text-blu-dark">
-                {member.phone}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <span className="text-blu-steel flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-blu-steel/70" /> {t("details.birthday")}
-              </span>
-              <span className="font-semibold text-blu-dark">
-                {(() => {
-                  const day = member.birthDay || "15";
-                  const month = member.birthMonth || "สิงหาคม";
-                  const monthMapEn: Record<string, string> = {
-                    "มกราคม": "January", "กุมภาพันธ์": "February", "มีนาคม": "March",
-                    "เมษายน": "April", "พฤษภาคม": "May", "มิถุนายน": "June",
-                    "กรกฎาคม": "July", "สิงหาคม": "August", "กันยายน": "September",
-                    "ตุลาคม": "October", "พฤศจิกายน": "November", "ธันวาคม": "December"
-                  };
-                  return lang === "en" ? `${day} ${monthMapEn[month] || month}` : `${day} ${month}`;
-                })()}
-              </span>
-            </div>
-
-            {member.emergencyContact?.name && (
-              <div className="flex items-center justify-between pt-1 border-t border-blu-sky/20">
-                <span className="text-blu-steel flex items-center gap-1.5">
-                  <HeartHandshake className="w-3.5 h-3.5 text-blu-steel/70" /> {t("details.emergency_contact")}
-                </span>
-                <span className="font-medium text-blu-dark text-right text-[11px]">
-                  {member.emergencyContact.name}{" "}
-                  {member.emergencyContact.relation && (
-                    <span className="text-blu-steel">({member.emergencyContact.relation})</span>
-                  )}{" "}
-                  <span className="font-mono font-bold text-blu-dark">{member.emergencyContact.phone}</span>
-                </span>
-              </div>
-            )}
-          </div>
-        </section>
-
-      </div>
-
-      {/* ═══════════════════════════════════════════════
-          FULLSCREEN QR CODE MODAL
-      ═══════════════════════════════════════════════ */}
-      {qrModalOpen && (
-        <div
-          onClick={() => setQrModalOpen(false)}
-          className="fixed inset-0 z-50 bg-blu-dark/90 backdrop-blur-md flex flex-col items-center justify-center p-6 animate-in fade-in duration-200"
-        >
-          <button
-            onClick={() => setQrModalOpen(false)}
-            className="absolute top-6 right-6 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
-
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-3xl p-8 text-center max-w-xs w-full shadow-2xl animate-in zoom-in-95 duration-150 border border-blu-sky/40"
-          >
-            <div className="text-xs font-bold text-blu-slate uppercase tracking-wider mb-1">
-              BLU FITNESS CHECK-IN
-            </div>
-            <div className="text-base font-bold text-blu-dark truncate">
-              {member.fullName}
-            </div>
-            <div className="flex items-center justify-center gap-1.5 text-[11px] text-emerald-600 font-bold mb-3">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <span className="font-mono">
-                {membership ? "MOCK LIVE" : "TEMPLATE"}: {timeLeft.days}d {String(timeLeft.hours).padStart(2, "0")}:{String(timeLeft.minutes).padStart(2, "0")}:{String(timeLeft.seconds).padStart(2, "0")}
-              </span>
-            </div>
-
-            <div className="inline-block p-4 bg-blu-ice/60 rounded-2xl border border-blu-sky/40 shadow-inner">
-              <QRCodeSVG
-                value={member.memberCode || "BLU-1001"}
-                size={230}
-                level="H"
-                marginSize={1}
-              />
-            </div>
-
-            <div className="mt-4 font-mono font-black text-2xl text-blu-slate tracking-widest">
-              {member.memberCode || "BLU-1001"}
-            </div>
-
-            <p className="text-xs text-blu-steel mt-2">
-              {t("member.qr_instruction")}
-            </p>
-          </div>
-        </div>
-      )}
-    </main>
-  );
+function PointCouponCard({ coupon }: { coupon: PointCoupon }) {
+  const status = statusText(coupon.status, coupon.expiresAt);
+  return <section className={`${cardClass} border-blu-yellow/60`}><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold text-blu-slate">แลกจากคะแนน</p><h2 className="mt-1 text-lg font-black">{coupon.title}</h2></div><span className={`rounded-full px-3 py-1 text-xs font-bold ${status.className}`}>{status.label}</span></div><p className="mt-2 text-sm text-blu-steel">{coupon.detail}</p><p className="mt-1 text-xs text-blu-steel">ใช้ {coupon.pointsSpent} คะแนน • หมดอายุ {dateText(coupon.expiresAt)}</p><div className="mt-4 flex flex-col items-center rounded-2xl bg-blu-ice p-4"><QRCodeSVG value={coupon.code} size={150} title={coupon.title} /><p className="mt-2 break-all text-center font-mono text-[10px]">{coupon.code}</p></div></section>;
 }

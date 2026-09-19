@@ -41,8 +41,9 @@ test("member request atomically journals point debit and stock reservation; coll
   assert.equal(record.status, "PENDING");
   assert.equal(s.rewardWallet("BLU-1001"), before - reward.pointCost);
   assert.equal(s.remainingStock(reward, s.desk.readDeskRewards()), stock - 1);
-  assert.deepEqual(s.writes, [s.desk.REWARD_STORAGE_KEY]);
-  assert.ok(s.requests.every(r => r.key === s.desk.DESK_LOCK_KEY));
+  assert.deepEqual(s.writes, ["blu_member_accounts_mock_v1", s.desk.REWARD_STORAGE_KEY]);
+  assert.ok(s.requests.some(r => r.key === "blu_member_account_transactions_v1"));
+  assert.ok(s.requests.some(r => r.key === s.desk.DESK_LOCK_KEY));
   const reload = fixture({ storage: s.storage });
   assert.equal(reload.rewardWallet("BLU-1001"), before - reward.pointCost);
   await reload.desk.confirmDeskAction(reload.desk.lookupRewardCode(record.rewardCode), new Date(s.clock.now));

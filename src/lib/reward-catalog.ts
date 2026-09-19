@@ -2,6 +2,10 @@ import { z } from "zod";
 import { mockRewards, type RewardItem } from "./mock-data";
 import { mockAdminMembers, type RedemptionRecord } from "./admin-mock";
 import { DESK_LOCK_KEY, DESK_UPDATED_EVENT, readDeskRewards, REWARD_STORAGE_KEY } from "./front-desk";
+import {
+  MEMBER_ACCOUNT_KEY, MEMBER_ACCOUNT_LOCK_KEY, commitLocalStorageTransaction, dispatchMemberAccountUpdated,
+  readMemberAccount, readMemberAccountStore, serializeMemberAccountStore, spendPointsInStore,
+} from "./member-account";
 
 export const CATALOG_KEY = "blu_reward_catalog_mock_v1";
 const rewardSchema = z.object({
@@ -24,15 +28,13 @@ export function readRewardCatalog(): RewardItem[] { return readCatalogState().re
 export function remainingStock(reward: RewardItem, records: RedemptionRecord[]): number {
   return Math.max(0, reward.stock - records.filter(r => r.rewardId === reward.id).length);
 }
-export function rewardWallet(memberCode: string, records = readDeskRewards()) {
-  const member = mockAdminMembers.find(m => m.memberCode === memberCode);
-  if (!member) throw new Error("กระเป๋ารางวัล mock รองรับเฉพาะรายชื่อสมาชิกตัวอย่างของ Admin");
-  // Seeds predate this wallet's opening balance. All newly requested rewards are persisted debits.
-  return Math.max(0, member.points - records.filter(r => r.memberCode === memberCode && !r.id.startsWith("seed-")).reduce((sum, r) => sum + r.pointsSpent, 0));
+export function rewardWallet(memberCode: string, records?: RedemptionRecord[]) {
+  void records; // Kept for backwards-compatible callers; the account ledger is the only point source.
+  return readMemberAccount(memberCode).points;
 }
 async function locked<T>(action: () => T): Promise<T> {
   if (typeof navigator === "undefined" || !navigator.locks?.request) throw new Error("ต้องใช้ Web Locks ผ่าน HTTPS หรือ localhost");
-  return navigator.locks.request(DESK_LOCK_KEY, { mode: "exclusive" }, action);
+  return navigator.locks.request(MEMBER_ACCOUNT_LOCK_KEY, { mode: "exclusive" }, action);
 }
 function write(key: string, value: unknown) {
   const event = new CustomEvent(DESK_UPDATED_EVENT);
@@ -73,19 +75,26 @@ export async function removeReward(expected: RewardItem): Promise<"DISABLED" | "
 }
 export async function requestMockReward(expected: RewardItem, memberCode: string): Promise<RedemptionRecord> {
   const snapshot = JSON.stringify(expected);
-  return locked(() => {
+  return locked(() => navigator.locks.request(DESK_LOCK_KEY, { mode: "exclusive" }, () => {
     const reward = readRewardCatalog().find(r => r.id === expected.id);
     const records = readDeskRewards();
     if (!reward || JSON.stringify(reward) !== snapshot || !reward.isActive) throw new Error("รางวัลเปลี่ยนหรือปิดใช้งานแล้ว กรุณาโหลดใหม่");
     if (remainingStock(reward, records) < 1) throw new Error("รางวัลหมดแล้ว");
     if (records.some(r => r.memberCode === memberCode && r.rewardId === reward.id)) throw new Error("สมาชิกนี้แลกรางวัลนี้แล้ว ห้ามส่งซ้ำ");
-    if (rewardWallet(memberCode, records) < reward.pointCost) throw new Error("แต้ม mock ไม่เพียงพอ");
-    const member = mockAdminMembers.find(m => m.memberCode === memberCode)!;
+    const member = mockAdminMembers.find(m => m.memberCode === memberCode);
+    if (!member) throw new Error("กระเป๋ารางวัล mock รองรับเฉพาะรายชื่อสมาชิกตัวอย่างของ Admin");
+    const accounts = readMemberAccountStore();
     const code = `BLU-RW-${reward.id}-${crypto.randomUUID().replaceAll("-", "").toUpperCase()}`;
+    const redeemedAt = new Date().toISOString();
     const record: RedemptionRecord = { id: code, rewardCode: code, rewardId: reward.id, rewardTitle: reward.title, memberCode, memberName: member.fullName,
-      pointsSpent: reward.pointCost, status: "PENDING", redeemedAt: new Date().toISOString() };
-    // One journal write reserves stock and debits mock points atomically; collection only changes status.
-    write(REWARD_STORAGE_KEY, [record, ...records]);
+      pointsSpent: reward.pointCost, status: "PENDING", redeemedAt };
+    spendPointsInStore(accounts, memberCode, reward.pointCost, "REWARD", record.id, `แลกรางวัล ${reward.title}`, redeemedAt);
+    commitLocalStorageTransaction([
+      { key: MEMBER_ACCOUNT_KEY, value: serializeMemberAccountStore(accounts), errorMessage: "บันทึกการหักแต้มไม่สำเร็จ ยังไม่ยืนยันการแลกรางวัล" },
+      { key: REWARD_STORAGE_KEY, value: JSON.stringify([record, ...records]), errorMessage: "บันทึกรางวัลไม่สำเร็จ ยังไม่ยืนยันรายการ" },
+    ]);
+    dispatchMemberAccountUpdated();
+    window.dispatchEvent(new CustomEvent(DESK_UPDATED_EVENT));
     return record;
-  });
+  }));
 }

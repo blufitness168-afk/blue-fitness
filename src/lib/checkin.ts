@@ -74,18 +74,16 @@ export function evaluateCheckin(
   const get = (type: string) => Number(parts.find((part) => part.type === type)?.value);
   const seconds = get("hour") * 3600 + get("minute") * 60 + get("second");
   if (seconds < 7 * 3600 || seconds > 22 * 3600) {
-    return { status: "warning", title: "อยู่นอกเวลาทำการ", message: "เปิดให้บริการ 07:00–22:00 น. • ยังไม่บันทึกและไม่เพิ่มแต้ม", member };
+    return { status: "warning", title: "อยู่นอกเวลาทำการ", message: "เปิดให้บริการ 07:00–22:00 น. • ยังไม่บันทึกเช็กอิน", member };
   }
   if (member.timeSlot === "07:00-14:00" && seconds > 14 * 3600) {
-    return { status: "warning", title: "อยู่นอกช่วงเวลาแพ็กเกจ", message: "สิทธิ์ 07:00–14:00 น. • ยังไม่บันทึกและไม่เพิ่มแต้ม กรุณาติดต่อเคาน์เตอร์", member };
+    return { status: "warning", title: "อยู่นอกช่วงเวลาแพ็กเกจ", message: "สิทธิ์ 07:00–14:00 น. • ยังไม่บันทึกเช็กอิน กรุณาติดต่อเคาน์เตอร์", member };
   }
-  const alreadyEarned = records.some((r) => r.memberCode === member.memberCode && r.points > 0 && bangkokDay(new Date(r.checkedAt)) === bangkokDay(now));
-  const points = alreadyEarned ? 0 : 1;
   return {
     status: "success", title: "เข้าใช้บริการได้",
-    message: alreadyEarned ? "ยินดีต้อนรับกลับ • ได้รับแต้มวันนี้แล้ว (+0 แต้ม)" : "เช็คอินสำเร็จ • ได้รับแต้มสะสม +1 แต้ม",
+    message: "เช็กอินสำเร็จ • ยินดีต้อนรับ",
     member,
-    record: { id, memberCode: member.memberCode, fullName: member.fullName, checkedAt: now.toISOString(), source, points },
+    record: { id, memberCode: member.memberCode, fullName: member.fullName, checkedAt: now.toISOString(), source, points: 0 },
   };
 }
 
@@ -99,12 +97,10 @@ export function parseCheckinRecords(raw: string | null): CheckinRecord[] {
     (r.source === "USB_MANUAL" || r.source === "CAMERA") && (r.points === 0 || r.points === 1)
   )) throw new Error("Invalid check-in history");
   const ids = new Set<string>();
-  const awards = new Set<string>();
   for (const record of value as CheckinRecord[]) {
-    const day = `${record.memberCode}:${bangkokDay(new Date(record.checkedAt))}`;
-    if (ids.has(record.id) || (record.points === 1 && awards.has(day))) throw new Error("Duplicate check-in history/point awards");
+    if (ids.has(record.id)) throw new Error("Duplicate check-in history");
     ids.add(record.id);
-    if (record.points === 1) awards.add(day);
   }
-  return value;
+  // Normalize legacy +1 check-ins in memory; check-in is no longer a point source.
+  return (value as CheckinRecord[]).map(record => ({ ...record, points: 0 }));
 }

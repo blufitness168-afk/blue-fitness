@@ -111,7 +111,7 @@ export const checkins = pgTable("checkins", {
   checkinTime: timestamp("checkin_time", { withTimezone: true }).defaultNow().notNull(),
   scannerType: scannerTypeEnum("scanner_type").default("WEB_CAMERA").notNull(),
   scannerDeviceId: text("scanner_device_id").default("FRONT_DESK").notNull(),
-  pointsAwarded: integer("points_awarded").default(1).notNull(),
+  pointsAwarded: integer("points_awarded").default(0).notNull(), // Check-in no longer awards points; retained for audit compatibility
   notes: text("notes"),
 });
 

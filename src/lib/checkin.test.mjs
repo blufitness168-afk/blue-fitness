@@ -26,7 +26,7 @@ test("normalizes input and accepts both member and physical card IDs", () => {
   for (const code of [" blu-1001 \r\n", "card-8899"]) {
     const result = scan(code);
     assert.equal(result.status, "success");
-    assert.equal(result.record.points, 1);
+    assert.equal(result.record.points, 0);
     assert.equal(result.record.memberCode, "BLU-1001");
   }
 });
@@ -52,16 +52,16 @@ test("opening and closing boundaries use Bangkok time", () => {
   for (const time of ["07:00:00", "22:00:00"]) assert.equal(scan("BLU-1001", time).status, "success");
   for (const time of ["06:59:59", "22:00:01"]) assert.equal(scan("BLU-1001", time).status, "warning");
 });
-test("repeat entry is allowed but physical card cannot earn another point", () => {
+test("repeat entry is allowed and never earns check-in points", () => {
   const first = scan().record;
   const repeat = scan("CARD-8899", "10:00:00", [first]);
   assert.equal(repeat.status, "success");
   assert.equal(repeat.record.points, 0);
 });
-test("next Bangkok day earns a new point", () => {
+test("next Bangkok day still records entry without awarding points", () => {
   const first = scan().record;
   const next = evaluateCheckin("BLU-1001", members, [first], new Date("2026-09-08T07:00:00+07:00"), "CAMERA", "next");
-  assert.equal(next.record.points, 1);
+  assert.equal(next.record.points, 0);
   assert.equal(next.record.source, "CAMERA");
   assert.notEqual(bangkokDay(new Date("2026-09-07T16:59:59Z")), bangkokDay(new Date("2026-09-07T17:00:00Z")));
 });
@@ -71,10 +71,13 @@ test("expiry is enforced at the exact instant and invalid expiry fails closed", 
     assert.equal(result.status, "error");
   }
 });
-test("history reader rejects corrupted storage instead of silently resetting points", () => {
+test("history reader rejects corruption and normalizes legacy check-in points to zero", () => {
   assert.equal(parseCheckinRecords(null).length, 0);
   assert.equal(parseCheckinRecords(JSON.stringify([scan().record])).length, 1);
-  for (const raw of ["", "invalid", "{}", "null", '[{"points":100}]', JSON.stringify([{ ...scan().record, checkedAt: "invalid" }]), JSON.stringify([scan().record, scan().record]), JSON.stringify([scan().record, { ...scan().record, id: "different-id" }])]) {
+  const legacy = { ...scan().record, points: 1 };
+  assert.equal(parseCheckinRecords(JSON.stringify([legacy]))[0].points, 0);
+  assert.equal(parseCheckinRecords(JSON.stringify([scan().record, { ...scan().record, id: "different-id" }])).length, 2);
+  for (const raw of ["", "invalid", "{}", "null", '[{"points":100}]', JSON.stringify([{ ...scan().record, checkedAt: "invalid" }]), JSON.stringify([scan().record, scan().record])]) {
     assert.throws(() => parseCheckinRecords(raw));
   }
 });

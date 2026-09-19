@@ -1,12 +1,13 @@
-# 📋 MASTER TODO: Blu Fitness (อัปเดตตาม Meeting ล่าสุด 01/09/2026 + Sprint หน้าฝั่ง Admin)
+# 📋 MASTER TODO: Blu Fitness (อัปเดต Requirement หน้า Account ล่าสุด 19/09/2026)
 
 เอกสารวางแผนและติดตามสถานะการพัฒนา: **ไล่ทำตามลำดับ Requirement จากการประชุมล่าสุด พร้อมเตรียมต่อยอดสู่ระบบจริง**
 
-> 📌 **สถานะปัจจุบัน (อัปเดต 07 ก.ย. 2026):**
-> — เสร็จ Thème ต, หน้าแพ็กเกจ, ฟอร์มสมัคร, โค้ดส่วนลด (ส่วนหน้า)
-> — เสร็จหน้า **Reward Shop ฝั่งสมาชิก** (ข้อ 5.1) + **Admin Dashboard** (ข้อ 6.1) + **Navbar ตัวเดียวกัน** + **การเข้าสู่หน้า Admin แบบ B (Admin เป็น Member + Dropdown)**
-> — เสร็จเพิ่มแบบ browser-only mock: แยก Check-in / Rewards / Promo Codes / Coupons, CRUD, แจกผู้รับบางคน/ทุกคนปัจจุบัน และกระเป๋าสิทธิ์ถาวรใน localStorage
-> — เหลือ: ตารางจัดการสมาชิก, Auth/API/Backend จริง, ทดสอบกล้องและ USB กับอุปกรณ์จริง
+> 📌 **สถานะปัจจุบัน (อัปเดต 19 ก.ย. 2026):**
+> — ของเดิมที่มี: ธีม, หน้าแพ็กเกจ, ฟอร์มสมัคร, Reward Shop, Admin Dashboard และระบบ Check-in / Rewards / Promo Codes / Coupons แบบ browser-only mock
+> — ข้อมูลธุรกรรม mock เก็บใน `localStorage`; ยังไม่มี Auth/API/Database/OTP/Payment verification ฝั่ง production
+> — หน้า Account Mobile-First, Bottom Navigation 4 เมนู, ประวัติสมาชิก, Coupon Wallet และคะแนนจากยอดชำระทำเป็น browser-only mock แล้ว ดูข้อ 7
+> — Check-in mock ไม่สร้างคะแนนแล้ว; คะแนนใช้ ledger ชุดเดียวจากยอดชำระและการแลกสิทธิ์
+> — Auth/API/Database, OTP จริง, Payment verification และข้อมูลที่ซิงก์ข้ามอุปกรณ์ยังเป็นงาน production
 
 ---
 
@@ -78,7 +79,8 @@
   - [x] สแกนรหัสรับรางวัลที่หน้า Rewards โดยตรง หรือสแกนสมาชิก/บัตรแข็งเพื่อค้นหารายการ ตรวจผู้รับก่อนยืนยัน **ไม่หักแต้มซ้ำ**
   - [x] CRUD ชื่อ รูป HTTPS URL แต้ม สต็อกรวม เปิด/ปิด; เคยมีรายการแลกแล้วปิดใช้งานแทนลบ และยังส่งมอบรายการจองเดิมได้
   - [x] `/member/rewards` อ่านคลังเดียวกับ Admin; journal รายการแลกเป็นการจองสต็อกและหักแต้ม mock ใน write เดียวใต้ Web Lock; กันแลกซ้ำและคงประวัติ/QR หลังโหลดหน้าใหม่
-  - หมายเหตุ: สต็อกคงเหลือ = สต็อกรวม − จำนวนจอง/รับแล้ว; แต้มตั้งต้นจาก mockAdminMembers หักรายการที่ไม่ใช่ seed (seed เกิดก่อนยอดตั้งต้น); ไม่รวมแต้มเช็คอิน/โปรไฟล์จริง และรางวัลเพิ่มวันไม่ต่ออายุจริง
+  - หมายเหตุ: สต็อกคงเหลือ = สต็อกรวม − จำนวนจอง/รับแล้ว; คะแนนและประวัติยังเป็น browser-only mock
+  - [x] เชื่อมการแลกสินค้าเข้ากับคะแนน ledger ชุดเดียว และเพิ่มการแลกคูปองด้วยคะแนน
 
 ---
 
@@ -96,9 +98,11 @@
   - [x] `/admin/promo-codes` — CRUD ส่วนลด + scanner เลือกผู้รับ/แจกบางคนหรือทุกคนปัจจุบัน
   - [x] `/admin/coupons` — CRUD คูปองพาเพื่อน/เพิ่มวัน mock + scanner แจกบางคน/ทุกคน + โหมดแลกใช้แยกจากแจก
 - [ ] **6.2 จุดสแกน Check-in หน้าร้าน (รองรับกล้อง + เครื่องสแกน 4600s 2D USB):**
-  - [x] UI สแกน QR/บัตรแข็ง + Time Slot Guard ตามเวลาไทย (Mock): นอกสิทธิ์เตือนสีส้ม ไม่บันทึก/ไม่เพิ่มแต้ม
-  - [x] บันทึกประวัติทดลองใน localStorage +1 แต้ม/วัน เข้าใช้ซ้ำได้โดยไม่เพิ่มแต้ม พร้อม unit tests (`node --test src/lib/checkin.test.mjs`)
-  - [ ] เชื่อมข้อมูลจริงและ `/api/access/checkin` พร้อมตรวจสิทธิ์ Admin ฝั่งเซิร์ฟเวอร์และ transaction ป้องกันแต้มซ้ำ
+  - [x] UI สแกน QR/บัตรแข็ง + Time Slot Guard ตามเวลาไทย (Mock): นอกสิทธิ์เตือนสีส้มและไม่บันทึก
+  - [x] มีประวัติ Check-in ทดลองใน localStorage และรองรับเข้าใช้ซ้ำ
+  - [x] แกนประเมิน Check-in ใหม่บันทึกคะแนนเป็น 0 และ normalize ประวัติเดิมในหน่วยความจำ โดย Check-in ไม่เป็นแหล่งคะแนนแล้ว
+  - [ ] ลบ field/ข้อความ/ข้อมูลคะแนนจาก Check-in เดิมที่ยังเหลือใน Admin Dashboard, mock data และ UI ที่เกี่ยวข้อง
+  - [ ] เชื่อมข้อมูลจริงและ `/api/access/checkin` พร้อมตรวจสิทธิ์ Admin ฝั่งเซิร์ฟเวอร์และป้องกันการบันทึกซ้ำ
   - [ ] ทดสอบกล้องและเครื่องสแกน 4600s 2D USB กับอุปกรณ์หน้าร้านจริง
   - [x] ทุกหน้าใช้กล้องพื้นฐาน `CheckinCamera` ผ่าน `AdminScanner`; แจก/รับรางวัล/แลกคูปองต้องตรวจผู้รับก่อนยืนยัน พักรับสแกนและไม่ใช้ Enter ยืนยัน
   - [x] ใช้รายชื่อ/รหัส/บัตรจาก `mockAdminMembers` ชุดเดียวกัน; checkin มีแพ็กเกจและวันหมดอายุทดลองแยก (Off-Peak/หมดอายุ/รอชำระ)
@@ -112,17 +116,47 @@
   - [x] Browser E2E Chromium: แจกบางคน/ทั้งหมดไม่ซ้ำ, ซื้อผ่าน PaymentModal ยอด 0, คูปองเพิ่ม 7 วัน, replay ไม่เปลี่ยนข้อมูล, บัตรอ่านวันใหม่, input ไม่ถูก unmount (`browser-admin.mjs`)
   - [x] ไม่อ่าน/ย้ายคูปอง DEMO รุ่นเก่าเข้ากระเป๋าใหม่; helper AUTO/DEMO ใน `front-desk.ts` คงไว้เฉพาะ regression/compatibility ไม่มีหน้าใหม่ใช้งาน
   - [x] ข้อมูล parse เสีย/อ่านไม่ได้/เขียนไม่ได้/ไม่มี Web Locks: ไม่ยืนยันสำเร็จ ไม่คืนสิทธิ์เริ่มต้นอัตโนมัติ
-  - ทดสอบ: `node --test src/lib/checkin.test.mjs src/lib/front-desk.test.mjs src/lib/benefits.test.mjs src/lib/reward-catalog.test.mjs`; ESLint เฉพาะไฟล์ที่แก้, `pnpm exec tsc --noEmit`, `pnpm build`
+  - ตรวจล่าสุด: domain tests 65 รายการ, ESLint ไฟล์ที่แก้, `pnpm exec tsc --noEmit` และ `pnpm build` ผ่าน; ชุดทดสอบรวม `src/lib/member-account.test.mjs` สำหรับ points ledger และคูปองจากคะแนน
   - หมายเหตุ: ทั้งหมด browser-only mock ไม่มี Auth/API/DB จริง ใช้เวลาของเครื่อง; ไม่แก้ฐานข้อมูล/secret/บริการภายนอก; การล้าง localStorage ทำให้ประวัติ mock หาย; กล้องและ USB ยังต้องทดสอบอุปกรณ์จริง
 - [ ] **6.3 ตารางจัดการข้อมูลสมาชิก (Excel-Style Member Management):**
   - [ ] ค้นหา/กรอง/แก้ไขข้อมูลสมาชิก/ผูกบัตรแข็ง/เปลี่ยนรูปโปรไฟล์
 
 ---
 
-### 🔌 7. การเชื่อมต่อระบบจริง (Backend Wiring & Database Integration)
-- [ ] **7.1 Database Migration (Neon PostgreSQL + Drizzle ORM):**
+### 📱 7. หน้า Account Mobile-First และกติกาคะแนนล่าสุด
+- [x] **7.1 Bottom Navigation 4 เมนู:** `หน้าหลัก / QR Code / คูปอง / คะแนน`
+  - [x] ใช้งาน Mobile-First, ระบุ active state และเข้าถึงทั้ง 4 หน้าจากหน้า Account ได้โดยตรง
+- [x] **7.2 หน้าหลัก Account:**
+  - [x] แสดงวันที่สมัครและข้อมูลสมาชิก
+  - [x] แก้ข้อมูลส่วนตัวได้ ยกเว้นรูปโปรไฟล์ต้องติดต่อเจ้าหน้าที่
+  - [x] เปลี่ยนเบอร์โทรศัพท์ได้เมื่อยืนยัน Mock OTP สำเร็จเท่านั้น (`123456`)
+  - [x] แสดงประวัติซื้อล่าสุด / ใช้คูปองล่าสุด / เข้าใช้ล่าสุด พร้อม “ดูทั้งหมด” ของแต่ละประเภท
+  - [x] แสดงโปรแนะนำที่ Admin แจกหรือกำหนดให้สมาชิก
+- [x] **7.3 หน้า QR Code:** แสดง QR ประจำตัวสำหรับ Check-in โดยไม่ผูกกับการให้คะแนน
+- [ ] **7.4 Coupon Wallet รวม:**
+  - [x] มีต้นแบบ mock/localStorage สำหรับคูปองที่ Admin แจกและประวัติใช้จากงานเดิม
+  - [x] มี data layer mock สำหรับแลกคะแนนเป็นคูปอง พร้อมหักคะแนนและสร้างคูปองใน transaction เดียว
+  - [x] รวมคูปองจากแพ็กเกจ, Admin และการแลกคะแนนใน Wallet UI/ประวัติชุดเดียว
+  - [x] แสดงสถานะพร้อมใช้ / ใช้แล้ว / หมดอายุ; คูปองที่ Admin ปิดยังตรวจตามนิยามเดิม
+  - [x] Admin/Coupons สแกนยืนยันใช้คูปองจากคะแนน (`BLU-PTC-…`) ได้โดยไม่หักคะแนนซ้ำ
+- [ ] **7.5 ระบบคะแนนตามยอดชำระ:**
+  - [x] มี data layer mock คำนวณคะแนนจากยอดชำระหลังส่วนลดทุก 20 บาท = 1 คะแนน โดยปัดเศษทิ้ง
+  - [x] มี mock ledger สำหรับยอดตั้งต้น, การซื้อ, แลกสินค้า และแลกคูปอง พร้อมตรวจยอดคงเหลือย้อนหลัง
+  - [x] การซื้อแพ็กเกจ mock บันทึก membership/ส่วนลด/ประวัติซื้อ/คะแนนใน localStorage transaction ชุดเดียว
+  - [x] แกน Check-in ไม่สร้าง transaction คะแนน
+  - [x] เชื่อม Reward Shop ให้ใช้ ledger ชุดใหม่แทนคะแนนแยกเดิม
+  - [x] หน้า Account แสดงยอดและประวัติรับ/ใช้คะแนน พร้อม UI แลกสินค้าและคูปอง
+- [x] **7.6 ขอบเขต Implementation รอบนี้:**
+  - [x] มี data layer ใหม่แบบ mock/browser-only เก็บใน `localStorage` และใช้ Web Locks/validation สำหรับ transaction หลัก
+  - [x] เชื่อม data layer เข้ากับ Account UI และติดป้ายชัดว่าไม่ใช่ข้อมูล production
+  - [ ] Production backend: Auth/OTP, API, Database, payment verification และ transaction จริง
+
+---
+
+### 🔌 8. การเชื่อมต่อระบบจริง (Backend Wiring & Database Integration)
+- [ ] **8.1 Database Migration (Neon PostgreSQL + Drizzle ORM):**
   - [ ] อัปเดต schema และรัน `pnpm db:push`
-- [ ] **7.2 เชื่อมต่อ Third-Party APIs:**
+- [ ] **8.2 เชื่อมต่อ Third-Party APIs:**
   - [ ] ThaiBulkSMS (OTP)
   - [ ] EasySlip API (ตรวจสลิปอัตโนมัติ)
   - [ ] Cloudinary (อัปโหลดรูปภาพ)
@@ -130,7 +164,7 @@
 
 ---
 
-### 🚀 8. เช็กลิสต์ส่งมอบงานจริง (Production Handover Checklist)
+### 🚀 9. เช็กลิสต์ส่งมอบงานจริง (Production Handover Checklist)
 - [ ] เปลี่ยนบัญชี PromptPay เป็นเบอร์ลูกค้า (`089-772-0282`) และเปลี่ยนชื่อบัญชี
 - [ ] ตรวจสอบการต่ออายุ EasySlip รายเดือน
 - [ ] ตรวจสอบเครดิต ThaiBulkSMS

@@ -7,9 +7,12 @@ import AdminScanner, { buttonClass, Confirmation, inputClass, MockNotice, panelC
 import { mockAdminMembers } from "@/lib/admin-mock";
 import { bangkokDay } from "@/lib/checkin";
 import { BENEFITS_EVENT, BENEFITS_KEY, commitGrant, newDefinition, previewCoupon, previewGrant, readBenefits, readMembership, redeemCoupon, removeDefinition, resolveBenefitMember, saveDefinition, type BenefitDefinition, type BenefitGrant, type BenefitKind, type BenefitsState, type GrantPlan } from "@/lib/benefits";
+import { consumePointCoupon, previewPointCoupon, type PointCoupon } from "@/lib/member-account";
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : "ทำรายการไม่ได้ กรุณาลองใหม่";
 const thaiDate = (value: string) => new Date(value).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" });
+type CouponRedemption = BenefitGrant | PointCoupon;
+const isAdminGrant = (redemption: CouponRedemption): redemption is BenefitGrant => "definition" in redemption;
 export default function BenefitsAdmin({ kind }: { kind: BenefitKind }) {
   const coupon = kind === "COUPON";
   const title = coupon ? "คูปอง" : "โค้ดส่วนลด";
@@ -26,7 +29,7 @@ export default function BenefitsAdmin({ kind }: { kind: BenefitKind }) {
   const [grantMode, setGrantMode] = useState<"SELECTED" | "ALL">("SELECTED");
   const [mode, setMode] = useState<"GRANT" | "REDEEM">("GRANT");
   const [plan, setPlan] = useState<GrantPlan | null>(null);
-  const [redemption, setRedemption] = useState<BenefitGrant | null>(null);
+  const [redemption, setRedemption] = useState<CouponRedemption | null>(null);
   const pending = useRef(false);
   const [walletQuery, setWalletQuery] = useState("");
   const [qr, setQr] = useState("");
@@ -60,8 +63,8 @@ export default function BenefitsAdmin({ kind }: { kind: BenefitKind }) {
   function scanCoupon(code: string) {
     if (writing.current || pending.current || !state) return;
     try {
-      const g = previewCoupon(code);
-      if (g.definition.benefit === "EXTRA_DAYS" && !readMembership(g.memberCode)) throw new Error("ผู้รับยังไม่มีแพ็กเกจ mock ที่บันทึก กรุณาซื้อแพ็กเกจก่อนแลกคูปองเพิ่มวัน");
+      const g = code.trim().toUpperCase().startsWith("BLU-PTC-") ? previewPointCoupon(code) : previewCoupon(code);
+      if (isAdminGrant(g) && g.definition.benefit === "EXTRA_DAYS" && !readMembership(g.memberCode)) throw new Error("ผู้รับยังไม่มีแพ็กเกจ mock ที่บันทึก กรุณาซื้อแพ็กเกจก่อนแลกคูปองเพิ่มวัน");
       pending.current = true; setMode("REDEEM"); setRedemption(g); setMessage("");
     }
     catch (cause) { setMessage(errorText(cause)); }
@@ -111,9 +114,16 @@ export default function BenefitsAdmin({ kind }: { kind: BenefitKind }) {
         <button type="button" className={buttonClass} disabled={!definitionId || (grantMode === "SELECTED" && !selected.length)} onClick={prepare}>ตรวจสอบรายชื่อและจำนวนก่อนแจก</button>
       </fieldset></section>
       <AdminScanner label={`สแกนสมาชิกเพื่อเลือกผู้รับ${title}: BLU-… / CARD-…`} disabled={disabled || grantMode === "ALL"} onScan={scanMember} />
-    </> : <AdminScanner label="แลกใช้คูปองที่แจกแล้ว: BLU-CP-… เท่านั้น" disabled={disabled} onScan={scanCoupon} />}
+    </> : <AdminScanner label="แลกใช้คูปอง: BLU-CP-… หรือ BLU-PTC-…" disabled={disabled} onScan={scanCoupon} />}
     {plan && <Confirmation key={plan.batchId} busy={busy || !state} onCancel={cancel} label={`ยืนยันแจก ${plan.newCodes.length} คน`} onConfirm={() => void run(async () => { const count = await commitGrant(plan); setSelected([]); return `แจกเข้า ${count} กระเป๋า mock แล้ว — ยังไม่มีการใช้สิทธิ์`; })}><h2 className="text-lg font-bold">ยืนยันแจก {definitions.find(d => d.id === plan.definitionId)?.name}</h2><p>snapshot {plan.memberCodes.length} คน • แจกใหม่ <strong>{plan.newCodes.length} คน</strong> • ข้ามผู้ที่เคยได้รับ {plan.skipped} คน</p><ul className="max-h-64 overflow-y-auto text-sm">{plan.memberCodes.map(c => <li key={c}>{mockAdminMembers.find(m => m.memberCode === c)?.fullName} ({c}) — {plan.newCodes.includes(c) ? "จะได้รับ" : "ข้าม: เคยได้รับแล้ว"}</li>)}</ul><p className="text-xs">ไม่มีการติดตามสมาชิกใหม่อัตโนมัติ • นิยามเดิมไม่แจกซ้ำแม้ใช้ไปแล้ว</p></Confirmation>}
-    {redemption && <Confirmation key={redemption.id} busy={busy || !state} onCancel={cancel} label="ยืนยันแลกใช้คูปอง" onConfirm={() => void run(async () => { await redeemCoupon(redemption); return redemption.definition.benefit === "EXTRA_DAYS" ? `เพิ่มอายุแพ็กเกจ mock ${redemption.definition.amount} วัน พร้อมบันทึกใช้คูปองแล้ว ตรวจสอบวันหมดอายุใหม่ได้ที่บัตรสมาชิก` : "บันทึกแลกใช้คูปองพาเพื่อน mock แล้ว ไม่มีการยืนยันสิทธิ์เข้าใช้จาก backend"; })}><h2 className="font-bold">{redemption.definition.name}</h2><p>ผู้รับ: {redemption.memberName} ({redemption.memberCode})</p><p>{redemption.definition.detail} • จำนวน {redemption.definition.amount}</p><p className="break-all font-mono text-xs">{redemption.code}</p><p>หมดอายุ: {thaiDate(redemption.definition.expiresAt)}</p><p className="text-sm">{redemption.definition.benefit === "EXTRA_DAYS" ? "ยืนยันแล้วจะเพิ่มวันหมดอายุแพ็กเกจ mock ของผู้รับพร้อมใช้คูปอง ต้องมีแพ็กเกจที่บันทึกแล้ว (ไม่ใช้แม่แบบบัตรสมาชิก)" : "ตรวจสอบบัตรสมาชิกก่อนส่งมอบ"} • ไม่หักแต้ม</p></Confirmation>}
+    {redemption && <Confirmation key={redemption.id} busy={busy || !state} onCancel={cancel} label="ยืนยันแลกใช้คูปอง" onConfirm={() => void run(async () => {
+      if (isAdminGrant(redemption)) {
+        await redeemCoupon(redemption);
+        return redemption.definition.benefit === "EXTRA_DAYS" ? `เพิ่มอายุแพ็กเกจ mock ${redemption.definition.amount} วัน พร้อมบันทึกใช้คูปองแล้ว ตรวจสอบวันหมดอายุใหม่ได้ที่บัตรสมาชิก` : "บันทึกแลกใช้คูปองพาเพื่อน mock แล้ว ไม่มีการยืนยันสิทธิ์เข้าใช้จาก backend";
+      }
+      await consumePointCoupon(redemption);
+      return "บันทึกใช้คูปองที่แลกจากคะแนนแล้ว • ไม่หักคะแนนซ้ำ";
+    })}>{isAdminGrant(redemption) ? <><h2 className="font-bold">{redemption.definition.name}</h2><p>ผู้รับ: {redemption.memberName} ({redemption.memberCode})</p><p>{redemption.definition.detail} • จำนวน {redemption.definition.amount}</p><p className="break-all font-mono text-xs">{redemption.code}</p><p>หมดอายุ: {thaiDate(redemption.definition.expiresAt)}</p><p className="text-sm">{redemption.definition.benefit === "EXTRA_DAYS" ? "ยืนยันแล้วจะเพิ่มวันหมดอายุแพ็กเกจ mock ของผู้รับพร้อมใช้คูปอง ต้องมีแพ็กเกจที่บันทึกแล้ว (ไม่ใช้แม่แบบบัตรสมาชิก)" : "ตรวจสอบบัตรสมาชิกก่อนส่งมอบ"} • ไม่หักแต้ม</p></> : <><h2 className="font-bold">{redemption.title}</h2><p>ผู้รับ: {mockAdminMembers.find(member => member.memberCode === redemption.memberCode)?.fullName ?? redemption.memberCode} ({redemption.memberCode})</p><p>{redemption.detail} • แลกด้วย {redemption.pointsSpent} คะแนน</p><p className="break-all font-mono text-xs">{redemption.code}</p><p>หมดอายุ: {thaiDate(redemption.expiresAt)}</p><p className="text-sm">คะแนนถูกหักตอนสมาชิกแลกคูปองแล้ว การยืนยันนี้เปลี่ยนเฉพาะสถานะเป็นใช้แล้ว</p></>}</Confirmation>}
     <section className={panelClass}><h2 className="font-bold">กระเป๋า / ประวัติการแจก{title}</h2><input className={inputClass} aria-label="ค้นหากระเป๋า" placeholder="ค้นหาผู้รับ ชื่อสิทธิ์ หรือรหัส" value={walletQuery} onChange={e => setWalletQuery(e.target.value)} />
       <div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-sm"><thead><tr>{["ผู้รับ", "สิทธิ์ ณ วันแจก", "สถานะ", "วันแจก / วันใช้ (ไทย)", "รหัสสิทธิ์"].map(h => <th key={h} className="p-3">{h}</th>)}</tr></thead><tbody>{grants.map(g => <tr key={g.id} className="border-t border-blu-sky/30"><td className="p-3">{g.memberName}<p className="text-xs">{g.memberCode}</p></td><td className="p-3">{g.definition.name}<p className="text-xs">{g.definition.detail} • จำนวน/ส่วนลด {g.definition.amount}{g.definition.kind === "PROMO" && g.definition.discountType === "PERCENT" ? "%" : ""}</p><p className="text-xs">หมดอายุ {thaiDate(g.definition.expiresAt)}</p></td><td className="p-3">{g.status === "USED" ? "ใช้แล้ว" : "ยังไม่ใช้"}{!state!.definitions.find(d => d.id === g.definition.id)?.active && <p>ระงับ</p>}{g.paymentId && <p className="text-xs">ชำระ mock {g.paidAmount} บาท</p>}</td><td className="p-3 text-xs">{thaiDate(g.issuedAt)}<p>{g.usedAt ? thaiDate(g.usedAt) : "—"}</p></td><td className="p-3"><button className={buttonClass} onClick={() => setQr(qr === g.code ? "" : g.code)}>แสดง QR / รหัส</button>{coupon && g.status === "UNUSED" && <button className={`${buttonClass} mt-2`} disabled={disabled} onClick={() => scanCoupon(g.code)}>ตรวจสอบแลกใช้</button>}{qr === g.code && <div className="mt-3 space-y-2"><QRCodeSVG value={g.code} size={144} title={`สิทธิ์ ${g.memberName}`} /><p className="max-w-52 break-all font-mono text-xs select-all">{g.code}</p></div>}</td></tr>)}{!grants.length && <tr><td colSpan={5} className="p-6 text-center">ยังไม่มีรายการที่ตรงกับการค้นหา</td></tr>}</tbody></table></div>
     </section>

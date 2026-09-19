@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { mockAdminMembers } from "./admin-mock";
 import { mockPackages, type MockPackage } from "./mock-data";
+import {
+  MEMBER_ACCOUNT_KEY, MEMBER_ACCOUNT_LOCK_KEY, commitLocalStorageTransaction, dispatchMemberAccountUpdated,
+  readMemberAccountStore, recordPurchaseInStore, serializeMemberAccountStore, type MemberAccountStore,
+} from "./member-account";
 
 const DAY_MS = 86400000;
 
@@ -80,19 +84,26 @@ export function readBenefits(): BenefitsState {
   try { raw = localStorage.getItem(BENEFITS_KEY); } catch { return fail("อ่านข้อมูลสิทธิ์ไม่ได้ กรุณาอนุญาตพื้นที่จัดเก็บเบราว์เซอร์"); }
   return parseBenefits(raw);
 }
-async function writeBenefits<T>(operation: (state: BenefitsState, now: Date) => T): Promise<T> {
+async function writeBenefits<T>(operation: (state: BenefitsState, now: Date, accounts: MemberAccountStore | null) => T, withAccounts = false): Promise<T> {
   if (typeof navigator === "undefined" || !navigator.locks?.request) return fail("ต้องใช้ Web Locks ผ่าน HTTPS หรือ localhost จึงจะบันทึกได้");
-  return navigator.locks.request(BENEFITS_KEY, { mode: "exclusive" }, () => {
+  const execute = () => {
     const state = readBenefits();
-    const result = operation(state, new Date());
+    const accounts = withAccounts ? readMemberAccountStore() : null;
+    const result = operation(state, new Date(), accounts);
     state.revision++;
     const serialized = JSON.stringify(state);
     parseBenefits(serialized);
-    const event = new CustomEvent(BENEFITS_EVENT);
-    try { localStorage.setItem(BENEFITS_KEY, serialized); } catch { return fail("บันทึกไม่สำเร็จ ยังไม่ได้แจก/ใช้สิทธิ์ กรุณาตรวจสอบพื้นที่จัดเก็บ"); }
-    window.dispatchEvent(event);
+    const writes = [{ key: BENEFITS_KEY, value: serialized, errorMessage: "บันทึกไม่สำเร็จ ยังไม่ได้แจก/ใช้สิทธิ์ กรุณาตรวจสอบพื้นที่จัดเก็บ" }];
+    if (accounts) writes.push({ key: MEMBER_ACCOUNT_KEY, value: serializeMemberAccountStore(accounts), errorMessage: "บันทึกบัญชีสมาชิกไม่สำเร็จ ยังไม่ยืนยันการซื้อ" });
+    commitLocalStorageTransaction(writes);
+    window.dispatchEvent(new CustomEvent(BENEFITS_EVENT));
+    if (accounts) dispatchMemberAccountUpdated();
     return result;
-  });
+  };
+  if (!withAccounts) return navigator.locks.request(BENEFITS_KEY, { mode: "exclusive" }, execute);
+  // Global account lock is always acquired before the narrower benefits lock to avoid deadlocks.
+  return navigator.locks.request(MEMBER_ACCOUNT_LOCK_KEY, { mode: "exclusive" }, () =>
+    navigator.locks.request(BENEFITS_KEY, { mode: "exclusive" }, execute));
 }
 export function newDefinition(kind: BenefitKind): BenefitDefinition {
   const bangkokDay = new Date(Date.now() + 30 * DAY_MS + 7 * 3600000).toISOString().slice(0, 10);
@@ -207,7 +218,8 @@ export type MockPackagePurchase = Pick<MockPackage, "id" | "name" | "timeSlot" |
 export async function purchaseMockPackage(memberCode: string, pkg: MockPackagePurchase, expected: MockPayment | null): Promise<void> {
   const draft = { ...pkg };
   const snapshot = expected === null ? null : { ...expected };
-  await writeBenefits((s, now) => {
+  const purchaseId = snapshot?.paymentId ?? crypto.randomUUID();
+  await writeBenefits((s, now, accounts) => {
     if (resolveBenefitMember(memberCode).memberCode !== memberCode) return fail("กรุณาใช้รหัสสมาชิก BLU ที่ถูกต้อง");
     const canonical = mockPackages.find(p => p.id === draft.id && p.isActive);
     const keys = ["id", "name", "timeSlot", "price", "durationDays", "bonusDays", "friendCoupons"] as const;
@@ -229,7 +241,11 @@ export async function purchaseMockPackage(memberCode: string, pkg: MockPackagePu
       s.memberships.push({ memberCode, startedAt: now.toISOString(), expiresAt: new Date(now.getTime() + days * DAY_MS).toISOString(),
         name: canonical.name, timeSlot: canonical.timeSlot, totalDays: days, friendCouponsLeft: canonical.friendCoupons });
     }
-  });
+    if (!accounts) return fail("ไม่พบบัญชีสมาชิกสำหรับบันทึกการซื้อ");
+    const paidAmount = snapshot?.total ?? canonical.price;
+    recordPurchaseInStore(accounts, { id: purchaseId, memberCode, packageId: canonical.id, packageName: canonical.name,
+      subtotal: canonical.price, discount: canonical.price - paidAmount, paidAmount, purchasedAt: now.toISOString(), promoCode: snapshot?.grantCode });
+  }, true);
 }
 export type MockPayment = { revision: number; grantCode: string; memberCode: string; subtotal: number; discount: number; total: number; paymentId: string };
 function quote(s: BenefitsState, code: string, memberCode: string, subtotal: number, paymentId: string, now: Date): MockPayment {
