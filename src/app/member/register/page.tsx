@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
-import { X, Eye, EyeOff, Lock, User, HeartHandshake, UploadCloud } from "lucide-react";
+import { X, User, HeartHandshake, UploadCloud } from "lucide-react";
 import LanguageToggle from "@/components/LanguageToggle";
 import { useLanguage } from "@/context/LanguageContext";
 
@@ -16,6 +16,9 @@ export default function RegisterPage() {
   const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
+  const [challengeId, setChallengeId] = useState("");
+  const [signupTicket, setSignupTicket] = useState("");
+  const [formError, setFormError] = useState("");
   
   // Registration Form Fields
   const [fullName, setFullName] = useState("");
@@ -23,9 +26,6 @@ export default function RegisterPage() {
   const [gender, setGender] = useState<"MALE" | "FEMALE" | "OTHER">("OTHER");
   const [birthDay, setBirthDay] = useState("");
   const [birthMonth, setBirthMonth] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
 
   // Emergency Contact Fields
   const [emergencyName, setEmergencyName] = useState("");
@@ -87,11 +87,15 @@ export default function RegisterPage() {
   };
 
   const handleSendOtp = async () => {
-    if (phone.length < 9) return;
-    setLoading(true);
-    await new Promise((r) => setTimeout(r, 1000));
-    setLoading(false);
-    setStep("otp");
+    if (!/^0[689]\d{8}$/.test(phone.replace(/\D/g, ""))) return;
+    setLoading(true); setFormError("");
+    try {
+      const response = await fetch("/api/auth/register/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone: phone.replace(/\D/g, "") }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "ส่ง OTP ไม่สำเร็จ");
+      setChallengeId(result.challengeId); setStep("otp");
+    } catch (error) { setFormError(error instanceof Error ? error.message : "ส่ง OTP ไม่สำเร็จ"); }
+    finally { setLoading(false); }
   };
 
   const handleOtpChange = (index: number, value: string) => {
@@ -110,75 +114,43 @@ export default function RegisterPage() {
     }
   };
 
-  const handleAutoFillOtp = () => {
-    const demoOtp = ["1", "2", "3", "4", "5", "6"];
-    setOtp(demoOtp);
-  };
+
 
   const handleVerifyOtp = async () => {
     const otpStr = otp.join("");
     if (otpStr.length !== 6) return;
-    setLoading(true);
-    await new Promise((r) => setTimeout(r, 600));
-    setLoading(false);
-    setStep("register");
+    setLoading(true); setFormError("");
+    try {
+      const response = await fetch("/api/auth/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ challengeId, code: otp.join("") }) });
+      const result = await response.json();
+      if (!response.ok || !result.ticket) throw new Error(result.error || "OTP ไม่ถูกต้องหรือหมดอายุ");
+      setSignupTicket(result.ticket); setStep("register");
+    } catch (error) { setFormError(error instanceof Error ? error.message : "ยืนยัน OTP ไม่สำเร็จ"); }
+    finally { setLoading(false); }
   };
 
   const handleRegister = async () => {
-    if (!fullName.trim() || !gender || !birthDay || !birthMonth || !password) return;
-    if (password !== confirmPassword) {
-      alert("รหัสผ่านไม่ตรงกัน กรุณาตรวจสอบอีกครั้ง / Passwords do not match");
-      return;
-    }
-    setLoading(true);
-
-    let finalAvatarUrl = "";
-    if (selectedFile) {
-      try {
-        const formData = new FormData();
-        formData.append("file", selectedFile);
-        formData.append("folder", "blue-fitness/profiles");
-
-        const res = await fetch("/api/upload", {
-          method: "POST",
-          body: formData,
-        });
-        const data = await res.json();
-        if (data.success && data.url) {
-          finalAvatarUrl = data.url;
-        }
-      } catch (err) {
-        console.error("Cloudinary upload error:", err);
+    if (!fullName.trim() || !gender || !birthDay || !birthMonth || !signupTicket) return;
+    setLoading(true); setFormError("");
+    try {
+      const response = await fetch("/api/auth/register/complete", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticket: signupTicket, profile: {
+          fullName, nickname, gender, birthDay: Number(birthDay), birthMonth: Number(birthMonth),
+          emergencyName, emergencyPhone: emergencyPhone.replace(/\D/g, ""), emergencyRelation,
+        } }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "สมัครสมาชิกไม่สำเร็จ");
+      if (selectedFile) {
+        const formData = new FormData(); formData.append("file", selectedFile);
+        const upload = await fetch("/api/upload", { method: "POST", body: formData });
+        if (!upload.ok) setFormError("สมัครสำเร็จแล้ว แต่บันทึกรูปไม่สำเร็จ สามารถติดต่อเจ้าหน้าที่เพื่อเพิ่มรูปได้");
       }
-    }
-
-    const memberData = {
-      phone,
-      fullName,
-      nickname: nickname.trim(),
-      gender,
-      birthDay,
-      birthMonth,
-      password,
-      emergencyContact: {
-        name: emergencyName.trim(),
-        phone: emergencyPhone.trim(),
-        relation: emergencyRelation.trim(),
-      },
-      avatarUrl: finalAvatarUrl || previewUrl || "",
-      memberCode: "BLU-1001",
-      cardNumber: "CARD-8899",
-      points: 0,
-      status: "ACTIVE",
-      registeredAt: new Date().toISOString(),
-    };
-
-    if (typeof window !== "undefined") {
-      localStorage.setItem("blu_member", JSON.stringify(memberData));
-    }
-
-    setLoading(false);
-    router.push("/member");
+      localStorage.removeItem("blu_member");
+      router.push("/member"); router.refresh();
+    } catch (error) { setFormError(error instanceof Error ? error.message : "สมัครสมาชิกไม่สำเร็จ"); }
+    finally { setLoading(false); }
   };
 
   useEffect(() => {
@@ -306,6 +278,8 @@ export default function RegisterPage() {
             </div>
           </div>
 
+          {formError && <p role="alert" className="mb-4 rounded-xl bg-rose-100 p-3 text-sm text-rose-700">{formError}</p>}
+
           {/* ═══════════════════════════════════════
               Step 1: Phone Number
           ═══════════════════════════════════════ */}
@@ -392,15 +366,6 @@ export default function RegisterPage() {
                   ))}
                 </div>
 
-                <div className="text-center">
-                  <button
-                    type="button"
-                    onClick={handleAutoFillOtp}
-                    className="inline-flex items-center gap-1 text-xs font-bold text-blu-slate bg-blu-ice hover:bg-blu-sky/30 px-3 py-1.5 rounded-full border border-blu-sky/60 transition-all cursor-pointer"
-                  >
-                    {t("reg.otp_demo")}
-                  </button>
-                </div>
 
                 <button
                   onClick={handleVerifyOtp}
@@ -583,59 +548,6 @@ export default function RegisterPage() {
                   </div>
                 </div>
 
-                {/* 5. Password / PIN */}
-                <div>
-                  <label className="block text-sm font-semibold text-blu-dark mb-1">
-                    {t("reg.pwd_label")} <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder={t("reg.pwd_placeholder")}
-                      className="w-full pl-10 pr-10 py-3 rounded-xl border border-blu-sky/50 bg-blu-ice/30 text-blu-dark text-sm placeholder:text-blu-ocean/70 focus:outline-none focus:ring-2 focus:ring-blu-slate focus:border-transparent transition-all"
-                    />
-                    <Lock className="w-4 h-4 text-blu-steel absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-blu-steel hover:text-blu-dark cursor-pointer"
-                    >
-                      {showPassword ? (
-                        <EyeOff className="w-4 h-4" />
-                      ) : (
-                        <Eye className="w-4 h-4" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                {/* 6. Confirm Password */}
-                <div>
-                  <label className="block text-sm font-semibold text-blu-dark mb-1">
-                    {t("reg.confirm_pwd_label")} <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      placeholder={t("reg.confirm_pwd_placeholder")}
-                      className={`w-full pl-10 pr-4 py-3 rounded-xl border bg-blu-ice/30 text-blu-dark text-sm placeholder:text-blu-ocean/70 focus:outline-none focus:ring-2 focus:ring-blu-slate focus:border-transparent transition-all ${
-                        confirmPassword && password !== confirmPassword
-                          ? "border-rose-400 focus:ring-rose-400"
-                          : "border-blu-sky/50"
-                      }`}
-                    />
-                    <Lock className="w-4 h-4 text-blu-steel absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  </div>
-                  {confirmPassword && password !== confirmPassword && (
-                    <p className="text-xs text-rose-500 mt-1">
-                      {lang === "en" ? "Passwords do not match" : "รหัสผ่านไม่ตรงกัน"}
-                    </p>
-                  )}
-                </div>
 
                 {/* 7. Profile Photo */}
                 <div>
@@ -702,14 +614,14 @@ export default function RegisterPage() {
                   </p>
                 </div>
 
+                {formError && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{formError}</p>}
                 <button
                   onClick={handleRegister}
                   disabled={
                     !fullName.trim() ||
                     !birthDay ||
                     !birthMonth ||
-                    !password ||
-                    password !== confirmPassword ||
+                    !signupTicket ||
                     loading
                   }
                   className="w-full btn-gold py-3.5 rounded-xl text-base font-bold disabled:opacity-40 disabled:cursor-not-allowed mt-2 cursor-pointer shadow-md transition-all"

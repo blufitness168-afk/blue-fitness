@@ -165,8 +165,19 @@
 ---
 
 ### 🔌 8. การเชื่อมต่อระบบจริง (Backend Wiring & Database Integration)
+- [ ] **8.0 Auth และสิทธิ์ผู้ใช้ 4 ระดับ (Guest / Member / Admin / Owner):**
+  - [x] ตั้งบัญชี `BLU-1` เป็น Owner แรกใน Neon; ผู้ว่าจ้างยังต้องยืนยันว่าเป็นบัญชีของเจ้าของกิจการ
+  - [x] เตรียม schema role/OTP hash/session/signup ticket; เพิ่ม API ขอ/ยืนยัน OTP, สมัครสมาชิกใหม่, ออกจากระบบ และ Owner ตั้ง/ปลด Admin; ตั้ง `BLU-1` เป็น OWNER ใน Neon ตามคำขอ
+  - [x] ป้องกันหน้า Account, Admin และ Finance ฝั่งเซิร์ฟเวอร์; หน้า Login เลิกยอมรับรหัส mock
+  - [x] เชื่อม flow สมัครและ OTP เข้าฐานข้อมูล Neon; upload รูปสมัครหลังยืนยันตัวตนและตรวจสิทธิ์
+  - [ ] ย้ายข้อมูล Account/ธุรกรรม Admin กับ DB จริง; ตรวจทุก API และทดสอบ OTP/SMS จริงกับผู้ว่าจ้าง
+  - [ ] Guest ยังไม่ login: ไม่มีหน้า Account และเข้า Admin ไม่ได้
+  - [ ] Member: มีหน้า Account ของตนเอง แต่เข้า Admin ไม่ได้
+  - [ ] Admin (พนักงาน): มีหน้า Account และเมนู Admin ยกเว้นการเงิน; เข้า `/admin/finance` โดยตรงไม่ได้
+  - [ ] Owner: มีหน้า Account และเมนู Admin รวมถึง `/admin/finance`
+  - [ ] ตรวจสิทธิ์ฝั่งเซิร์ฟเวอร์ทั้งหน้าและ API ที่เกี่ยวข้อง ไม่พึ่งแค่การซ่อนเมนู; ของปัจจุบันยังเป็น mock
 - [ ] **8.1 Database Migration (Neon PostgreSQL + Drizzle ORM):**
-  - [ ] อัปเดต schema และรัน `pnpm db:push`
+  - [x] เพิ่ม schema role/OTP/session และรัน `pnpm db:push` บน Neon ที่ `public` เดิมไม่มีตาราง (ยังต้อง migrate domain schema mock ให้ครบก่อน production)
 - [ ] **8.2 เชื่อมต่อ Third-Party APIs:**
   - [ ] ThaiBulkSMS (OTP)
   - [ ] EasySlip API (ตรวจสลิปอัตโนมัติ)

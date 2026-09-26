@@ -1,5 +1,6 @@
 import {
   pgTable,
+  index,
   serial,
   text,
   varchar,
@@ -15,6 +16,11 @@ import { relations } from "drizzle-orm";
 // ==============================================================================
 // 🏷️ ENUMS
 // ==============================================================================
+// Guests have no authenticated member record/session; only persisted roles belong here.
+export const memberRoleEnum = pgEnum("member_role", ["MEMBER", "ADMIN", "OWNER"]);
+export const profileGenderEnum = pgEnum("profile_gender", ["MALE", "FEMALE", "OTHER"]);
+export const authOtpPurposeEnum = pgEnum("auth_otp_purpose", ["LOGIN", "REGISTER"]);
+
 export const memberStatusEnum = pgEnum("member_status", [
   "PENDING",
   "ACTIVE",
@@ -53,6 +59,11 @@ export const members = pgTable("members", {
   id: serial("id").primaryKey(),
   phone: varchar("phone", { length: 20 }).notNull().unique(),
   fullName: text("full_name").notNull(),
+  nickname: text("nickname"),
+  gender: profileGenderEnum("gender").default("OTHER").notNull(),
+  emergencyName: text("emergency_name"),
+  emergencyPhone: varchar("emergency_phone", { length: 20 }),
+  emergencyRelation: text("emergency_relation"),
   birthDay: integer("birth_day"),     // วันที่เกิด (1 - 31)
   birthMonth: integer("birth_month"), // เดือนที่เกิด (1 - 12)
   memberCode: varchar("member_code", { length: 50 }).notNull().unique(), // เช่น BLU-1001
@@ -61,6 +72,7 @@ export const members = pgTable("members", {
   points: integer("points").default(0).notNull(),
   expireDate: timestamp("expire_date", { withTimezone: true }),
   status: memberStatusEnum("status").default("PENDING").notNull(),
+  role: memberRoleEnum("role").default("MEMBER").notNull(),
   isFirstRegistration: boolean("is_first_registration").default(true).notNull(),
   lineUserId: varchar("line_user_id", { length: 100 }), // สำหรับแจ้งเตือนผ่าน LINE
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -177,6 +189,48 @@ export const otpRequests = pgTable("otp_requests", {
 });
 
 // ==============================================================================
+// AUTH OTP CHALLENGES & SESSIONS
+// The legacy otp_requests table is retained for existing data, but must not be
+// used for login: it stores plaintext OTPs. New login flows use only these tables.
+// ==============================================================================
+export const authOtpChallenges = pgTable("auth_otp_challenges", {
+  id: serial("id").primaryKey(),
+  phone: varchar("phone", { length: 20 }).notNull(),
+  challengeId: varchar("challenge_id", { length: 64 }).notNull().unique(),
+  codeHash: varchar("code_hash", { length: 255 }).notNull(),
+  purpose: authOtpPurposeEnum("purpose").default("LOGIN").notNull(),
+  attempts: integer("attempts").default(0).notNull(),
+  maxAttempts: integer("max_attempts").default(5).notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("auth_otp_challenges_phone_idx").on(table.phone),
+]);
+
+export const authSignupTickets = pgTable("auth_signup_tickets", {
+  id: serial("id").primaryKey(),
+  phone: varchar("phone", { length: 20 }).notNull(),
+  tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("auth_signup_tickets_phone_idx").on(table.phone)]);
+
+export const authSessions = pgTable("auth_sessions", {
+  id: serial("id").primaryKey(),
+  memberId: integer("member_id")
+    .references(() => members.id, { onDelete: "cascade" })
+    .notNull(),
+  tokenHash: varchar("token_hash", { length: 255 }).notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("auth_sessions_member_id_idx").on(table.memberId),
+]);
+
+// ==============================================================================
 // 🔗 RELATIONS
 // ==============================================================================
 export const membersRelations = relations(members, ({ many }) => ({
@@ -184,6 +238,14 @@ export const membersRelations = relations(members, ({ many }) => ({
   checkins: many(checkins),
   payments: many(payments),
   redemptions: many(redemptions),
+  authSessions: many(authSessions),
+}));
+
+export const authSessionsRelations = relations(authSessions, ({ one }) => ({
+  member: one(members, {
+    fields: [authSessions.memberId],
+    references: [members.id],
+  }),
 }));
 
 export const couponsRelations = relations(coupons, ({ one }) => ({

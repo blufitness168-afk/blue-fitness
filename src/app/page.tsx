@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { getPackagesBySlot, type TimeSlot, type MockPackage } from "@/lib/mock-data";
 import PaymentModal from "@/components/PaymentModal";
 import Navbar from "@/components/Navbar";
@@ -14,26 +15,31 @@ function formatPrice(price: number) {
 
 export default function Home() {
   const { t, lang } = useLanguage();
+  const router = useRouter();
   const [activeSlot, setActiveSlot] = useState<TimeSlot>("07:00-22:00");
   const [selectedPackage, setSelectedPackage] = useState<MockPackage | null>(null);
   const [member, setMember] = useState<{
     fullName?: string;
     avatarUrl?: string;
     phone?: string;
+    role?: "MEMBER" | "ADMIN" | "OWNER";
   } | null>(null);
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("blu_member");
-      if (saved) {
-        setMember(JSON.parse(saved));
-      }
-    } catch (e) { }
+    let active = true;
+    fetch("/api/auth/me", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((result) => { if (active) setMember(result?.member ?? null); })
+      .catch(() => { if (active) setMember(null); });
+    return () => { active = false; };
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const response = await fetch("/api/auth/logout", { method: "POST" });
+    if (!response.ok) return;
     localStorage.removeItem("blu_member");
     setMember(null);
+    router.refresh();
   };
 
   const packages = getPackagesBySlot(activeSlot);

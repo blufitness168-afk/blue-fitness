@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { neon } from "@neondatabase/serverless";
 import { v2 as cloudinary } from "cloudinary";
+import { getCurrentMember } from "@/lib/auth/server";
+import { sameOrigin } from "@/lib/auth/http";
 
 // Configure Cloudinary
 if (
@@ -17,6 +19,8 @@ if (
 }
 
 export async function GET() {
+  const member = await getCurrentMember();
+  if (member?.role !== "OWNER") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const results: Record<string, any> = {};
 
   // 1. Neon Database Test
@@ -193,6 +197,9 @@ export async function GET() {
 
 // Interactive POST (Send SMS using official ThaiBulkSMS API v2.0)
 export async function POST(req: Request) {
+  if (!sameOrigin(req)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const member = await getCurrentMember();
+  if (member?.role !== "OWNER") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   try {
     const body = await req.json();
     const { action, phone, message } = body;

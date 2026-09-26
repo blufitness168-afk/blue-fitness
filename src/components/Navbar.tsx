@@ -11,7 +11,7 @@ export type NavbarMember = {
   fullName?: string;
   avatarUrl?: string;
   phone?: string;
-  role?: "MEMBER" | "ADMIN";
+  role?: "MEMBER" | "ADMIN" | "OWNER";
 } | null;
 
 export default function Navbar({
@@ -107,7 +107,7 @@ export default function Navbar({
                     </Link>
                   </div>
 
-                  {member.role === "ADMIN" && (
+                  {(member.role === "ADMIN" || member.role === "OWNER") && (
                     <div className="p-1.5 border-t border-blu-sky/20">
                       <Link
                         href="/admin"
