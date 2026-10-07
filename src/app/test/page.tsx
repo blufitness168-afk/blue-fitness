@@ -1,5 +1,6 @@
 "use client";
 
+import CredentialTests from "./CredentialTests";
 import Image from "next/image";
 import React, { useState, useEffect } from "react";
 import {
@@ -35,11 +36,6 @@ export default function TestServicesPage() {
     line?: ServiceResult;
   }>({});
 
-  // SMS Test Box state
-  const [testPhone, setTestPhone] = useState("0973355322");
-  const [smsSending, setSmsSending] = useState(false);
-  const [smsResult, setSmsResult] = useState<any>(null);
-
   const runAllTests = async () => {
     setLoading(true);
     setResults({
@@ -64,31 +60,6 @@ export default function TestServicesPage() {
   useEffect(() => {
     runAllTests();
   }, []);
-
-  const sendTestSms = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!testPhone) return;
-    setSmsSending(true);
-    setSmsResult(null);
-
-    try {
-      const res = await fetch("/api/test-services", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "send-test-sms",
-          phone: testPhone,
-          message: `[Blu Fitness] รหัส OTP ทดสอบระบบคือ ${Math.floor(100000 + Math.random() * 900000)} (Ref: BLU)`,
-        }),
-      });
-      const data = await res.json();
-      setSmsResult(data);
-    } catch (err: any) {
-      setSmsResult({ success: false, error: err.message });
-    } finally {
-      setSmsSending(false);
-    }
-  };
 
   const getStatusBadge = (res?: ServiceResult) => {
     if (!res || res.status === "TESTING") {
@@ -311,54 +282,7 @@ export default function TestServicesPage() {
           </div>
         </div>
 
-        {/* Interactive SMS OTP Test Box */}
-        <div className="bg-[#0d1b3e]/60 rounded-2xl p-6 border border-amber-500/20">
-          <div className="flex items-center gap-2 mb-2 text-[#ffd700] font-bold text-lg">
-            <Zap className="w-5 h-5" />
-            ทดสอบการส่ง SMS OTP จริงเข้าเบอร์มือถือ
-          </div>
-          <p className="text-xs text-slate-400 mb-4">
-            ทดสอบว่าระบบสามารถยิง SMS ผ่าน ThaiBulkSMS เข้ามือถือได้จริงหรือไม่
-          </p>
-
-          <form onSubmit={sendTestSms} className="flex flex-col sm:flex-row gap-3">
-            <input
-              type="tel"
-              value={testPhone}
-              onChange={(e) => setTestPhone(e.target.value)}
-              placeholder="กรอกเบอร์มือถือ เช่น 0973355322"
-              className="flex-1 px-4 py-2.5 rounded-xl bg-[#060b19] border border-slate-700 text-white focus:outline-none focus:border-[#ffd700] text-sm"
-              required
-            />
-            <button
-              type="submit"
-              disabled={smsSending}
-              className="px-6 py-2.5 rounded-xl font-bold text-sm bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-            >
-              <Send className={`w-4 h-4 ${smsSending ? "animate-pulse" : ""}`} />
-              {smsSending ? "กำลังส่ง SMS..." : "ส่ง SMS ทดสอบ"}
-            </button>
-          </form>
-
-          {smsResult && (
-            <div className="mt-4 p-4 rounded-xl bg-[#060b19] border border-slate-700 text-xs font-mono">
-              <div className="flex items-center gap-2 mb-2 font-bold">
-                {smsResult.success ? (
-                  <span className="text-emerald-400 flex items-center gap-1">
-                    <CheckCircle2 className="w-4 h-4" /> ส่ง SMS สำเร็จ! (วิธี: {smsResult.method})
-                  </span>
-                ) : (
-                  <span className="text-rose-400 flex items-center gap-1">
-                    <XCircle className="w-4 h-4" /> ส่งไม่สำเร็จ
-                  </span>
-                )}
-              </div>
-              <pre className={smsResult.success ? "text-emerald-300" : "text-rose-300"}>
-                {JSON.stringify(smsResult, null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
+        <CredentialTests />
 
         {/* Footer Note */}
         <div className="flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 pt-4 border-t border-slate-800">

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { neon } from "@neondatabase/serverless";
 import { v2 as cloudinary } from "cloudinary";
 import { getCurrentMember } from "@/lib/auth/server";
+import { serviceBalance, testServiceAction } from "@/lib/test-service-actions";
 import { sameOrigin } from "@/lib/auth/http";
 
 // Configure Cloudinary
@@ -73,51 +74,13 @@ export async function GET() {
     };
   }
 
-  // 3. EasySlip API Test
   const easyStart = Date.now();
-  try {
-    const easyKey = process.env.EASYSLIP_API_KEY;
-    if (!easyKey) throw new Error("EASYSLIP_API_KEY is not configured");
-
-    const easyRes = await fetch("https://developer.easyslip.com/api/v1/verify", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${easyKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({}),
-      cache: "no-store",
-    });
-
-    const easyData = await easyRes.json().catch(() => ({}));
-    
-    if (easyRes.status === 200 || easyRes.status === 400) {
-      results.easyslip = {
-        status: "SUCCESS",
-        latencyMs: Date.now() - easyStart,
-        data: {
-          message: "API Key Authorized & Ready to Verify Slips",
-          tokenValid: true,
-          statusText: easyRes.status === 200 ? "OK" : "Ready (Awaiting Slips)",
-        },
-      };
-    } else {
-      results.easyslip = {
-        status: "ERROR",
-        latencyMs: Date.now() - easyStart,
-        data: {
-          statusCode: easyRes.status,
-          message: easyData.message || "Invalid API Key or Unauthorized",
-        },
-      };
-    }
-  } catch (error: any) {
-    results.easyslip = {
-      status: "ERROR",
-      latencyMs: Date.now() - easyStart,
-      error: error.message || "Failed to reach EasySlip API",
-    };
-  }
+  const easyBalance = await serviceBalance("slip");
+  results.easyslip = {
+    status: easyBalance.available ? "SUCCESS" : "ERROR",
+    latencyMs: Date.now() - easyStart,
+    data: { ...easyBalance, message: easyBalance.available ? "อ่านข้อมูลบัญชีได้ ยังไม่ได้ตรวจสลิป" : easyBalance.message, statusText: "GET /me" },
+  };
 
   // 4. ThaiBulkSMS Test
   const smsStart = Date.now();
@@ -131,7 +94,7 @@ export async function GET() {
     const smsRes = await fetch("https://api-v2.thaibulksms.com/credit", {
       method: "GET",
       headers: { Authorization: `Basic ${authHeader}` },
-      cache: "no-store",
+      cache: "no-store", signal: AbortSignal.timeout(12000),
     });
     const smsData = await smsRes.json().catch(() => ({}));
 
@@ -140,7 +103,7 @@ export async function GET() {
       latencyMs: Date.now() - smsStart,
       data: smsRes.ok
         ? {
-            credit: smsData?.credit ?? smsData?.total_credit ?? "OK",
+            credit: JSON.stringify(smsData?.remaining_credit ?? null),
             raw: smsData,
           }
         : { statusCode: smsRes.status, message: smsData?.error?.message || "ThaiBulkSMS authentication failed" },
@@ -162,7 +125,7 @@ export async function GET() {
     const lineRes = await fetch("https://api.line.me/v2/bot/info", {
       method: "GET",
       headers: { Authorization: `Bearer ${lineToken}` },
-      cache: "no-store",
+      cache: "no-store", signal: AbortSignal.timeout(12000),
     });
 
     const lineData = await lineRes.json();
@@ -192,61 +155,12 @@ export async function GET() {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV,
     results,
-  });
+  }, { headers: { "Cache-Control": "no-store" } });
 }
 
-// Interactive POST (Send SMS using official ThaiBulkSMS API v2.0)
 export async function POST(req: Request) {
   if (!sameOrigin(req)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const member = await getCurrentMember();
   if (member?.role !== "OWNER") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  try {
-    const body = await req.json();
-    const { action, phone, message } = body;
-
-    if (action === "send-test-sms") {
-      const apiKey = process.env.SMS_API_KEY;
-      const apiSecret = process.env.SMS_API_SECRET;
-      const sender = process.env.SMS_SENDER_NAME || "Demo";
-
-      if (!apiKey || !apiSecret) {
-        return NextResponse.json(
-          { success: false, message: "SMS Credentials are missing in .env.local" },
-          { status: 400 }
-        );
-      }
-
-      const cleanPhone = phone.replace(/[^0-9]/g, "");
-      const authHeader = Buffer.from(`${apiKey}:${apiSecret}`).toString("base64");
-
-      // Payload according to official ThaiBulkSMS API v2.0 PDF (Page 4 & 12)
-      const smsPayload = new URLSearchParams({
-        msisdn: cleanPhone,
-        message: message || `[Blu Fitness] รหัส OTP ทดสอบระบบคือ ${Math.floor(100000 + Math.random() * 900000)}`,
-        sender: sender,
-      });
-
-      const res = await fetch("https://api-v2.thaibulksms.com/sms", {
-        method: "POST",
-        headers: {
-          Authorization: `Basic ${authHeader}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: smsPayload.toString(),
-      });
-
-      const data = await res.json().catch(() => ({}));
-
-      return NextResponse.json({
-        success: res.ok && !data.error,
-        status: res.status,
-        senderUsed: sender,
-        data,
-      });
-    }
-
-    return NextResponse.json({ success: false, message: "Unknown action" }, { status: 400 });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-  }
+  return testServiceAction(req);
 }
