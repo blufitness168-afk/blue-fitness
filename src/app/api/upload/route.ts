@@ -23,7 +23,8 @@ if (
 export async function POST(req: Request) {
   if (!sameOrigin(req)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const member = await getCurrentMember();
-  if (!member) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  // This endpoint uploads member profiles, not staff-managed rewards or coupons.
+    if (!member || (member.role !== "OWNER" && member.role !== "MEMBER")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   if (member.role === "MEMBER" && (member.avatarUrl || member.avatarChanged)) return NextResponse.json({ error: "ติดต่อเจ้าหน้าที่เพื่อเปลี่ยนรูปโปรไฟล์" }, { status: 403 });
   try {
     const formData = await req.formData();

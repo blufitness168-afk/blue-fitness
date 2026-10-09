@@ -1,3 +1,4 @@
+import { PasswordWorkLimitError } from "@/lib/auth/password";
 import { json, readBody } from "@/lib/auth/http";
 import { completeRegistration, SESSION_COOKIE } from "@/lib/auth/server";
 import { registrationSchema } from "@/lib/auth/registration";
@@ -11,7 +12,7 @@ export async function POST(request: Request) {
   if (!profile.success) return json({ error: "กรุณาตรวจสอบข้อมูลสมัครสมาชิก" }, 400);
   try {
     const session = await completeRegistration(body.ticket, profile.data);
-    if (!session) return json({ error: "ลิงก์ยืนยันหมดอายุหรือถูกใช้แล้ว กรุณาขอ OTP ใหม่" }, 409);
+    if (!session) return json({ error: "เบอร์นี้มีบัญชีแล้ว หรือการยืนยันหมดอายุ/ถูกใช้แล้ว กรุณาเข้าสู่ระบบหรือขอ OTP ใหม่" }, 409);
     const response = json({ ok: true });
     response.cookies.set(SESSION_COOKIE, session.token, {
       httpOnly: true,
@@ -21,7 +22,8 @@ export async function POST(request: Request) {
       expires: session.expiresAt,
     });
     return response;
-  } catch {
+  } catch (error) {
+    if (error instanceof PasswordWorkLimitError) return json({ error: "ระบบกำลังประมวลผล กรุณารอสักครู่แล้วขอ OTP ใหม่" }, 429);
     return json({ error: "สมัครสมาชิกไม่สำเร็จ กรุณาลองใหม่" }, 503);
   }
 }

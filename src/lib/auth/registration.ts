@@ -1,6 +1,9 @@
 import { z } from "zod";
 
+export const passwordSchema = z.string().min(10).max(128);
+
 export const registrationSchema = z.object({
+  password: passwordSchema,
   fullName: z.string().trim().min(2).max(100),
   nickname: z.string().trim().max(50).optional().default(""),
   gender: z.enum(["MALE", "FEMALE", "OTHER"]),

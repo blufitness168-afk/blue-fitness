@@ -21,6 +21,8 @@ export default function RegisterPage() {
   const [formError, setFormError] = useState("");
   
   // Registration Form Fields
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [nickname, setNickname] = useState("");
   const [gender, setGender] = useState<"MALE" | "FEMALE" | "OTHER">("OTHER");
@@ -131,12 +133,13 @@ export default function RegisterPage() {
 
   const handleRegister = async () => {
     if (!fullName.trim() || !gender || !birthDay || !birthMonth || !signupTicket) return;
+    if (password.length < 10 || password.length > 128 || password !== confirmPassword) { setFormError("รหัสผ่านต้องยาว 10–128 ตัวอักษร และตรงกันทั้งสองช่อง"); return; }
     setLoading(true); setFormError("");
     try {
       const response = await fetch("/api/auth/register/complete", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ticket: signupTicket, profile: {
-          fullName, nickname, gender, birthDay: Number(birthDay), birthMonth: Number(birthMonth),
+          password, fullName, nickname, gender, birthDay: Number(birthDay), birthMonth: Number(birthMonth),
           emergencyName, emergencyPhone: emergencyPhone.replace(/\D/g, ""), emergencyRelation,
         } }),
       });
@@ -413,6 +416,12 @@ export default function RegisterPage() {
               </div>
 
               <div className="space-y-4">
+                <label className="block text-sm text-blu-dark">รหัสผ่าน (10–128 ตัวอักษร)
+                  <input type="password" autoComplete="new-password" minLength={10} maxLength={128} value={password} onChange={e => setPassword(e.target.value)} className="w-full border rounded-xl p-3" required />
+                </label>
+                <label className="block text-sm text-blu-dark">ยืนยันรหัสผ่าน
+                  <input type="password" autoComplete="new-password" maxLength={128} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} className="w-full border rounded-xl p-3" required />
+                </label>
                 {/* 1. Full Name */}
                 <div>
                   <label className="block text-sm font-semibold text-blu-dark mb-1">

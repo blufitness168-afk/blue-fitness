@@ -1,6 +1,7 @@
 import {
   pgTable,
   index,
+  uniqueIndex,
   serial,
   text,
   varchar,
@@ -19,7 +20,7 @@ import { relations } from "drizzle-orm";
 // Guests have no authenticated member record/session; only persisted roles belong here.
 export const memberRoleEnum = pgEnum("member_role", ["MEMBER", "ADMIN", "OWNER"]);
 export const profileGenderEnum = pgEnum("profile_gender", ["MALE", "FEMALE", "OTHER"]);
-export const authOtpPurposeEnum = pgEnum("auth_otp_purpose", ["LOGIN", "REGISTER"]);
+export const authOtpPurposeEnum = pgEnum("auth_otp_purpose", ["LOGIN", "REGISTER", "PASSWORD_SETUP", "PASSWORD_RESET"]);
 
 export const memberStatusEnum = pgEnum("member_status", [
   "PENDING",
@@ -29,6 +30,7 @@ export const memberStatusEnum = pgEnum("member_status", [
 ]);
 
 export const couponTypeEnum = pgEnum("coupon_type", [
+  "FREE_ENTRY",
   "FRIEND_PASS", // คูปองพาเพื่อนมาเล่นฟรี
   "EXTRA_DAYS",  // คูปองเพิ่มวันใช้งาน
   "CUSTOM",      // คูปองพิเศษอื่นๆ
@@ -58,6 +60,7 @@ export const paymentStatusEnum = pgEnum("payment_status", [
 export const members = pgTable("members", {
   id: serial("id").primaryKey(),
   phone: varchar("phone", { length: 20 }).notNull().unique(),
+  passwordHash: text("password_hash"),
   fullName: text("full_name").notNull(),
   nickname: text("nickname"),
   gender: profileGenderEnum("gender").default("OTHER").notNull(),
@@ -102,6 +105,7 @@ export const coupons = pgTable("coupons", {
   memberId: integer("member_id")
     .references(() => members.id, { onDelete: "cascade" })
     .notNull(),
+  source: text("source"),
   type: couponTypeEnum("type").notNull(),
   title: text("title").notNull(), // เช่น "คูปองพาเพื่อนมาเล่นฟรี 1 คน (5 ครั้ง)"
   totalQuota: integer("total_quota").default(1).notNull(),
@@ -110,7 +114,7 @@ export const coupons = pgTable("coupons", {
   expireDate: timestamp("expire_date", { withTimezone: true }),
   status: couponStatusEnum("status").default("AVAILABLE").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+}, (table) => [uniqueIndex("coupons_member_source_unique").on(table.memberId, table.source)]);
 
 // ==============================================================================
 // ⏱️ 4. CHECKINS (ประวัติการเช็กอิน & สะสมแต้ม)
@@ -198,6 +202,7 @@ export const authOtpChallenges = pgTable("auth_otp_challenges", {
   phone: varchar("phone", { length: 20 }).notNull(),
   challengeId: varchar("challenge_id", { length: 64 }).notNull().unique(),
   codeHash: varchar("code_hash", { length: 255 }).notNull(),
+  passwordHashAtIssue: text("password_hash_at_issue"),
   purpose: authOtpPurposeEnum("purpose").default("LOGIN").notNull(),
   attempts: integer("attempts").default(0).notNull(),
   maxAttempts: integer("max_attempts").default(5).notNull(),
@@ -213,9 +218,26 @@ export const authSignupTickets = pgTable("auth_signup_tickets", {
   phone: varchar("phone", { length: 20 }).notNull(),
   tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  hashStartedAt: timestamp("hash_started_at", { withTimezone: true }),
   consumedAt: timestamp("consumed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [index("auth_signup_tickets_phone_idx").on(table.phone)]);
+
+export const authPasswordTickets = pgTable("auth_password_tickets", {
+  passwordHashAtIssue: text("password_hash_at_issue"),
+  id: serial("id").primaryKey(),
+  phone: varchar("phone", { length: 20 }).notNull(),
+  purpose: authOtpPurposeEnum("purpose").notNull(),
+  tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  hashStartedAt: timestamp("hash_started_at", { withTimezone: true }),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+});
+export const authLoginLimits = pgTable("auth_login_limits", {
+  phone: varchar("phone", { length: 20 }).primaryKey(),
+  attempts: integer("attempts").default(0).notNull(),
+  windowStart: timestamp("window_start", { withTimezone: true }).defaultNow().notNull(),
+});
 
 export const authSessions = pgTable("auth_sessions", {
   id: serial("id").primaryKey(),

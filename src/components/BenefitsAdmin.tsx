@@ -15,7 +15,7 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : "
 const thaiDate = (value: string) => new Date(value).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" });
 const bangkokDateTimeInput = (value: string) => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(value)).replace(" ", "T");
 const couponTypeLabel = (value: BenefitDefinition["couponType"]) => ({ DISCOUNT: "ส่วนลด", GIFT: "ของขวัญ", FREE: "แถมฟรี", BONUS_POINTS: "แต้มเพิ่ม", OTHER: "อื่นๆ" })[value];
-const unitLabel = (value: BenefitDefinition["unit"]) => ({ BAHT: "บาท", PERCENT: "%", POINTS: "แต้ม" })[value];
+const unitLabel = (value: BenefitDefinition["unit"]) => ({ BAHT: "บาท", PERCENT: "%", POINTS: "แต้ม", VISITS: "ครั้ง", DAYS: "วัน", ITEMS: "รายการ" })[value];
 type CouponRedemption = BenefitGrant | PointCoupon;
 type Eligibility = "ALL" | "DAILY" | "MONTHLY" | "3_MONTHS" | "6_MONTHS" | "12_MONTHS";
 const isAdminGrant = (redemption: CouponRedemption): redemption is BenefitGrant => "definition" in redemption;

@@ -179,8 +179,8 @@
 - [ ] **8.1 Database Migration (Neon PostgreSQL + Drizzle ORM):**
   - [x] เพิ่ม schema role/OTP/session และรัน `pnpm db:push` บน Neon ที่ `public` เดิมไม่มีตาราง (ยังต้อง migrate domain schema mock ให้ครบก่อน production)
 - [ ] **8.2 เชื่อมต่อ Third-Party APIs:**
-  - [ ] ThaiBulkSMS (OTP)
-  - [ ] EasySlip API (ตรวจสลิปอัตโนมัติ)
+  - [ ] ThaiBulkSMS (OTP): 2026-10-09 อ่านเครดิตได้ แต่ส่งทดสอบ HTTP 400; ผู้ใช้กำลังขอ Sender Name รอผู้ให้บริการอนุมัติ พักทดสอบส่งจริงแล้วทดสอบครบวงจรหลังอนุมัติ
+  - [ ] EasySlip API (ตรวจสลิปอัตโนมัติ): ทดสอบจริงผ่าน `/test` สำเร็จ HTTP 200 และโควตาลด 1 ครั้งแล้ว; ยังต้องเชื่อมการชำระจริง ตรวจผู้รับ/ยอด/เวลา ป้องกันสลิปซ้ำ และเพิ่มสิทธิ์ใน transaction
   - [ ] Cloudinary (อัปโหลดรูปภาพ)
   - [ ] LINE Messaging API (แจ้งเตือนหมดอายุผ่าน LINE OA `@816hbkyl`)
 

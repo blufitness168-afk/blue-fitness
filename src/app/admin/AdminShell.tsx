@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { canAccessAdminPath } from "@/lib/admin-permissions";
 import {
   LayoutDashboard,
   Users,
@@ -51,7 +52,7 @@ export default function AdminShell({ children, role }: { children: React.ReactNo
 
       {/* Nav */}
       <div className="flex-1 px-3 py-4 space-y-1">
-        {navItems.filter((item) => role === "OWNER" || item.href !== "/admin/finance").map((item) => {
+        {navItems.filter((item) => canAccessAdminPath(role, item.href)).map((item) => {
           const active = isActive(item.href);
           return (
             <Link

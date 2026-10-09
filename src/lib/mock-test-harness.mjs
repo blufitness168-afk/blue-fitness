@@ -16,7 +16,7 @@ export function setupMock({ locks = true, storage = new Map() } = {}) {
   const writes = [], events = [], requests = [];
   const queues = new Map();
   const globals = {
-    Date: MockDate, Intl, Error, crypto: { randomUUID }, performance: { now: () => 0 },
+    Date: MockDate, Intl, Error, structuredClone, crypto: { randomUUID }, performance: { now: () => 0 },
     localStorage: {
       getItem(key) { if (failures.read) throw new Error("denied"); return storage.get(key) ?? null; },
       setItem(key, value) { if (failures.write) throw new Error("quota"); writes.push(key); storage.set(key, value); },

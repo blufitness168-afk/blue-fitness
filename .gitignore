@@ -13,6 +13,9 @@
 # testing
 /coverage
 
+# Sensitive local database snapshots and migration reports
+/.local-db/
+
 # next.js
 /.next/
 /out/

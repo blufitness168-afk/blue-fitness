@@ -8,10 +8,10 @@ export function json(body: object, status = 200) {
 export async function readBody(request: Request): Promise<Record<string, unknown> | null> {
   if (!sameOrigin(request)) return null;
   if (request.headers.get("content-type")?.split(";")[0].trim() !== "application/json") return null;
-  if (Number(request.headers.get("content-length")) > 1024) return null;
+  if (Number(request.headers.get("content-length")) > 4096) return null;
   try {
     const text = await request.text();
-    if (text.length > 1024) return null;
+    if (Buffer.byteLength(text, "utf8") > 4096) return null;
     const value: unknown = JSON.parse(text);
     return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
   } catch {

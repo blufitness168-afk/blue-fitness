@@ -12,19 +12,32 @@ export const BENEFITS_KEY = "blu_benefits_mock_v1";
 export const BENEFITS_EVENT = "blu-benefits-updated";
 const date = z.string().datetime({ offset: true });
 const money = z.number().int().min(0).max(10000000); // Integer baht in this prototype.
-const definitionSchema = z.object({
+function normalizeLegacyCoupon(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const d = value as Record<string, unknown>;
+  if (d.kind !== "COUPON") return value;
+  if (d.benefit === "EXTRA_DAYS" && (d.unit === "BAHT" || d.unit === "VISITS" || d.unit === undefined)) return { ...d, unit: "DAYS" };
+  if ((d.unit === "BAHT" || d.unit === undefined) && ["FREE", "GIFT", "OTHER"].includes(String(d.couponType ?? "FREE"))) {
+    return { ...d, unit: d.code === "DRINKFREE" ? "ITEMS" : "VISITS" };
+  }
+  return value;
+}
+const definitionSchema = z.preprocess(normalizeLegacyCoupon, z.object({
   id: z.string().uuid(), kind: z.enum(["PROMO", "COUPON"]),
   name: z.string().trim().min(1).max(120), code: z.string().regex(/^[A-Z0-9-]{3,40}$/),
   active: z.boolean(), expiresAt: date, quota: z.number().int().min(1).max(100000),
   maxUses: z.number().int().min(1).max(100000).default(100),
   discountType: z.enum(["FIXED", "PERCENT"]), amount: money, minSpend: money,
   couponType: z.enum(["DISCOUNT", "GIFT", "FREE", "BONUS_POINTS", "OTHER"]).default("FREE"),
-  unit: z.enum(["BAHT", "PERCENT", "POINTS"]).default("BAHT"),
+  unit: z.enum(["BAHT", "PERCENT", "POINTS", "VISITS", "DAYS", "ITEMS"]).default("BAHT"),
   maxCondition: money.default(0), conditionUnit: z.enum(["BAHT", "POINTS"]).default("BAHT"),
   perPerson: z.number().int().min(1).max(100).default(1), validDays: z.number().int().min(0).max(3650).default(30),
   noFixedExpiry: z.boolean().default(false),
   benefit: z.enum(["BRING_FRIEND", "EXTRA_DAYS"]), detail: z.string().trim().min(1).max(300),
 }).strict().superRefine((d, ctx) => {
+  if (d.kind === "COUPON" && ((d.benefit === "EXTRA_DAYS" && d.unit !== "DAYS") || (d.unit === "DAYS" && d.benefit !== "EXTRA_DAYS") || (d.couponType === "DISCOUNT" && (d.benefit === "EXTRA_DAYS" || !["BAHT", "PERCENT"].includes(d.unit))) || (["FREE", "GIFT", "OTHER"].includes(d.couponType) && !["VISITS", "DAYS", "ITEMS"].includes(d.unit)))) {
+    ctx.addIssue({ code: "custom", message: "หน่วยไม่ตรงกับประเภทคูปอง กรุณาเลือกครั้ง วัน หรือรายการตามสิทธิ์" });
+  }
   if (d.amount < 1 || (d.kind === "PROMO" && d.discountType === "PERCENT" && d.amount > 100) || (d.kind === "COUPON" && d.unit === "PERCENT" && d.amount > 100)) {
     ctx.addIssue({ code: "custom", message: "จำนวนสิทธิ์/ส่วนลดไม่ถูกต้อง (เปอร์เซ็นต์ไม่เกิน 100)" });
   }
@@ -35,7 +48,7 @@ const definitionSchema = z.object({
   if (d.kind === "COUPON" && d.couponType === "BONUS_POINTS" && (d.unit !== "POINTS" || d.benefit === "EXTRA_DAYS")) {
     ctx.addIssue({ code: "custom", message: "คูปองแต้มเพิ่มต้องใช้หน่วยแต้มและรูปแบบสิทธิ์ทั่วไป" });
   }
-});
+}));
 export type BenefitDefinition = z.infer<typeof definitionSchema>;
 export type BenefitKind = BenefitDefinition["kind"];
 const grantSchema = z.object({
@@ -82,13 +95,13 @@ const PROMO_DEMO_GRANTS: BenefitGrant[] = [
 const COUPON_DEMO_A: BenefitDefinition = {
   id: "00000000-0000-4000-8000-000000000003", kind: "COUPON", name: "คูปองพาเพื่อนฟรี", code: "FRIENDPASS", active: true,
   expiresAt: "9999-12-31T23:59:59+07:00", quota: 100, maxUses: 100, discountType: "FIXED", amount: 1, minSpend: 0,
-  couponType: "GIFT", unit: "BAHT", maxCondition: 0, conditionUnit: "BAHT", perPerson: 1, validDays: 30, noFixedExpiry: true,
+  couponType: "GIFT", unit: "VISITS", maxCondition: 0, conditionUnit: "BAHT", perPerson: 1, validDays: 30, noFixedExpiry: true,
   benefit: "BRING_FRIEND", detail: "พาเพื่อนเข้าใช้บริการได้ 1 ครั้ง",
 };
 const COUPON_DEMO_B: BenefitDefinition = {
   id: "00000000-0000-4000-8000-000000000004", kind: "COUPON", name: "คูปองเครื่องดื่มฟรี", code: "DRINKFREE", active: true,
   expiresAt: "9999-12-31T23:59:59+07:00", quota: 50, maxUses: 50, discountType: "FIXED", amount: 1, minSpend: 0,
-  couponType: "FREE", unit: "BAHT", maxCondition: 0, conditionUnit: "BAHT", perPerson: 1, validDays: 30, noFixedExpiry: true,
+  couponType: "FREE", unit: "ITEMS", maxCondition: 0, conditionUnit: "BAHT", perPerson: 1, validDays: 30, noFixedExpiry: true,
   benefit: "BRING_FRIEND", detail: "รับเครื่องดื่มฟรี 1 รายการ",
 };
 const COUPON_DEMO_GRANTS: BenefitGrant[] = [
@@ -171,7 +184,7 @@ async function writeBenefits<T>(operation: (state: BenefitsState, now: Date, acc
 export function newDefinition(kind: BenefitKind): BenefitDefinition {
   const bangkokDay = new Date(Date.now() + 30 * DAY_MS + 7 * 3600000).toISOString().slice(0, 10);
   return { id: crypto.randomUUID(), kind, name: "", code: "", active: true, expiresAt: kind === "COUPON" ? "9999-12-31T23:59:59+07:00" : `${bangkokDay}T23:59:59+07:00`, quota: 100, maxUses: 100,
-    discountType: "FIXED", amount: 1, minSpend: 0, couponType: "FREE", unit: "BAHT", maxCondition: 0, conditionUnit: "BAHT", perPerson: 1, validDays: 30,
+    discountType: "FIXED", amount: 1, minSpend: 0, couponType: "FREE", unit: kind === "COUPON" ? "VISITS" : "BAHT", maxCondition: 0, conditionUnit: "BAHT", perPerson: 1, validDays: 30,
     noFixedExpiry: kind === "COUPON", benefit: "BRING_FRIEND", detail: kind === "PROMO" ? "ส่วนลดแพ็กเกจ (mock)" : "พาเพื่อนมาออกกำลังกาย (mock)" };
 }
 export async function saveDefinition(value: BenefitDefinition, expected: BenefitDefinition | null): Promise<void> {

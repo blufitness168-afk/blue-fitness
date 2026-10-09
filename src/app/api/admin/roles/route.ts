@@ -1,14 +1,15 @@
 import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { members } from "@/db/schema";
-import { json, readBody } from "@/lib/auth/http";
+import { json, readBody, sameOrigin } from "@/lib/auth/http";
 import { getCurrentMember } from "@/lib/auth/server";
 import { normalizePhone } from "@/lib/auth/policy";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const owner = await getCurrentMember();
+  if (!sameOrigin(request)) return json({ error: "Forbidden" }, 403);
+    const owner = await getCurrentMember();
   if (owner?.role !== "OWNER") return json({ error: "Forbidden" }, 403);
   const body = await readBody(request);
   const phone = normalizePhone(body?.phone);

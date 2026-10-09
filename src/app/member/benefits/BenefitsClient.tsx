@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import WelcomeCoupons from "./WelcomeCoupons";
+import type { WelcomeCoupon } from "@/lib/benefits-server";
 import { QRCodeSVG } from "qrcode.react";
 import { buttonClass, MockNotice, panelClass } from "@/components/AdminScanner";
 
 import { BENEFITS_EVENT, BENEFITS_KEY, readBenefits, readMembership, type BenefitsState, type MockMembership } from "@/lib/benefits";
 
-export default function MockBenefitsWallet({ identity }: { identity: { memberCode: string; fullName: string } }) {
+export default function MockBenefitsWallet({ identity, welcomeCoupons }: { identity: { memberCode: string; fullName: string }; welcomeCoupons: WelcomeCoupon[] }) {
   const [state, setState] = useState<BenefitsState | null>(null);
   const [member, setMember] = useState<{ memberCode: string; fullName: string } | null>(null);
   const [membership, setMembership] = useState<MockMembership | null>(null);
@@ -35,7 +37,9 @@ export default function MockBenefitsWallet({ identity }: { identity: { memberCod
   }, [refresh]);
   const grants = state?.grants.filter(g => g.memberCode === member?.memberCode) ?? [];
   return <main className="mx-auto max-w-4xl space-y-5 px-4 py-24 text-blu-dark">
-    <h1 className="text-2xl font-black">กระเป๋าสิทธิ์ทดลอง (Mock Wallet)</h1><MockNotice />
+    <h1 className="text-2xl font-black">กระเป๋าสิทธิ์สมาชิก</h1>
+        <WelcomeCoupons coupons={welcomeCoupons} />
+        <h2 className="text-lg font-bold">สิทธิ์ทดลองในเบราว์เซอร์ (แยกจากคูปองจริง)</h2><MockNotice />
     <p className="text-sm">ตัวตนจาก session ฝั่งเซิร์ฟเวอร์ แต่สิทธิ์ที่แสดงยังเป็นข้อมูลทดลองในเบราว์เซอร์ ไม่ใช่สิทธิ์จากฐานข้อมูลจริง</p>
     <p className="text-sm">ส่วนลดที่ได้รับแจกใช้ใน PaymentModal ตอนซื้อแพ็กเกจ mock: บันทึกแพ็กเกจและใช้ส่วนลดพร้อมกันเมื่อยืนยันสำเร็จ ไม่มีการตัดเงินจริง • คูปองนำ QR ไปแลกที่ Admin/Coupons; คูปองเพิ่มวันต้องมีแพ็กเกจ mock ที่บันทึกแล้ว</p>
     <nav className="flex flex-wrap gap-4 text-sm underline"><Link href="/#packages">เลือกซื้อ / ต่ออายุแพ็กเกจ</Link><Link href="/member">บัตรสมาชิก</Link><Link href="/member/rewards">ของรางวัล</Link></nav>
@@ -47,7 +51,7 @@ export default function MockBenefitsWallet({ identity }: { identity: { memberCod
     {error && <p role="alert" className="rounded-xl bg-rose-100 p-4">{error}</p>}
     <div className="grid gap-4 sm:grid-cols-2">{grants.map(g => <article key={g.id} className={panelClass}>
       <h2 className="font-bold">{g.definition.name}</h2>
-      <p className="text-sm">{g.definition.kind === "PROMO" ? `ส่วนลด ${g.definition.amount}${g.definition.discountType === "PERCENT" ? "%" : " บาท"} • ยอดขั้นต่ำ ${g.definition.minSpend} บาท` : `${g.definition.benefit === "EXTRA_DAYS" ? "เพิ่มวันแพ็กเกจ (mock)" : "พาเพื่อน"} ${g.definition.amount}`}</p>
+      <p className="text-sm">{g.definition.kind === "PROMO" ? `ส่วนลด ${g.definition.amount}${g.definition.discountType === "PERCENT" ? "%" : " บาท"} • ยอดขั้นต่ำ ${g.definition.minSpend} บาท` : `${g.definition.benefit === "EXTRA_DAYS" ? "เพิ่มวันแพ็กเกจ (mock)" : "สิทธิ์คูปอง (mock)"} ${g.definition.amount} ${{ BAHT: "บาท", PERCENT: "%", POINTS: "แต้ม", VISITS: "ครั้ง", DAYS: "วัน", ITEMS: "รายการ" }[g.definition.unit]}`}</p>
       <p className="text-sm">{g.definition.detail}</p>
       <p className="text-xs">หมดอายุ {new Date(g.definition.expiresAt).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" })}</p>
       <p className="font-bold">{g.status === "USED" ? "ใช้แล้ว" : "ยังไม่ใช้"}{!state!.definitions.find(d => d.id === g.definition.id)?.active ? " • ระงับ" : ""}</p>

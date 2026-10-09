@@ -17,7 +17,7 @@ schemaModule.filename = filename;
 schemaModule.paths = Module._nodeModulePaths(fileURLToPath(new URL(".", import.meta.url)));
 schemaModule.require = require;
 schemaModule._compile(compiled, filename);
-const { memberRoleEnum, profileGenderEnum, authOtpPurposeEnum, members, otpRequests, authOtpChallenges, authSignupTickets, authSessions } = schemaModule.exports;
+const { coupons, couponTypeEnum, authPasswordTickets, authLoginLimits, memberRoleEnum, profileGenderEnum, authOtpPurposeEnum, members, otpRequests, authOtpChallenges, authSignupTickets, authSessions } = schemaModule.exports;
 
 function columnNames(table) {
   return getTableConfig(table).columns.map((column) => column.name);
@@ -36,10 +36,10 @@ test("auth OTP challenges provide hash, attempt limit, expiry and consumption fi
   const config = getTableConfig(authOtpChallenges);
   assert.equal(config.name, "auth_otp_challenges");
   assert.deepEqual(columnNames(authOtpChallenges), [
-    "id", "phone", "challenge_id", "code_hash", "purpose", "attempts", "max_attempts",
+    "id", "phone", "challenge_id", "code_hash", "password_hash_at_issue", "purpose", "attempts", "max_attempts",
     "expires_at", "consumed_at", "created_at",
   ]);
-  assert.deepEqual(authOtpPurposeEnum.enumValues, ["LOGIN", "REGISTER"]);
+  assert.deepEqual(authOtpPurposeEnum.enumValues, ["LOGIN", "REGISTER", "PASSWORD_SETUP", "PASSWORD_RESET"]);
   assert.equal(authOtpChallenges.purpose.default, "LOGIN");
   assert.equal(authOtpChallenges.challengeId.isUnique, true);
   assert.equal(authOtpChallenges.codeHash.notNull, true);
@@ -75,4 +75,36 @@ test("sessions store unique token hashes with member FK, expiry and revocation",
   assert.deepEqual(fk.columns, [authSessions.memberId]);
   assert.deepEqual(fk.foreignColumns, [members.id]);
   assert.equal(config.foreignKeys[0].onDelete, "cascade");
+});
+
+test("welcome coupons have a nullable source and unique member/source index", () => {
+  assert.ok(couponTypeEnum.enumValues.includes("FREE_ENTRY"));
+  assert.equal(coupons.source.notNull, false);
+  const config = getTableConfig(coupons);
+  assert.ok(config.indexes.some(index => index.config.unique && index.config.name === "coupons_member_source_unique"));
+});
+test("password tickets and persistent login quotas are exported", () => {
+  assert.equal(authPasswordTickets.tokenHash.isUnique, true);
+  assert.ok(columnNames(authPasswordTickets).includes("password_hash_at_issue"));
+  assert.equal(authLoginLimits.phone.primary, true);
+});
+
+test("issuance credential snapshots and one-shot pre-hash ticket claims exist", () => {
+  assert.equal(authOtpChallenges.passwordHashAtIssue.notNull, false);
+  for (const table of [authSignupTickets, authPasswordTickets]) {
+    assert.ok(columnNames(table).includes("hash_started_at"));
+    assert.equal(table.hashStartedAt.notNull, false);
+  }
+});
+
+test("incremental hardening invalidates pre-snapshot recovery credentials", () => {
+  const migration = readFileSync(new URL("./migrations/20261009_auth_review_hardening.sql", import.meta.url), "utf8");
+  assert.match(migration, /BEGIN;/);
+  assert.match(migration, /ALTER TABLE auth_otp_challenges ADD COLUMN IF NOT EXISTS password_hash_at_issue text/);
+  assert.match(migration, /ALTER TABLE auth_signup_tickets ADD COLUMN IF NOT EXISTS hash_started_at timestamptz/);
+  assert.match(migration, /ALTER TABLE auth_password_tickets ADD COLUMN IF NOT EXISTS hash_started_at timestamptz/);
+  assert.match(migration, /UPDATE auth_otp_challenges SET consumed_at = now\(\)/);
+  assert.match(migration, /purpose IN \('PASSWORD_SETUP', 'PASSWORD_RESET'\)/);
+  assert.match(migration, /UPDATE auth_password_tickets SET consumed_at = now\(\) WHERE consumed_at IS NULL/);
+  assert.match(migration, /COMMIT;/);
 });

@@ -17,7 +17,7 @@ registrationModule.require = require;
 registrationModule._compile(compiled, filename);
 const { registrationSchema } = registrationModule.exports;
 
-const valid = { fullName: "สมชาย ใจดี", gender: "OTHER", birthDay: 29, birthMonth: 2 };
+const valid = { password: "safe-password-123", fullName: "สมชาย ใจดี", gender: "OTHER", birthDay: 29, birthMonth: 2 };
 
 test("registration accepts valid Thai birth dates and defaults optional fields", () => {
   const result = registrationSchema.parse(valid);
@@ -32,4 +32,8 @@ test("registration rejects invalid profile fields and date bounds", () => {
   assert.equal(registrationSchema.safeParse({ ...valid, birthDay: 32 }).success, false);
   assert.equal(registrationSchema.safeParse({ ...valid, birthDay: 31, birthMonth: 4 }).success, false);
   assert.equal(registrationSchema.safeParse({ ...valid, birthMonth: 13 }).success, false);
+});
+
+test("registration requires a bounded password", () => {
+ for (const password of [undefined, "short", "x".repeat(129)]) assert.equal(registrationSchema.safeParse({ ...valid, password }).success, false);
 });

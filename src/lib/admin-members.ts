@@ -34,6 +34,7 @@ const memberSchema = z.object({
   cardNumber: z.string().regex(/^CARD-\d+$/),
   firstName: z.string().trim().min(1).max(100),
   lastName: z.string().trim().min(1).max(100),
+    nickname: z.string().trim().max(100).default(""),
   email: z.union([z.literal(""), z.string().email()]),
   phone: z.string().trim().min(9).max(20),
   gender: z.enum(["MALE", "FEMALE", "OTHER"]),
@@ -43,13 +44,14 @@ const memberSchema = z.object({
   emergencyName: z.string().trim().max(150),
   emergencyPhone: z.string().trim().max(20),
   emergencyRelation: z.string().trim().max(100),
-  role: z.enum(["MEMBER", "TRAINER", "STAFF", "OTHER"]),
+  // Legacy personnel categories never imply persisted authentication privileges.
+  role: z.preprocess((role) => ["TRAINER", "STAFF", "OTHER"].includes(String(role)) ? "MEMBER" : role, z.enum(["MEMBER", "ADMIN", "OWNER"])),
   passwordHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   membershipHistory: z.array(membershipHistorySchema),
   coupons: z.array(memberCouponSchema),
 }).strict();
 export type AdminMember = z.infer<typeof memberSchema>;
-export type AdminMemberProfileInput = Pick<AdminMember, "firstName" | "lastName" | "email" | "phone" | "gender" | "birthDate" | "registeredAt" | "avatarUrl" | "emergencyName" | "emergencyPhone" | "emergencyRelation" | "role">;
+export type AdminMemberProfileInput = Pick<AdminMember, "firstName" | "lastName" | "nickname" | "email" | "phone" | "gender" | "birthDate" | "registeredAt" | "avatarUrl" | "emergencyName" | "emergencyPhone" | "emergencyRelation" | "role">;
 
 const storeSchema = z.object({ version: z.literal(1), members: z.array(memberSchema) }).strict();
 type AdminMembersStore = z.infer<typeof storeSchema>;
@@ -66,7 +68,7 @@ const history = (
   return { id, packageId, packageName: pkg.name, startedAt, expiresAt, timeSlot: pkg.timeSlot, price: pkg.price, kind };
 };
 
-const seeds: AdminMember[] = [
+const seeds = [
   { id: 1, memberCode: "BLU-1001", cardNumber: "CARD-8899", firstName: "สมชาย", lastName: "ใจดี", email: "somchai@example.com", phone: "081-234-5678", gender: "MALE", birthDate: "08-15", registeredAt: "2026-06-06", avatarUrl: "", emergencyName: "สมศรี ใจดี", emergencyPhone: "089-999-8888", emergencyRelation: "ภรรยา", role: "MEMBER", membershipHistory: [history("m-1001-1", 7, "2026-06-06", "2026-07-06", "NEW"), history("m-1001-2", 7, "2026-07-06", "2026-08-05", "RENEWAL"), history("m-1001-3", 7, "2026-08-05", "2026-10-04", "RENEWAL")], coupons: [] },
   { id: 101, memberCode: "BLU-1012", cardNumber: "CARD-1188", firstName: "วิภาดา", lastName: "รักฟิต", email: "wipada@example.com", phone: "089-111-2200", gender: "FEMALE", birthDate: "02-11", registeredAt: "2026-09-02", avatarUrl: "", emergencyName: "วิมล รักฟิต", emergencyPhone: "089-111-2201", emergencyRelation: "มารดา", role: "MEMBER", membershipHistory: [history("m-1012-1", 7, "2026-09-02", "2026-10-02", "NEW")], coupons: [] },
   { id: 102, memberCode: "BLU-1015", cardNumber: "CARD-2299", firstName: "จักรพงษ์", lastName: "สมบูรณ์", email: "jakrapong@example.com", phone: "086-222-3311", gender: "MALE", birthDate: "11-20", registeredAt: "2026-04-10", avatarUrl: "", emergencyName: "", emergencyPhone: "", emergencyRelation: "", role: "MEMBER", membershipHistory: [history("m-1015-1", 3, "2026-04-10", "2026-07-09", "NEW")], coupons: [] },
@@ -76,7 +78,7 @@ const seeds: AdminMember[] = [
 ];
 
 function seedStore(): AdminMembersStore {
-  return { version: 1, members: seeds.map((member) => structuredClone(member)) };
+  return validateStore({ version: 1, members: seeds.map((member) => structuredClone(member)) });
 }
 
 function validateStore(value: unknown): AdminMembersStore {
@@ -110,7 +112,8 @@ export function saveAdminMemberProfile(memberCode: string, input: AdminMemberPro
   const store = readStore();
   const index = store.members.findIndex((member) => member.memberCode === memberCode);
   if (index < 0) throw new Error("ไม่พบสมาชิก");
-  store.members[index] = memberSchema.parse({ ...store.members[index], ...input });
+  if (input.role !== store.members[index].role) throw new Error("เปลี่ยนสิทธิ์จริงผ่าน API เจ้าของเท่านั้น ไม่ใช่ข้อมูล mock");
+    store.members[index] = memberSchema.parse({ ...store.members[index], ...input });
   writeStore(store);
   return structuredClone(store.members[index]);
 }

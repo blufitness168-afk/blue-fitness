@@ -1,10 +1,7 @@
-import { redirect } from "next/navigation";
-import { getCurrentMember } from "@/lib/auth/server";
+import { requireAdminPage } from "@/lib/admin-permissions-server";
 import FinanceClient from "./FinanceClient";
 
 export default async function FinancePage() {
-  const member = await getCurrentMember();
-  if (!member) redirect("/member/login");
-  if (member.role !== "OWNER") redirect("/admin");
+  await requireAdminPage("/admin/finance");
   return <FinanceClient />;
 }

@@ -4,6 +4,7 @@ import AdminShell from "./AdminShell";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const member = await getCurrentMember();
-  if (!member || (member.role !== "ADMIN" && member.role !== "OWNER")) redirect("/member/login");
+  if (!member) redirect("/member/login");
+    if (member.role !== "ADMIN" && member.role !== "OWNER") redirect("/member");
   return <AdminShell role={member.role}>{children}</AdminShell>;
 }
