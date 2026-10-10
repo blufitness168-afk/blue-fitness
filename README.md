@@ -2,7 +2,9 @@
 
 เว็บแอปพลิเคชันจัดการระบบสมาชิกฟิตเนสออนไลน์แบบครบวงจร ออกแบบและพัฒนาเพื่อ **BLU FITNESS (ชะอำ)** ครอบคลุมทั้งระบบบัตรสมาชิกดิจิทัล (Digital Member Card), การชำระเงินพร้อมตรวจสอบสลิปอัตโนมัติ (EasySlip), ระบบคูปอง & คะแนนสะสม, ระบบ Check-in หน้าร้าน (กล้องเว็บ + เครื่องสแกน 4600s 2D USB) และระบบหลังบ้านสำหรับผู้ดูแล (Admin Dashboard)
 
-> **สถานะปัจจุบัน:** ฟีเจอร์ธุรกรรมของสมาชิกยังเป็นต้นแบบ **mock/browser-only** ใน `localStorage` ห้ามใช้ยืนยันการชำระเงินหรือสิทธิ์เข้าใช้จริง เพิ่มฐาน Auth/OTP/session และสิทธิ์เข้าหน้าด้วย Neon ในโค้ดแล้ว สร้าง schema ใน Neon และเชื่อม Register/OTP/Session เข้าฐานแล้ว (ยังไม่มีสมาชิก/Owner คนแรก); ยังไม่ได้ทดสอบ SMS จริง และข้อมูล Account/ธุรกรรมส่วนใหญ่ยังเป็น mock จึงยังไม่พร้อมใช้งาน production
+> **สถานะปัจจุบัน:** เพิ่มระบบซื้อแพ็กเกจจริงผ่าน session → คำสั่งซื้อ DB → PromptPay → EasySlip v2 registered-account matching → ต่ออายุ/แต้มแบบ atomic แล้วในโค้ด แต่ **payment migration ยังไม่ได้ apply และยังไม่ทดสอบสลิปจริง** อ่าน [Payment deployment/security](src/db/migrations/PAYMENTS.md) ก่อนเปิดใช้งาน ยอมรับ raw masked เฉพาะเมื่อ matchedAccount เลขเต็ม/ชื่อตรง snapshot และ visible digits ไม่ขัดกัน (พึ่ง dashboard “เลขบัญชีและชื่อบัญชีธนาคาร” ของ provider ไม่ใช่ cryptographic proof); สิทธิ์ Admin/ร้านแลกแต้ม/ธุรกรรมเดิมอื่น ๆ ยังเป็น **mock/browser-only** ใน `localStorage` และไม่ใช้ยืนยันเงินจริง ระบบนี้ยังไม่ถือว่าผ่าน production acceptance
+>
+> **ทดสอบเงินจริงหลัง parent apply migration:** ตั้ง `EASYSLIP_PAYMENT_V2_API_KEY` และ `PAYMENT_PROVIDER_STRATEGY=EASYSLIP_V2_REGISTERED_ACCOUNT` จากนั้นจึงเปิด `PAYMENT_TRANSFERS_ENABLED=true` → สร้าง order ก่อน → โอนยอดตรง order ทุกสตางค์ภายใน 15 นาที → อัปโหลดสลิปภายใน upload grace อีก 30 นาที ตรวจ PAID/expiry/points จาก DB; ถ้าผล UNKNOWN ห้ามโอนซ้ำ โหลดสถานะหรือ reconciliation รูปเดิมเท่านั้น
 >
 > **อัปเดต Admin ล่าสุด:** `/admin/checkin` มี Auto Scan USB รับรหัส+Enter และสลับเข้า/ออกตามประวัติวันนี้; `/admin/finance` ย้อนรายการ Manual โดยเก็บรายการเดิม; `/admin/members` จัดการข้อมูล/เพศ; `/admin/rewards`, `/admin/promo-codes`, `/admin/coupons` แยก flow แล้ว ทั้งหมดยังเป็น mock ต้องทดสอบเครื่องสแกนจริง
 

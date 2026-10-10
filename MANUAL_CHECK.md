@@ -1,6 +1,35 @@
 # Manual check ก่อนเปิดใช้งานจริง
 
-> ตอนนี้ยังไม่พร้อม production: Register และ OTP ต่อ Neon แล้ว; มีสมาชิกทดลอง 1 ราย (`BLU-1`) ที่ตั้งบทบาทเป็น OWNER ใน Neon แล้ว; ยังไม่ได้ทดสอบสิทธิ์ครบทุก flow; Account/ธุรกรรมส่วนใหญ่ยังเป็น mock/localStorage, ยังไม่ทดสอบ SMS จริงและยังไม่เปิดรับเงิน ห้ามใช้ข้อมูล mock เป็นหลักฐานการชำระเงินหรือสิทธิ์เข้าใช้
+## Acceptance จริง: PromptPay 100 บาท และ paid replay (2026-10-10)
+
+- ตรวจ Neon ยืนยัน order `fa7ebd15-3951-4eed-914d-0c70f841458d` = PAID, amount 100 บาท, transRef `Acb0e9d77c0604926` ตรงสลิปที่ผู้ใช้ส่ง
+- Paid เวลาไทย 10/10/2569 18:47:14, confirmed 19:41:09; สิทธิ์รายวันหมดอายุ 11/10/2569 19:41:09 แต้มสมาชิกจริง 5, point ledger 1 แถว, transfer registry 1 แถว
+- เรียก `finalize_package_payment` ของรายการที่ PAID อยู่แล้วซ้ำ 2 ครั้งใน Neon Serializable transaction ผ่าน session ที่ยัง active โดยไม่เปิดเผย digest: คืน PAID ทั้งคู่ วันหมดอายุ/แต้มไม่เปลี่ยน ledger และ registry ยังแถวเดียว ไม่สร้างการซื้อเพิ่ม
+- รอบตรวจนี้ไม่ส่งรูปให้ provider ซ้ำ ไม่โอนเงิน ไม่เพิ่มวัน/แต้มเอง ไม่ลบสมาชิก; เป็น DB-finalizer replay acceptance ไม่ใช่ browser upload replay
+- Policy/API regression และ isolated PostgreSQL migration/fixtures ผ่าน ครอบคลุมยอดผิด ผู้รับผิด สลิปเก่า การใช้ transRef ซ้ำ และ audited PromptPay recovery; cases negative/concurrency เหล่านี้ยังเป็น offline/isolated acceptance ไม่อ้างว่าทดสอบ browser/Neon concurrent ครบ
+
+## ทดสอบผู้รับ EasySlip v2 เพิ่มเติม
+
+- ผู้ใช้อนุญาตให้ใช้โควตาตรวจจริงได้แล้ว; diagnostics ล่าสุดจากผู้ใช้ยืนยัน keyAccepted/branchActive/receiverLinkedToBranch = true หลังเพิ่มบัญชีกสิกรด้วยตัวเลือกตรวจเลขบัญชีและชื่อ
+- `/test` เพิ่มตัวเลือก v2: ส่ง image + matchAccount=true + checkDuplicate=true ไป `/v2/verify/bank` แสดง matchedAccount, ผู้รับจาก rawSlip, transRef/ยอด/เวลา และเครดิต/โควตาก่อน–หลังจาก `/v2/info`
+- ต้องแนบไฟล์สลิปผ่านหน้าเว็บก่อนเรียก verify จริง; ไม่มีการเรียกตรวจเสียโควตาระหว่างพัฒนา ไม่มีการอนุมัติซื้อ/เพิ่มสิทธิ์/เปิดรับโอนจาก diagnostic result
+- ทดสอบสลิปเข้าบัญชีทดลองและสลิปโอนให้บัญชีอื่นเป็น positive/negative cases; matchedRegisteredReceiver เป็นผลเทียบบัญชีที่ API คืนกับ config ไม่ใช่การรับรองกลไกตรวจของ provider
+- TypeScript/scoped lint ผ่าน และ tests test-service-actions + provider-diagnostics 10/10 ผ่าน
+
+## EasySlip ชำระแพ็กเกจ — รอบพัฒนาล่าสุด (2026-10-10)
+
+- ทำ order/QR/ตรวจสลิป/ต่ออายุ/แต้มด้วย server API และ DB transaction; ไม่อนุมัติจาก browser mock
+- บัญชีช่วงทดลอง: PromptPay `0973355322`, กสิกร `004`, บัญชี `0528938965`, นาย ณัฐนที รุ่งทองใบสุรีย์ ตามที่ผู้ใช้ยืนยัน ไม่ใช่บัญชีรับเงิน production ของร้าน
+- ป้องกันยอดแก้จาก client, transRef ซ้ำข้าม legacy, request replay, provider timeout; evidence และ audit immutable; คำสั่งซื้อโอนภายใน 15 นาที แนบสลิปได้เพิ่ม 30 นาทีโดยยังตรวจเวลาโอนเดิม
+- **เปิดชำระช่วงทดลอง local แล้ว** ด้วย EasySlip v2 registered-account strategy ตามที่ผู้ใช้อนุมัติหลังทดสอบ positive/negative จริง; ตรวจ matched bank/account/name เต็มกับ snapshot และไม่รับ masked digits ที่ขัดกัน ใช้ matching ของ provider/dashboard ไม่อ้างเป็น cryptographic proof
+- OWNER มี diagnostics และ v2 slip test ใน `/test`; ตรวจ `/v2/info` ด้วย payment branch key จริงตอบ HTTP 200, branchActive=true, usedQuota2 remainingQuota998 โดยไม่ตรวจสลิปเสียโควตารอบพัฒนา
+- Apply payment migration บน Neon สำเร็จครบ 5 ตาราง/9 functions พร้อม atomic snapshot guards, fixed search_path และ revoke PUBLIC execute; ข้อมูลเดิม 13 ตารางไม่เปลี่ยน Backup `.local-db/backup-2026-10-10T11-39-17.293Z` รายละเอียด `scripts/db-payments-deployment.md`
+- Validation: payment offline tests 30/30, TypeScript, scoped ESLint และ `pnpm build` ผ่าน; migration+SQL transactional fixture ผ่าน PostgreSQL WASM in-memory พร้อม rollback (minimal baseline ไม่ใช่ full Neon schema/concurrency)
+- ไม่มีการส่ง SMS, ตรวจสลิปเสียโควตา, โอนเงิน, ตั้งรหัสสมาชิกเดิม หรือแก้ยอดสมาชิกบน Neon รอบนี้
+- ขั้น acceptance ที่เหลือ: restart local server เพื่อโหลด env ใหม่; สร้าง order จริงก่อน โอนยอดตรงภายใน15นาที แล้วแนบสลิปผ่านหน้าซื้อ (ไม่ใช่ /test) ตรวจ PAID/expiry/แต้ม/ประวัติจาก DB และ replay ไม่เพิ่มสิทธิ์ซ้ำ; ยังไม่ผ่านเงินจริง end-to-end หรือ concurrency หลาย connections
+- `.env.local` ตั้ง payment key จาก branch key ที่ทดสอบแล้ว, strategy EASYSLIP_V2_REGISTERED_ACCOUNT และ enable=true โดยไม่เปิดเผยค่า key ไม่ได้ตั้งค่า Vercel ให้
+
+> ตอนนี้ยังไม่พร้อม production: Register และ OTP ต่อ Neon แล้ว; มีสมาชิกทดลอง 1 ราย (`BLU-1`) ที่ตั้งบทบาทเป็น OWNER ใน Neon แล้ว; ยังไม่ได้ทดสอบสิทธิ์ครบทุก flow; Account/ธุรกรรมส่วนใหญ่ยังเป็น mock/localStorage, SMS ยังรอ Sender Name; เปิดรับเงินเฉพาะ local ทดลองผ่าน real payment flow แล้ว ยังไม่ผ่าน acceptance/ไม่เปิด production ห้ามใช้ข้อมูล mock เป็นหลักฐานการชำระเงินหรือสิทธิ์เข้าใช้
 
 ## สถานะบริการล่าสุด (2026-10-09)
 

@@ -1,5 +1,9 @@
 # Password authentication / welcome coupon migration
 
+## Real package payments (prepare only)
+
+`20261009_real_package_payments.sql` เป็น migration ใหม่แยกจาก auth เดิม **ยังไม่ได้ apply** ต้องหยุด DB writers ทั้งหมด สำรองและทดสอบบน disposable DB ก่อน ไม่ใช้ `db:push` หรือ auth migration script เดิมแทน ดูขั้นตอนและข้อจำกัดที่ [PAYMENTS.md](PAYMENTS.md).
+
 Migration นี้เป็น incremental SQL สำหรับฐานข้อมูลที่มี schema เดิม (`members`, `coupons`, `auth_otp_challenges`, `auth_signup_tickets`, `auth_sessions`) อยู่แล้ว ไม่ใช่ baseline หรือ migration journal ของ drizzle-kit
 
 ยังไม่ได้รันบนฐานข้อมูลใด และไม่ควรใช้ `db:push` แทนโดยไม่ตรวจ schema diff

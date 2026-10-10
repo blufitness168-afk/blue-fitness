@@ -1,437 +1,141 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
-import confetti from "canvas-confetti";
-import {
-  X,
-  QrCode,
-  Copy,
-  UploadCloud,
-  CheckCircle2,
-  ShieldCheck,
-  Loader2,
-  Tag,
+import { X, Loader2, CheckCircle2 } from "lucide-react";
+import type { MockPackage } from "@/lib/mock-data";
+import { RECEIVER_BLOCKER } from "@/lib/payment-policy";
 
-} from "lucide-react";
-import { defaultMockMember, type MockPackage } from "@/lib/mock-data";
-import { previewMockPayment, purchaseMockPackage, resolveBenefitMember, type MockPayment } from "@/lib/benefits";
-import { generatePromptPayPayload } from "@/lib/promptpay";
-import { useLanguage } from "@/context/LanguageContext";
-
-// PromptPay Gym Account (Khun James)
-const PROMPTPAY_NUMBER = "0897720282";
-
-interface PaymentModalProps {
-  pkg: MockPackage | null;
-  isOpen: boolean;
-  onClose: () => void;
-}
-
-export default function PaymentModal({ pkg, isOpen, onClose }: PaymentModalProps) {
+type Order = {
+  id: string; package: MockPackage; receiver: { promptpay: string; bankCode: string; bankAccount: string; name: string };
+  amountSatang: number; subtotalSatang: number; discountSatang: number; expiresAt: string; uploadDeadline: string;
+  readiness: { transfersEnabled: boolean; blocker: string | null }; rejectionReason: string | null;
+  status: "PENDING" | "PAID" | "REJECTED"; qrPayload: string | null; membershipExpiresAt: string | null; pointsEarned: number;
+};
+const money = (amount: number) => (amount / 100).toLocaleString("th-TH", { minimumFractionDigits: 2 });
+const date = (value: string) => new Date(value).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" });
+export default function PaymentModal({ pkg, isOpen, onClose }: { pkg: MockPackage | null; isOpen: boolean; onClose: () => void }) {
   if (!isOpen || !pkg) return null;
   return <PaymentForm key={pkg.id} pkg={pkg} onClose={onClose} />;
 }
-
-function currentMemberCode(): string {
-  const raw = localStorage.getItem("blu_member");
-  const member = raw === null ? defaultMockMember : JSON.parse(raw);
-  if (!member || typeof member.memberCode !== "string") throw new Error("ข้อมูลสมาชิกไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่");
-  return resolveBenefitMember(member.memberCode).memberCode;
-}
-
 function PaymentForm({ pkg, onClose }: { pkg: MockPackage; onClose: () => void }) {
-  const { t, lang } = useLanguage();
   const router = useRouter();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [order, setOrder] = useState<Order | null>(null);
+  const [promoCode, setPromoCode] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [ownerRecheckAvailable, setOwnerRecheckAvailable] = useState(false);
+  const [ownerRecheckPrepared, setOwnerRecheckPrepared] = useState(false);
+  const [readiness, setReadiness] = useState({ transfersEnabled: false, blocker: RECEIVER_BLOCKER as string | null });
+  const [now, setNow] = useState(0);
+  const lock = useRef(false);
+  const requestKey = useRef<string | null>(null);
+  const expired = !!order && now >= Date.parse(order.expiresAt);
+  const uploadExpired = !!order && now >= Date.parse(order.uploadDeadline);
+  const transfersEnabled = (order?.readiness ?? readiness).transfersEnabled;
 
-  const [slipFile, setSlipFile] = useState<File | null>(null);
-  const [slipPreview, setSlipPreview] = useState<string | null>(null);
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [verificationSuccess, setVerificationSuccess] = useState(false);
-  const [copiedPromptPay, setCopiedPromptPay] = useState(false);
-
-  // 🎟️ Promo Code States
-  const [promoInput, setPromoInput] = useState("");
-  const [appliedPromo, setAppliedPromo] = useState<MockPayment | null>(null);
-  const writing = useRef(false);
-  const [paymentError, setPaymentError] = useState("");
-  const [discountAmount, setDiscountAmount] = useState(0);
-  const [promoError, setPromoError] = useState("");
-
-  // Final Price Calculation
-  const finalAmount = Math.max(0, pkg.price - discountAmount);
-
-  const handleCopyPromptPay = () => {
-    void navigator.clipboard.writeText(PROMPTPAY_NUMBER).then(() => setCopiedPromptPay(true)).catch(() => setPaymentError("คัดลอกไม่ได้ กรุณาตรวจสอบสิทธิ์ Clipboard"));
-  };
-
-  const handleApplyPromo = (codeToApply?: string) => {
-    const code = codeToApply || promoInput;
-    if (!code.trim() || writing.current) return;
-    setPromoError("");
-    try {
-      const quote = previewMockPayment(code, currentMemberCode(), pkg.price);
-      setAppliedPromo(quote);
-      setDiscountAmount(quote.discount);
-      setPromoInput(quote.grantCode);
-    } catch (error) {
-      setAppliedPromo(null);
-      setDiscountAmount(0);
-      setPromoError(error instanceof Error ? error.message : "ตรวจสอบส่วนลดไม่ได้");
-    }
-  };
-
-  const handleRemovePromo = () => {
-    if (writing.current) return;
-    setAppliedPromo(null);
-    setDiscountAmount(0);
-    setPromoInput("");
-    setPromoError("");
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && !writing.current) {
-      if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
-        setPaymentError("ใช้ไฟล์รูปภาพขนาดไม่เกิน 5 MB");
-        return;
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/member/payment-account", { cache: "no-store" }).then(async response => {
+      const body = await response.json();
+      if (!response.ok) throw Error(body.error ?? "กรุณาเข้าสู่ระบบ");
+      if (active && body.readiness) setReadiness(body.readiness);
+      if (active && body.pendingOrder) {
+        setOrder(body.pendingOrder);
+        setNotice("พบคำสั่งซื้อเดิม จึงแสดงรายการเดิมเพื่อป้องกันโอนซ้ำ กรุณาตรวจชื่อแพ็กเกจและยอดก่อนโอน");
       }
-      setSlipFile(file);
-      const reader = new FileReader();
-      reader.onload = () => {
-        setSlipPreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+    }).catch(cause => { if (active) setError(cause instanceof Error ? cause.message : "โหลดรายการค้างไม่ได้"); })
+      .finally(() => { if (active) setLoaded(true); });
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => { active = false; clearInterval(timer); };
+  }, []);
+
+  async function run(action: () => Promise<void>) {
+    if (lock.current) return;
+    lock.current = true; setBusy(true); setError(""); setNotice("");
+    try { await action(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "ระบบยังไม่ยืนยัน กรุณาโหลดสถานะ อย่าโอนซ้ำ"); }
+    finally { lock.current = false; setBusy(false); }
+  }
+  function acceptOrder(next: Order) {
+    setOrder(next);
+    if (next.status === "PAID") {
+      window.dispatchEvent(new Event("blu-real-payment-updated"));
+      router.refresh();
     }
-  };
-
-  const handleVerifySlip = async () => {
-    if ((finalAmount > 0 && !slipFile) || writing.current || verificationSuccess) return;
-    writing.current = true;
-    setIsVerifying(true);
-    setPaymentError("");
-    try {
-      await purchaseMockPackage(currentMemberCode(), pkg, appliedPromo);
-      setVerificationSuccess(true);
-      // Cosmetic feedback must never turn a committed purchase into an apparent failure.
-      try { void confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } }); } catch { /* Animation is optional. */ }
-    } catch (error) {
-      setPaymentError(error instanceof Error ? error.message : "บันทึกไม่สำเร็จ กรุณาลองใหม่");
-    } finally {
-      writing.current = false;
-      setIsVerifying(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-blu-dark/80 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl border border-blu-sky/40 max-h-[92vh] overflow-y-auto space-y-5 animate-in slide-in-from-bottom duration-300">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-blu-sky/30">
-          <div>
-            <h3 className="font-extrabold text-base sm:text-lg text-blu-dark">
-              {t("pay.title")}
-            </h3>
-            <p className="text-xs text-blu-steel">
-              {t("pay.subtitle")}
-            </p>
-          </div>
-
-          <button
-            disabled={isVerifying}
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-blu-ice hover:bg-blu-sky/40 flex items-center justify-center text-blu-steel transition-colors cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900">โหมดทดลองเท่านั้น — ห้ามโอนเงินจริง ระบบยังไม่ตรวจ EasySlip รูปสลิปใช้ทดลอง UI และไม่ถูกอัปโหลด การยืนยันจะบันทึกแพ็กเกจ/ส่วนลดในเบราว์เซอร์นี้</p>
-        {paymentError && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{paymentError}</p>}
-        {/* Success State */}
-        {verificationSuccess ? (
-          <div className="py-8 text-center space-y-3">
-            <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto ring-8 ring-emerald-50 animate-bounce">
-              <CheckCircle2 className="w-10 h-10" />
-            </div>
-            <h4 className="text-xl font-black text-blu-dark">
-              บันทึกแพ็กเกจทดลองแล้ว
-            </h4>
-            <p className="text-xs text-blu-steel max-w-xs mx-auto">
-              ต่ออายุและบันทึกการใช้ส่วนลดเรียบร้อย ไม่มีการตรวจสลิปหรือรับเงินจริง
-            </p>
-            <button type="button" className="btn-gold rounded-xl px-5 py-3" onClick={() => { onClose(); router.push("/member"); }}>ดูบัตรสมาชิก</button>
-          </div>
-        ) : (
-          <>
-            {/* 1. Order Summary Box */}
-            <div className="bg-blu-ice/50 rounded-2xl p-4 border border-blu-sky/40 space-y-2 text-xs">
-              <div className="flex justify-between items-center">
-                <span className="text-blu-steel">{t("pay.selected_pkg")}</span>
-                <span className="font-extrabold text-blu-dark">
-                  {lang === "en"
-                    ? `BLU ${pkg.timeSlot} (${
-                        pkg.durationDays === 1
-                          ? "1 Day Pass"
-                          : pkg.durationDays === 30
-                            ? "1 Month Pass"
-                            : pkg.durationDays === 90
-                              ? "3 Months Pass"
-                              : pkg.durationDays === 180
-                                ? "6 Months Pass"
-                                : pkg.durationDays === 365
-                                  ? "1 Year Pass"
-                                  : `${pkg.durationDays} Days Pass`
-                      })`
-                    : pkg.name}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-blu-steel">{t("pay.time_slot")}</span>
-                <span className="font-bold text-blu-dark">{pkg.timeSlot}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-blu-steel">{t("pay.duration")}</span>
-                <span className="font-bold text-blu-dark">
-                  {lang === "en"
-                    ? `${
-                        pkg.durationDays === 1
-                          ? "1 Day"
-                          : pkg.durationDays === 30
-                            ? "1 Month"
-                            : pkg.durationDays === 90
-                              ? "3 Months"
-                              : pkg.durationDays === 180
-                                ? "6 Months"
-                                : pkg.durationDays === 365
-                                  ? "1 Year"
-                                  : `${pkg.durationDays} Days`
-                      } (${pkg.durationDays} ${t("pkg.days")})`
-                    : `${pkg.label} (${pkg.durationDays} ${t("pkg.days")})`}
-                </span>
-              </div>
-
-              {/* Original Price (if promo applied) */}
-              {discountAmount > 0 && (
-                <div className="flex justify-between items-center text-blu-steel">
-                  <span>{t("pay.original_price")}</span>
-                  <span className="line-through">฿{pkg.price.toLocaleString()}</span>
-                </div>
-              )}
-
-              {/* Discount Row */}
-              {discountAmount > 0 && appliedPromo && (
-                <div className="flex justify-between items-center text-emerald-600 font-bold bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/80">
-                  <span className="flex items-center gap-1">
-                    <Tag className="w-3 h-3" />
-                    <span className="break-all">{t("pay.promo_discount_label")} ({appliedPromo.grantCode})</span>
-                  </span>
-                  <span>-฿{discountAmount.toLocaleString()}</span>
-                </div>
-              )}
-
-              {/* Final Total Amount */}
-              <div className="flex justify-between items-center pt-2 border-t border-blu-sky/40 text-sm">
-                <span className="font-bold text-blu-dark">{t("pay.total")}</span>
-                <span className="text-xl font-black text-blu-slate">
-                  ฿{finalAmount.toLocaleString()}
-                </span>
-              </div>
-            </div>
-
-            {/* 2. Promo Code Input Box */}
-            <div className="bg-blu-ice/30 rounded-2xl p-3.5 border border-blu-sky/40 space-y-2">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-blu-dark">
-                <Tag className="w-3.5 h-3.5 text-blu-slate" />
-                <span>{t("pay.promo_title")}</span>
-              </div>
-
-              {appliedPromo ? (
-                <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-3 py-2 text-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="break-all font-mono font-bold text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-300">
-                      {appliedPromo.grantCode}
-                    </span>
-                    <span className="text-emerald-700 font-semibold">
-                      {lang === "en"
-                        ? `Saved ฿${discountAmount.toLocaleString()}`
-                        : `ลดแล้ว ฿${discountAmount.toLocaleString()}`}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleRemovePromo}
-                    className="text-xs font-bold text-rose-500 hover:text-rose-700 hover:underline cursor-pointer"
-                  >
-                    {t("pay.promo_remove")}
-                  </button>
-                </div>
-              ) : (
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={promoInput}
-                    onChange={(e) => setPromoInput(e.target.value.toUpperCase())}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        handleApplyPromo();
-                      }
-                    }}
-                    placeholder={t("pay.promo_placeholder")}
-                    className="flex-1 px-3 py-2 rounded-xl border border-blu-sky/60 bg-white text-xs sm:text-sm font-mono uppercase text-blu-dark placeholder:text-blu-ocean/70 focus:outline-none focus:ring-2 focus:ring-blu-slate"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleApplyPromo()}
-                    className="btn-blue px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                  >
-                    {t("pay.promo_apply")}
-                  </button>
-                </div>
-              )}
-
-              {promoError && (
-                <p className="text-[11px] font-semibold text-rose-500">
-                  {promoError}
-                </p>
-              )}
-
-              <p className="text-xs text-blu-steel">ใช้รหัส BLU-PC-… ที่แจกให้บัญชีนี้เท่านั้น ไม่รับโค้ดตัวอย่างเดิม <Link href="/member/benefits" className="underline">ดูกระเป๋าส่วนลด</Link></p>
-            </div>
-
-            {/* 3. Dynamic PromptPay QR Box (Reflects finalAmount) */}
-            <div className="bg-gradient-to-b from-blu-slate to-blu-dark rounded-2xl p-5 text-white text-center shadow-md space-y-3">
-              <div className="inline-flex items-center gap-1.5 bg-white/10 px-3 py-1 rounded-full text-[11px] font-bold text-blu-sky">
-                <QrCode className="w-3.5 h-3.5 text-blu-yellow" />
-                <span>{t("pay.qr_label")}</span>
-              </div>
-
-              {/* QR Code Canvas */}
-              <div className="bg-white p-3.5 rounded-2xl inline-block shadow-inner mx-auto">
-                <QRCodeSVG
-                  value={generatePromptPayPayload(PROMPTPAY_NUMBER, finalAmount)}
-                  size={180}
-                  level="M"
-                  includeMargin={false}
-                />
-              </div>
-
-              {/* Account Name & Copy Button */}
-              <div className="space-y-1 text-xs">
-                <div className="font-extrabold text-white text-sm">
-                  {t("pay.account_name")}
-                </div>
-                <div className="flex items-center justify-center gap-2 text-blu-sky/90 font-mono">
-                  <span>{t("pay.promptpay_no")} {PROMPTPAY_NUMBER}</span>
-                  <button
-                    type="button"
-                    onClick={handleCopyPromptPay}
-                    className="text-blu-yellow hover:text-white transition-colors flex items-center gap-0.5 text-[11px] font-bold cursor-pointer"
-                  >
-                    <Copy className="w-3 h-3" />
-                    <span>{copiedPromptPay ? t("pay.copied") : t("pay.copy")}</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* 4. Slip Upload & Verification Section */}
-            <div className="space-y-3">
-              <label className="block text-xs font-extrabold text-blu-dark">
-                {t("pay.slip_label")}
-              </label>
-
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileChange}
-                accept="image/*"
-                className="hidden"
-              />
-
-              {slipPreview ? (
-                <div className="relative rounded-2xl overflow-hidden border-2 border-emerald-500 bg-blu-ice/40 p-2 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="relative w-12 h-16 rounded-lg overflow-hidden bg-blu-sky/30 shrink-0">
-                      <Image
-                        src={slipPreview}
-                        alt="Slip Preview"
-                        fill
-                        className="object-cover"
-                      />
-                    </div>
-                    <div className="text-xs">
-                      <div className="font-bold text-blu-dark truncate max-w-[180px]">
-                        {slipFile?.name}
-                      </div>
-                      <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-0.5">
-                        <CheckCircle2 className="w-3 h-3" /> {t("pay.slip_ready")}
-                      </span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSlipFile(null);
-                      setSlipPreview(null);
-                    }}
-                    className="p-2 text-blu-steel hover:text-rose-500 transition-colors cursor-pointer"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : (
-                <div
-                  onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-blu-sky hover:border-blu-slate rounded-2xl p-5 text-center cursor-pointer transition-colors bg-blu-ice/40 hover:bg-blu-ice space-y-1.5"
-                >
-                  <div className="w-10 h-10 rounded-full bg-blu-ice text-blu-slate flex items-center justify-center mx-auto">
-                    <UploadCloud className="w-5 h-5" />
-                  </div>
-                  <div className="text-xs font-bold text-blu-dark">
-                    {t("pay.slip_upload")}
-                  </div>
-                  <p className="text-[10px] text-blu-steel">
-                    {t("pay.slip_hint")}
-                  </p>
-                </div>
-              )}
-
-              {/* Submit Action Button */}
-              <button
-                type="button"
-                disabled={(finalAmount > 0 && !slipFile) || isVerifying}
-                onClick={handleVerifySlip}
-                className={`w-full py-3.5 px-6 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all ${
-                  (slipFile || finalAmount === 0) && !isVerifying
-                    ? "btn-gold cursor-pointer shadow-md hover:shadow-lg"
-                    : "bg-blu-sky/40 text-blu-steel/60 cursor-not-allowed"
-                }`}
-              >
-                {isVerifying ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-blu-dark" />
-                    <span>กำลังบันทึกข้อมูลทดลอง…</span>
-                  </>
-                ) : (
-                  <>
-                    <ShieldCheck className="w-4 h-4" />
-                    <span>ยืนยันซื้อแพ็กเกจทดลอง{finalAmount === 0 ? " (0 บาท ไม่ต้องแนบสลิป)" : ""}</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </>
-        )}
-
-      </div>
+  }
+  async function create() {
+    requestKey.current ??= crypto.randomUUID();
+    const response = await fetch("/api/payments/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ packageId: pkg.id, promoCode, requestKey: requestKey.current }) });
+    const body = await response.json();
+    if (body.readiness) setReadiness(body.readiness);
+    if (!response.ok) throw Error(body.error ?? "สร้างคำสั่งซื้อไม่ได้");
+    acceptOrder(body.order);
+  }
+  async function refresh() {
+    const response = await fetch(order ? `/api/payments/orders/${order.id}` : "/api/member/payment-account", { cache: "no-store" });
+    const body = await response.json();
+    if (!response.ok) throw Error(body.error ?? "อ่านสถานะไม่ได้");
+    const next = body.order ?? body.pendingOrder;
+    setOwnerRecheckAvailable(body.ownerRecheckAvailable === true);
+    setOwnerRecheckPrepared(body.ownerRecheckPrepared === true);
+    if (next) acceptOrder(next);
+    else setNotice("ไม่มีคำสั่งซื้อค้าง สามารถสร้างรายการใหม่ได้");
+    if (body.verification?.state === "VERIFIED" && next?.status !== "PAID") setNotice("ตรวจสลิปแล้วแต่ยังบันทึกไม่สำเร็จ ส่งรูปเดิมอีกครั้งเพื่อบันทึก โดยไม่เรียก EasySlip ซ้ำ");
+    if (["PROCESSING", "UNKNOWN"].includes(body.verification?.state)) setNotice("กำลังตรวจหรือยังไม่ทราบผล ห้ามโอนซ้ำ ตรวจซ้ำได้ด้วยรูปเดิมหลัง 2 นาที สูงสุด 1 ครั้งเพิ่มเติม");
+  }
+  async function prepareRecheck() {
+    if (!order || !window.confirm("เปิดตรวจภาพเดิมหนึ่งครั้งเพื่อแก้บั๊ก PromptPay อาจใช้โควตาเพิ่ม ห้ามโอนซ้ำ ยืนยันหรือไม่?")) return;
+    const response = await fetch(`/api/admin/payments/${order.id}/recheck`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmed: true, reason: "PROMPTPAY_REGISTRATION_FIX" }) });
+    const body = await response.json();
+    if (!response.ok) throw Error(body.error);
+    await refresh();
+    setNotice(body.message);
+  }
+  async function verify(reconcile = false) {
+    if (!order || !file) throw Error("กรุณาเลือกรูปสลิป");
+    if (reconcile && !window.confirm("ตรวจซ้ำหลัง 2 นาทีด้วยรูปเดิม อาจใช้โควตา EasySlip เพิ่มอีก 1 ครั้ง ยืนยันหรือไม่? ห้ามโอนเงินซ้ำ")) return;
+    const form = new FormData(); form.append("file", file); form.append("reconcile", String(reconcile));
+    const response = await fetch(`/api/payments/orders/${order.id}/verify`, { method: "POST", body: form });
+    const body = await response.json();
+    if (body.order) acceptOrder(body.order);
+    if (body.order?.status === "PAID") return;
+    else if (body.pending) setNotice(body.error ?? "ยังรอการยืนยัน ห้ามโอนซ้ำ");
+    else if (!response.ok) throw Error(body.error ?? "สลิปไม่ผ่าน");
+    else throw Error("ระบบยังไม่ยืนยันการชำระ");
+  }
+  const button = "rounded-xl bg-blu-dark px-4 py-3 font-bold text-white disabled:opacity-40";
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-blu-dark/80 p-4" role="dialog" aria-modal="true" aria-labelledby="payment-title">
+    <div className="max-h-[92vh] w-full max-w-md space-y-4 overflow-y-auto rounded-3xl bg-white p-6 text-blu-dark">
+      <header className="flex items-center justify-between"><h2 id="payment-title" className="text-lg font-black">ชำระแพ็กเกจ</h2><button aria-label="ปิด" onClick={onClose} disabled={busy}><X /></button></header>
+      <p className="text-sm">{order?.package.name ?? pkg.name}</p>
+      <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900">บัญชีผู้รับทดสอบชั่วคราวที่ได้รับอนุญาต กรุณาตรวจชื่อผู้รับก่อนโอน • รูปสลิปจะส่งให้ EasySlip และอาจใช้โควตาบริการ • ตรวจผู้รับด้วย EasySlip v2 และบัญชีที่ลงทะเบียน เลขปิดบังหรือชื่ออย่างเดียวไม่ใช้อนุมัติ</p>
+      {!transfersEnabled && <p role="alert" className="rounded-xl bg-rose-100 p-3 text-sm font-bold">{(order?.readiness ?? readiness).blocker ?? RECEIVER_BLOCKER} ห้ามโอนเงินจริง หากเคยโอนแล้วให้ติดต่อเจ้าของ</p>}
+      {error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
+      {notice && <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm">{notice}</p>}
+      {!loaded && <p>กำลังโหลดรายการค้าง...</p>}
+      {order?.status === "PAID" ? <section className="space-y-3 text-center"><CheckCircle2 className="mx-auto text-emerald-600" size={48} /><h3 className="font-bold">ชำระสำเร็จและบันทึกสมาชิกจริงแล้ว</h3><p>หมดอายุ {order.membershipExpiresAt ? date(order.membershipExpiresAt) : "—"}</p><p>ได้รับ {order.pointsEarned} แต้ม</p><Link href="/member" className={button} onClick={onClose}>ดูบัญชีสมาชิก</Link></section> : order?.status === "REJECTED" ? <section role="alert" className="rounded-xl bg-rose-50 p-3 text-sm">รายการถูกปิดโดยไม่เพิ่มสิทธิ์ ({order.rejectionReason}) หากโอนแล้วติดต่อเจ้าของเรื่องยอดโอน ห้ามโอนซ้ำ</section> : <>
+        {!order && <><label className="block text-sm">โค้ดส่วนลด (ถ้ามี)<input value={promoCode} maxLength={40} disabled={busy} onChange={e => { setPromoCode(e.target.value); requestKey.current = null; }} className="mt-1 w-full rounded-xl border p-3" /></label><p className="text-xs">ราคาและโควตาส่วนลดตรวจโดยเซิร์ฟเวอร์ สิทธิ์ทดลองในเบราว์เซอร์ใช้ลดเงินจริงไม่ได้</p><button className={`${button} w-full`} disabled={busy || !loaded || !transfersEnabled} onClick={() => void run(create)}>สร้างคำสั่งซื้อ / แสดงยอดจริง</button></>}
+        {order && <>
+          <p className="text-sm">ราคา ฿{money(order.subtotalSatang)} • ลด ฿{money(order.discountSatang)}</p><p className="text-2xl font-black">ยอดโอน ฿{money(order.amountSatang)}</p>
+          {transfersEnabled && <p className="text-sm">{order.receiver.name}<br />PromptPay {order.receiver.promptpay}<br />บัญชี {order.receiver.bankAccount} • ธนาคาร {order.receiver.bankCode === "004" ? "กสิกรไทย" : order.receiver.bankCode}</p>}
+          <p className="text-xs">คำสั่งซื้อ {order.id}<br />โอนภายใน {date(order.expiresAt)} (15 นาที)<br />อัปโหลดสลิปได้ถึง {date(order.uploadDeadline)} (เพิ่ม 30 นาที เฉพาะโอนทันเวลา)</p>
+          {transfersEnabled && !expired && order.qrPayload ? <div className="flex justify-center rounded-xl border bg-white p-4"><QRCodeSVG value={order.qrPayload} size={200} /></div> : <p className="font-bold text-rose-700">ห้ามโอนเพิ่ม {uploadExpired ? "พ้นเวลาอัปโหลดใหม่แล้ว กู้ได้เฉพาะผลตรวจที่บันทึกไว้ หรือติดต่อเจ้าของ" : "หากโอนทันกำหนด ส่งรูปสลิปได้ภายใน upload deadline"}</p>}
+          <label className="block text-sm">รูปสลิป (ไม่เกิน 4 MB)<input className="mt-2 block w-full" type="file" accept="image/jpeg,image/png,image/gif,image/webp" disabled={busy} onChange={e => setFile(e.target.files?.[0] ?? null)} /></label>
+          <button className={`${button} w-full`} disabled={busy || !file} onClick={() => void run(() => verify())}>{transfersEnabled ? "ตรวจสลิปจริง / บันทึกผลเดิม" : "กู้ผลตรวจที่บันทึกไว้เท่านั้น"}</button>
+          {ownerRecheckAvailable && <button className="block text-xs underline" disabled={busy} onClick={() => void run(prepareRecheck)}>OWNER: ขอแก้บั๊ก PromptPay และตรวจภาพเดิมอีกหนึ่งครั้ง</button>}
+          <button className="text-xs underline disabled:opacity-40" disabled={busy || !file || (uploadExpired && !ownerRecheckPrepared) || !transfersEnabled} onClick={() => void run(() => verify(true))}>ยังไม่ทราบผล: ยืนยันตรวจรูปเดิมซ้ำ (อาจใช้โควตาเพิ่ม)</button>
+          {uploadExpired && <button className="block text-xs underline" disabled={busy} onClick={() => { setOrder(null); setFile(null); requestKey.current = null; setNotice("รายการเดิมยังเก็บใน DB หากมีผลตรวจค้าง เซิร์ฟเวอร์จะไม่อนุญาตสร้างใหม่"); }}>เลือกสร้างรายการใหม่ (เฉพาะยังไม่ได้โอน)</button>}
+        </>}
+        <button className="block text-sm underline disabled:opacity-40" disabled={busy} onClick={() => void run(refresh)}>โหลดคำสั่งซื้อ / สถานะล่าสุด</button>
+        <Link className="block text-sm underline" href="/member/login">เข้าสู่ระบบสมาชิก</Link>
+      </>}
+      {busy && <p role="status" className="flex gap-2 text-sm"><Loader2 className="animate-spin" />กำลังดำเนินการ กรุณารอ อย่ากดซ้ำ</p>}
     </div>
-  );
+  </div>;
 }

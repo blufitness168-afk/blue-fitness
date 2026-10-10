@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
+import RealPaymentAccount from "@/components/RealPaymentAccount";
 import { BENEFITS_EVENT, BENEFITS_KEY, readBenefits, readMembership, type BenefitGrant, type MockMembership } from "@/lib/benefits";
 import { CHECKIN_STORAGE_KEY, parseCheckinRecords, type CheckinRecord } from "@/lib/checkin";
 import { DESK_UPDATED_EVENT, readDeskRewards } from "@/lib/front-desk";
@@ -256,14 +257,14 @@ export default function MemberAccountPage({ identity }: { identity: AccountIdent
     finally { setBusy(false); }
   };
 
-  if (!member || !account) return <main className="flex min-h-screen items-center justify-center bg-blu-ice p-6 text-blu-dark">{error ? <div className={cardClass}><p role="alert">{error}</p><button className={`${buttonClass} mt-4`} onClick={refresh}>ลองใหม่</button></div> : <div className="h-9 w-9 animate-spin rounded-full border-4 border-blu-slate border-t-transparent" />}</main>;
+  if (!member || !account) return <main className="min-h-screen space-y-4 bg-blu-ice p-6 text-blu-dark"><RealPaymentAccount />{error ? <div className={cardClass}><p role="alert">{error}</p><button className={`${buttonClass} mt-4`} onClick={refresh}>ลองใหม่</button></div> : <div className="h-9 w-9 animate-spin rounded-full border-4 border-blu-slate border-t-transparent" />}</main>;
 
   return <main className="min-h-screen bg-blu-ice pb-28 text-blu-dark">
     <Navbar member={member} onLogout={logout} />
     <div className="mx-auto max-w-lg space-y-5 px-4 pt-24">
       <header className="flex items-center justify-between gap-3">
         <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-blu-steel">My Account</p><h1 className="text-2xl font-black">{({ home: "หน้าหลัก", qr: "QR Code", coupons: "คูปอง", points: "คะแนน" } as const)[tab]}</h1></div>
-        <span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-[11px] font-bold text-amber-800">Mock / เครื่องนี้</span>
+        <span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-[11px] font-bold text-amber-800">สมาชิกจริง / สิทธิ์อื่นทดลอง</span>
       </header>
 
       {message && <div role="status" className="flex items-start justify-between gap-3 rounded-2xl bg-blu-dark p-4 text-sm text-white"><span>{message}</span><button aria-label="ปิดข้อความ" onClick={() => setMessage("")}><X className="h-4 w-4" /></button></div>}
@@ -280,8 +281,7 @@ export default function MemberAccountPage({ identity }: { identity: AccountIdent
             </div>
           </div>
           <div className="space-y-3 p-5 text-sm">
-            <div className="flex justify-between gap-3"><span className="text-blu-steel">แพ็กเกจปัจจุบัน</span><strong className="text-right">{membership?.name ?? "ยังไม่มีแพ็กเกจ"}</strong></div>
-            <div className="flex justify-between gap-3"><span className="text-blu-steel">วันหมดอายุ</span><strong>{membership ? dateText(membership.expiresAt) : "—"}</strong></div>
+            <RealPaymentAccount />
             <div className="flex justify-between gap-3"><span className="text-blu-steel">สมัครครั้งแรก</span><strong>{dateText(member.registeredAt)}</strong></div>
             <button className={`${buttonClass} mt-2 flex w-full items-center justify-center gap-2`} onClick={openEdit}><Pencil className="h-4 w-4" />แก้ไขข้อมูลส่วนตัว</button>
           </div>
@@ -289,7 +289,7 @@ export default function MemberAccountPage({ identity }: { identity: AccountIdent
 
         {adminPromos.length > 0 && <section className={`${cardClass} border-amber-300 bg-gradient-to-br from-amber-50 to-white`}><SectionTitle icon={Gift} title="คูปองแนะนำจาก Admin" /><div className="mt-4 space-y-3">{adminPromos.filter(grant => grant.status === "UNUSED").slice(0, 2).map(grant => <div key={grant.id} className="rounded-2xl bg-white p-4 shadow-sm"><strong>{grant.definition.name}</strong><p className="mt-1 text-xs text-blu-steel">{grant.definition.detail}</p><button className="mt-2 text-xs font-bold text-blu-slate underline" onClick={() => setTab("coupons")}>เปิดคูปอง</button></div>)}</div></section>}
 
-        <HistoryBlock title="ประวัติการซื้อ" icon={ShoppingBag} expanded={showPurchases} setExpanded={setShowPurchases} total={purchases.length}>
+        <HistoryBlock title="ประวัติการซื้อทดลองในเบราว์เซอร์" icon={ShoppingBag} expanded={showPurchases} setExpanded={setShowPurchases} total={purchases.length}>
           {(showPurchases ? purchases : purchases.slice(0, 3)).map(item => <div key={item.id} className="flex justify-between gap-3 border-b border-blu-sky/20 py-3 last:border-0"><div><strong className="text-sm">{item.packageName}</strong><p className="text-xs text-blu-steel">{dateText(item.purchasedAt)} • ได้ {item.pointsEarned} คะแนน</p></div><strong className="whitespace-nowrap">฿{item.paidAmount.toLocaleString()}</strong></div>)}
           {!purchases.length && <Empty>ยังไม่มีประวัติการซื้อบนเครื่องนี้</Empty>}
         </HistoryBlock>

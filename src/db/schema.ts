@@ -1,5 +1,6 @@
 import {
   pgTable,
+  uuid,
   index,
   uniqueIndex,
   serial,
@@ -12,7 +13,8 @@ import {
   jsonb,
   pgEnum,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
+import type { PaymentEvidence, Receiver } from "../lib/payment-policy";
 
 // ==============================================================================
 // 🏷️ ENUMS
@@ -149,6 +151,68 @@ export const payments = pgTable("payments", {
   easyslipRaw: jsonb("easyslip_raw"),                               // Raw JSON ตอบกลับจาก EasySlip
   status: paymentStatusEnum("status").default("PENDING").notNull(),
   approvedBy: text("approved_by").default("SYSTEM_EASYSLIP").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, table => [uniqueIndex("payments_easyslip_trans_ref_unique").on(table.easyslipTransRef)]);
+
+// Real package payments use the current storefront catalog snapshot, not legacy seed IDs.
+export const paymentTransferRefs = pgTable("payment_transfer_refs", {
+  transRef: varchar("trans_ref", { length: 100 }).primaryKey(),
+  source: text("source").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export const packagePaymentOrders = pgTable("package_payment_orders", {
+  id: uuid("id").primaryKey(),
+  memberId: integer("member_id").notNull().references(() => members.id, { onDelete: "restrict" }),
+  requestKey: uuid("request_key").notNull(),
+  packageSnapshot: jsonb("package_snapshot").notNull(),
+  receiverSnapshot: jsonb("receiver_snapshot").$type<Receiver>().notNull(),
+  subtotalSatang: integer("subtotal_satang").notNull(),
+  discountSatang: integer("discount_satang").notNull(),
+  amountSatang: integer("amount_satang").notNull(),
+  promoSnapshot: jsonb("promo_snapshot"),
+  promoCode: text("promo_code"),
+  pointsEarned: integer("points_earned").notNull(),
+  status: text("status").default("PENDING").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  uploadDeadline: timestamp("upload_deadline", { withTimezone: true }).notNull(),
+  rejectionReason: text("rejection_reason"),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  paidAt: timestamp("paid_at", { withTimezone: true }),
+  membershipExpiresAt: timestamp("membership_expires_at", { withTimezone: true }),
+  verificationSnapshot: jsonb("verification_snapshot").$type<PaymentEvidence>(),
+  transRef: varchar("trans_ref", { length: 100 }).unique().references(() => paymentTransferRefs.transRef),
+}, table => [uniqueIndex("package_payment_orders_member_request_unique").on(table.memberId, table.requestKey), index("package_payment_orders_member_created").on(table.memberId, table.createdAt), index("package_payment_orders_promo").on(table.promoCode, table.uploadDeadline)]);
+export const packagePaymentAttempts = pgTable("package_payment_attempts", {
+  id: uuid("id").primaryKey(),
+  orderId: uuid("order_id").notNull().references(() => packagePaymentOrders.id, { onDelete: "restrict" }),
+  imageSha256: varchar("image_sha256", { length: 64 }).notNull(),
+  leaseToken: uuid("lease_token").notNull(),
+  providerCalls: integer("provider_calls").default(1).notNull(),
+  state: text("state").notNull(),
+  rejectionReason: text("rejection_reason"),
+  evidence: jsonb("evidence").$type<PaymentEvidence>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, table => [
+  uniqueIndex("package_payment_attempts_order_image_unique").on(table.orderId, table.imageSha256),
+  uniqueIndex("package_payment_one_inflight").on(table.orderId).where(sql`${table.state} IN ('PROCESSING', 'UNKNOWN', 'VERIFIED')`),
+]);
+export const packagePaymentPointLedger = pgTable("package_payment_point_ledger", {
+  orderId: uuid("order_id").primaryKey().references(() => packagePaymentOrders.id, { onDelete: "restrict" }),
+  memberId: integer("member_id").notNull().references(() => members.id, { onDelete: "restrict" }),
+  delta: integer("delta").notNull(),
+  balanceAfter: integer("balance_after").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const packagePaymentResolutionAudit = pgTable("package_payment_resolution_audit", {
+  id: uuid("id").primaryKey(),
+  orderId: uuid("order_id").notNull().references(() => packagePaymentOrders.id, { onDelete: "restrict" }),
+  attemptId: uuid("attempt_id").notNull().references(() => packagePaymentAttempts.id, { onDelete: "restrict" }),
+  actorMemberId: integer("actor_member_id").notNull().references(() => members.id, { onDelete: "restrict" }),
+  action: text("action").notNull(), reasonCode: text("reason_code").notNull(), reason: text("reason").notNull(),
+  reconciliationEvidence: jsonb("reconciliation_evidence").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

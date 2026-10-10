@@ -2,11 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { client, protect, local, tables, quote, digest, save, stamp, safeFailure } from './db-safety.mjs';
 
-export async function backup(sql = client()) {
+export async function backup(sql = client(), selectedTables = tables) {
   protect();
   // Discovery does not capture data. The following transaction captures all data/DDL in one MVCC snapshot.
   const existing = await sql.query("SELECT tablename FROM pg_tables WHERE schemaname='public'");
-  const selected = tables.filter(t => existing.some(r => r.tablename === t));
+  const selected = selectedTables.filter(t => existing.some(r => r.tablename === t));
+    if (!selected.length || selected.some(t => !/^[a-z_][a-z_0-9]*$/.test(t))) throw new Error('Invalid backup selection');
   const names = selected.map(t => "'" + t + "'").join(',');
   const results = await sql.transaction([
     sql.query("SELECT current_database() AS database, transaction_timestamp() AS captured_at, pg_current_snapshot()::text AS snapshot"),
@@ -14,7 +15,7 @@ export async function backup(sql = client()) {
     sql.query(`SELECT c.relname AS table_name,k.conname,k.contype,pg_get_constraintdef(k.oid) AS definition FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN (${names}) ORDER BY k.contype,c.relname,k.conname`),
     sql.query(`SELECT tablename,indexname,indexdef FROM pg_indexes WHERE schemaname='public' AND tablename IN (${names}) ORDER BY tablename,indexname`),
     sql.query("SELECT t.typname,e.enumlabel FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace JOIN pg_enum e ON e.enumtypid=t.oid WHERE n.nspname='public' ORDER BY t.typname,e.enumsortorder"),
-    sql.query(`SELECT sequencename,data_type,start_value,min_value,max_value,increment_by,cycle,cache_size,last_value FROM pg_sequences WHERE schemaname='public' AND sequencename IN (SELECT split_part(pg_get_serial_sequence('public.' || tablename,'id'),'.',2) FROM pg_tables WHERE schemaname='public' AND tablename IN (${names}) AND tablename <> 'auth_login_limits') ORDER BY sequencename`),
+    sql.query(`SELECT sequencename,data_type,start_value,min_value,max_value,increment_by,cycle,cache_size,last_value FROM pg_sequences WHERE schemaname='public' AND sequencename IN (SELECT split_part(pg_get_serial_sequence('public.' || tablename,'id'),'.',2) FROM pg_tables WHERE schemaname='public' AND tablename IN (${names}) AND EXISTS (SELECT 1 FROM information_schema.columns c WHERE c.table_schema='public' AND c.table_name=tablename AND c.column_name='id' AND c.data_type IN ('smallint','integer','bigint'))) ORDER BY sequencename`),
     ...selected.map(t => sql.query(`SELECT count(*)::text AS row_count,coalesce(json_agg(t ORDER BY to_jsonb(t)::text),'[]'::json)::text AS rows FROM public.${quote(t)} t`)),
   ], { isolationLevel: 'RepeatableRead', readOnly: true });
   const [identity, columns, constraints, indexes, enums, sequences, ...data] = results;
