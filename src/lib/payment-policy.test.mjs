@@ -23,16 +23,38 @@ test('integer satang rejects precision, exponent, negatives and nonnumeric value
   assert.equal(satang('900.01'), 90001);
   for (const x of [NaN, Infinity, -1, '1e2', '900.001', '', null, {}, '21474836.48']) assert.throws(() => satang(x));
 });
-test('server quote uses catalog and net amount, rejects invalid promos and zero totals', () => {
-  assert.equal(quotePackage(2, ' blu100 ', now).amountSatang, 80000);
-  assert.equal(quotePackage(2, 'BLU100', now).pointsEarned, 40);
-  assert.equal(quotePackage(10, 'FITNESS10', now).discountSatang, 30000);
-  for (const [id, code] of [[100, ''], [1, 'BLU100'], [2, 'EXPIRED'], [2, 'UNKNOWN']]) assert.throws(() => quotePackage(id, code, now));
+test('server base quote uses catalog and rejects local promos, inactive packages and zero totals', () => {
+  const quote = quotePackage(2, '   ', now);
+  assert.equal(quote.package.id, 2);
+  assert.equal(quote.subtotalSatang, 90000);
+  assert.equal(quote.amountSatang, 90000);
+  assert.equal(quote.discountSatang, 0);
+  assert.equal(quote.pointsEarned, 45);
+  assert.equal(quote.promo, null);
+  assert.equal(quotePackage(10, '', now).amountSatang, 840000);
+  for (const code of [' blu100 ', 'BLU100', 'FITNESS10', 'EXPIRED', 'UNKNOWN']) {
+    assert.throws(() => quotePackage(2, code, now), /ต้องตรวจโค้ดส่วนลดผ่านระบบชำระเงินจริง/);
+  }
+  for (const id of [100, 0, -1, 2.5]) assert.throws(() => quotePackage(id, '', now));
   const data = load('./mock-data'), promo = data.mockPromoCodes.find(p => p.code === 'BLU100');
-  const previous = promo.discountValue; promo.discountValue = 900;
-  assert.throws(() => quotePackage(2, 'BLU100', now)); promo.discountValue = previous;
-  const pkg = data.mockPackages.find(p => p.id === 2); pkg.isActive = false;
-  assert.throws(() => quotePackage(2, '', now)); pkg.isActive = true;
+  const previous = promo.discountValue;
+  try {
+    promo.discountValue = 900;
+    assert.throws(() => quotePackage(2, 'BLU100', now));
+    assert.equal(quotePackage(2, '', now).amountSatang, 90000);
+  } finally { promo.discountValue = previous; }
+  const pkg = data.mockPackages.find(p => p.id === 2);
+  const original = { ...pkg };
+  assert.notEqual(quote.package, pkg);
+  try {
+    pkg.isActive = false;
+    assert.throws(() => quotePackage(2, '', now));
+    pkg.isActive = true;
+    for (const price of [0, -1, 900.001]) {
+      pkg.price = price;
+      assert.throws(() => quotePackage(2, '', now));
+    }
+  } finally { Object.assign(pkg, original); }
 });
 test('v2 registered full identity accepts matching mask and truncated raw English name', () => {
   const proof = validateSlip(slip(), order, now);

@@ -128,8 +128,11 @@ test("v1 membership defaults and Bangkok end-of-day defaults are backwards compa
   s.clock.now = Date.parse("2026-12-31T20:00:00Z");
   assert.equal(s.newDefinition("PROMO").expiresAt, "2027-01-31T23:59:59+07:00");
 });
-test("package purchase creates real membership, stacks active/expired dates and never invents friend coupons", async () => {
-  const s = await fixture(); const pkg = packageFor(s);
+test("mock package purchase stacks active/expired dates and never invents friend coupons for a zero-benefit catalog entry", async () => {
+  const s = await fixture();
+  // Change this isolated harness's canonical catalog, not just the caller's snapshot.
+  Object.assign(packageFor(s), { friendCoupons: 0, bonusDays: 0 });
+  const pkg = { ...packageFor(s) };
   const start = s.clock.now; const writes = s.writes.length;
   await s.purchaseMockPackage("BLU-1001", pkg, null);
   assert.equal(s.writes.length, writes + 2); // benefits + member account/points ledger
@@ -149,7 +152,30 @@ test("package purchase creates real membership, stacks active/expired dates and 
   const m = s.readMembership("BLU-1001");
   assert.equal(Date.parse(m.expiresAt), s.clock.now + 30 * DAY);
   assert.equal(m.totalDays, 90); assert.equal(m.startedAt, new Date(start).toISOString());
+  assert.equal(m.friendCouponsLeft, 0);
   assert.equal(setupMock({ storage: s.storage }).load("benefits").readMembership("BLU-1001").expiresAt, m.expiresAt);
+});
+test("mock package purchase credits only canonical friend coupons and bonus days on each purchase", async () => {
+  const s = await fixture();
+  const pkg = s.load("mock-data").mockPackages.find(p => p.id === 8);
+  assert.equal(pkg.friendCoupons, 5);
+  assert.equal(pkg.bonusDays, 15);
+  const start = s.clock.now;
+  const grants = json(s.readBenefits().grants);
+  await s.purchaseMockPackage("BLU-1001", { ...pkg }, null);
+  let membership = s.readMembership("BLU-1001");
+  assert.equal(membership.friendCouponsLeft, 5);
+  assert.equal(membership.totalDays, 105);
+  assert.equal(Date.parse(membership.expiresAt), start + 105 * DAY);
+  s.clock.now += DAY;
+  await s.purchaseMockPackage("BLU-1001", { ...pkg }, null);
+  membership = s.readMembership("BLU-1001");
+  assert.equal(membership.friendCouponsLeft, 10);
+  assert.equal(membership.totalDays, 210);
+  assert.equal(Date.parse(membership.expiresAt), start + 210 * DAY);
+  assert.equal(s.readMembership("BLU-1012"), null);
+  assert.deepEqual(json(s.readBenefits().grants), grants);
+  assert.deepEqual(json(setupMock({ storage: s.storage }).load("benefits").readMembership("BLU-1001")), json(membership));
 });
 test("canonical package fields, member, assigned promo subtotal and totals cannot be forged", async () => {
   const s = await fixture("PROMO"); const pkg = packageFor(s); const [g] = await issue(s);

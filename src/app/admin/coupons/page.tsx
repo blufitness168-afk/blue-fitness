@@ -1,5 +1,5 @@
-import CouponsAdmin from "@/components/CouponsAdmin";
+import BenefitsAdminClient from "./BenefitsAdminClient";
 
 export default function CouponsPage() {
-  return <CouponsAdmin />;
+  return <BenefitsAdminClient kind="COUPON" />;
 }

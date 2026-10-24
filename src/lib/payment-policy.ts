@@ -1,4 +1,4 @@
-import { mockPackages, mockPromoCodes } from "./mock-data";
+import { mockPackages } from "./mock-data";
 import { z } from "zod";
 
 export const ORDER_MINUTES = 15;
@@ -30,16 +30,15 @@ export function quotePackage(packageId: number, code: string, now = Date.now()) 
   if (!pkg) throw Error("ไม่พบแพ็กเกจที่เปิดขาย");
   const subtotalSatang = satang(pkg.price);
   const normalized = code.trim().toUpperCase();
-  const promo = normalized ? mockPromoCodes.find(p => p.code === normalized) : null;
-  if (normalized && (!promo || !promo.isActive || Date.parse(promo.expiresAt) <= now || promo.usedCount >= promo.usageLimit || pkg.price < (promo.minSpend ?? 0))) throw Error("โค้ดส่วนลดใช้ไม่ได้หรือหมดอายุ");
-  let discountSatang = 0;
-  if (promo) {
-    discountSatang = promo.discountType === "FIXED" ? satang(promo.discountValue) : Math.floor(subtotalSatang * promo.discountValue / 100);
-    if (promo.maxDiscount !== undefined) discountSatang = Math.min(discountSatang, satang(promo.maxDiscount));
-  }
+  // Real promos are resolved and reserved atomically by order creation in PostgreSQL.
+  // Never fall back to browser/mock marketing definitions.
+  void now;
+  if (normalized) throw Error("ต้องตรวจโค้ดส่วนลดผ่านระบบชำระเงินจริง");
+  const promo: { code: string } | null = null;
+  const discountSatang = 0;
   const amountSatang = subtotalSatang - discountSatang;
   if (amountSatang <= 0) throw Error("ส่วนลดต้องไม่ทำให้ยอดชำระเป็นศูนย์");
-  return { package: { ...pkg }, subtotalSatang, discountSatang, amountSatang, promo: promo ? { ...promo } : null, pointsEarned: Math.floor(amountSatang / 2000) };
+  return { package: { ...pkg }, subtotalSatang, discountSatang, amountSatang, promo, pointsEarned: Math.floor(amountSatang / 2000) };
 }
 
 function object(value: unknown): Record<string, unknown> {

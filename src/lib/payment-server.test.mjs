@@ -75,14 +75,36 @@ test('client price, unknown fields, invalid UUID and forged signature are reject
   assert.equal((await app.verifyOrder(upload({ extra: true }), orderId)).status, 400);
   assert.equal(app.calls.length, 0);
 });
-test('server owned amount quote and receiver snapshot used at order creation', async () => {
+test('order creation sends server base quote and normalized promo; response uses DB discount and points', async () => {
   const app = setup();
-  const req = new Request('https://local/api/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: 2, promoCode: 'BLU100', requestKey: randomUUID() }) });
-  assert.equal((await app.createOrder(req)).status, 201);
+  // Model the DB-resolved result, deliberately different from the input base quote.
+  Object.assign(app.state.order, { amount_satang: 80000, discount_satang: 10000, points_earned: 40 });
+  const requestKey = randomUUID();
+  const req = new Request('https://local/api/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: 2, promoCode: ' blu100 ', requestKey }) });
+  const response = await app.createOrder(req);
+  assert.equal(response.status, 201);
   const query = app.queries.find(q => q.text.includes('create_package_payment_order'));
-  assert.equal(JSON.parse(query.values[4]).amountSatang, 80000);
-  assert.equal(JSON.parse(query.values[5]).bankAccount, receiver.bankAccount);
+  const quote = JSON.parse(query.values[4]);
+  assert.equal(quote.package.id, 2);
+  assert.equal(quote.subtotalSatang, 90000);
+  assert.equal(quote.amountSatang, 90000);
+  assert.equal(quote.discountSatang, 0);
+  assert.equal(quote.pointsEarned, 45);
+  assert.deepEqual(quote.promo, { code: 'BLU100' });
+  assert.equal(query.values[1], 1);
+  assert.match(query.values[2], /^[a-f0-9]{64}$/);
+  assert.notEqual(query.values[2], 'a'.repeat(64));
+  assert.equal(query.values[3], requestKey);
+  assert.deepEqual(JSON.parse(query.values[5]), receiver);
+  const { order } = await response.json();
+  assert.equal(order.amountSatang, 80000);
+  assert.equal(order.subtotalSatang, 90000);
+  assert.equal(order.discountSatang, 10000);
+  assert.equal(order.pointsEarned, 40);
+  assert.equal(order.status, 'PENDING');
+  assert.equal(order.qrPayload, app.load('./promptpay').generatePromptPayPayload(receiver.promptpay, 800));
   assert.equal(app.calls.length, 0);
+  assert.equal(app.state.benefits, 0);
 });
 test('exact v2 image FormData + timeout, no private filename/raw data exposed; replay does not credit twice', async () => {
   const app = setup(); const result = await (await app.verifyOrder(upload(), orderId)).json();

@@ -2,6 +2,19 @@
 
 อัปเดต: 2026-10-24 | สภาพแวดล้อม: localhost + Neon บัญชีทดสอบ | ยังไม่ใช่ production sign-off
 
+## ระบบ DB จริง — ผลล่าสุด 24 ต.ค. 2026 (ใช้แทนสถานะ mock ด้านล่าง)
+
+- ผู้ใช้เปลี่ยนขอบเขตให้เลิก mock: สมาชิก/Dashboard/โปรไฟล์/wallet/rewards/checkin/finance/coupon/promo เชื่อมฐานข้อมูลจริงแล้ว; หน้า `/member/benefits` ไม่อ่าน browser business stores อีก
+- Apply5migrationsในtransactionเดียวแล้ว: real_rewards,real_finance,real_frontdesk,real_benefits_admin,package_payment_benefits; backup `.local-db/backup-2026-10-24T11-34-08.894Z`; ตรวจข้อมูลเดิม20ตารางทุกoriginalcolumnไม่เปลี่ยน, ไม่มี historical grants/backfill, ไม่แตะOwner/passwordหรือsessionเดิม
+- โมดูลใหม่มีrole/sessionguardsฝั่งAPIและSQL, idempotency/audit; rewardsหักแต้ม+stock+ledgeratomic, financeแยกmanualentriesจากPAIDorders, promoคำนวณจากDBตอนจองorder, packageของแถมตรงBUSINESSและแจกเมื่อPAIDครั้งเดียว
+- Uploadตรวจsignature/MIME/streamlimitsและatomicfirst-photo guardแล้ว; testsใช้Cloudinarystub ไม่อ้างว่าexternaluploadผ่าน
+- ชุดทดสอบล่าสุด **230/230ผ่าน**, TypeScriptและfulllintผ่าน; migrationchain/rollback/ACLผ่าน isolated WASM; paymentwrapper/helperและmoduleentrypointsrevokePUBLICEXECUTE/pinnedsearch_pathแล้ว
+- Browser/APIต่อNeonจริง **54/54ผ่าน / runtimeerrors0**: OWNER/ADMIN/MEMBERชั่วคราวล็อกอินpasswordจริง, pages/APIs, profilepersist, tamperและCSRF; ล้างtemporaryaccounts/sessionsแล้ว originalmembers/points/visits/couponsไม่เปลี่ยน รายงาน `.local-db/real-modules-browser-2026-10-24T11-35-58.218Z/results.json`
+- Productionbuildผ่าน `next build --webpack` บนสำเนาแยก `.local-db/real-modules-build-20261024/` ไม่ชนdev.next; มีwarningmultiplelockfilesจากสำเนาทดสอบเท่านั้น
+- **ข้อจำกัดยังไม่ใช่production sign-off:** browserรอบนี้อ่านโมดูลและแก้profileบัญชีชั่วคราว ไม่ใช่CRUD/เงินจริง/rewardsครบทุกเส้นทางบนNeon; concurrencyหลายconnectionของโมดูลใหม่ยังต้องตรวจ; productionconfigurationยังไม่ทำ
+- **ฟีเจอร์ที่ยังไม่ครบ ไม่ควรกล่าวว่าไม่มีงานค้าง:** เปลี่ยนเบอร์ด้วยOTPยังปิดไว้, memberdetailเป็นread-only, แลกคะแนนเป็นคูปอง/ผูกบัตรแข็ง/walk-inไม่สมัครเต็มยังไม่ได้เพิ่ม; catalogยังเป็นserver-authoritativecodeไม่ใช่DBadminCRUD; ไม่ย้ายข้อมูลเก่าในlocalStorageเข้าฐานให้อัตโนมัติ
+- สมมติฐานของแถม: อายุคูปองตามmembership_expires_atของorder; BUSINESSยังไม่กำหนดอายุแยก ต้องยืนยันก่อนproduction ไม่แจกย้อนหลังให้orderเก่า
+
 ## Kiosk เข้าอย่างเดียว — 24 ต.ค. 2026
 
 - ผู้ใช้อนุมัติ: เครื่องUSBหนึ่งเครื่อง, Enterท้ายรหัส (ไม่ดักครบ10ตัว), เข้าอย่างเดียว, ไม่เพิ่มแต้ม, samecode3วินาทีทั้งหน้าเว็บ/DB, คนละคนไม่ติดglobalcooldown
@@ -29,7 +42,9 @@
 | KIOSK-11 | สแกนBLU-6จากUSBจริง | ค่าขึ้นinput+Enterเอง แล้วผลปฏิเสธ/ไม่เพิ่มvisit | PASS ผู้ใช้ยืนยัน + DB visits0/points0 |
 | KIOSK-12 | สแกนBLU-5จากUSBจริง | ผ่านครั้งแรก ใช้welcome1/visit1/no points; หลัง3วิใช้ซ้ำไม่ได้ | PASS ภาพผู้ใช้ครั้งแรก/ซ้ำ + DB visits1/used1/points0; ช่วงเวลาระหว่างสแกนไม่มี timestamp ยืนยัน |
 
-## ตรวจอัตโนมัติเพิ่มหลัง hardware — 24 ต.ค. 2026
+## ประวัติตรวจอัตโนมัติหลัง hardware ก่อนย้าย DB — 24 ต.ค. 2026
+
+> สถานะ mock/upload/catalog ในส่วนนี้เป็นก่อนแก้ ดูผลล่าสุดด้านบน ไม่ใช้เป็นสถานะปัจจุบัน
 
 - รันใหม่: `node --test src/lib/*.test.mjs src/lib/auth/*.test.mjs src/db/schema.test.mjs scripts/*.test.mjs` ผ่าน169/169; `pnpm exec tsc --noEmit` และ `pnpm lint` ผ่าน
 - `node scripts/payment-sql-tests.mjs --run-memory` และ `node scripts/kiosk-sql-tests.mjs` ผ่าน isolated PostgreSQL WASM รวม compile migration จริงและ NORMAL predicates ของ payment5functions; ไม่ใช่ multi-connection proof

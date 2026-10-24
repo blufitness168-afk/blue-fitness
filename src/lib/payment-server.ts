@@ -72,7 +72,7 @@ export async function createOrder(request: Request) {
     const parsed = createInput.safeParse(JSON.parse((await boundedBody(request, 4096)).toString("utf8")));
     if (!parsed.success) return json({ error: "ข้อมูลคำสั่งซื้อไม่ถูกต้อง" }, 400);
     let quote;
-    try { quote = quotePackage(parsed.data.packageId, parsed.data.promoCode); }
+    try { quote = { ...quotePackage(parsed.data.packageId, ""), promo: parsed.data.promoCode.trim() ? { code: parsed.data.promoCode.trim().toUpperCase() } : null }; }
     catch (cause) { return json({ error: cause instanceof Error ? cause.message : "แพ็กเกจไม่ถูกต้อง" }, 400); }
     const readiness = paymentReadiness(process.env);
     if (!readiness.transfersEnabled) return json({ error: readiness.blocker, readiness }, 503);

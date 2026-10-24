@@ -1,7 +1,9 @@
-import { requireAdminPage } from "@/lib/admin-permissions-server";
+import { getAdminDashboard } from "@/lib/admin-members-server";
 import Client from "./DashboardClient";
+import { requireAdminPage } from "@/lib/admin-permissions-server";
 
-export default async function Page() {
+export default async function Page({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
   await requireAdminPage("/admin");
-  return <Client />;
+  const { month } = await searchParams;
+  return <Client data={await getAdminDashboard(typeof month === "string" ? month : undefined)} />;
 }

@@ -4,7 +4,8 @@ import { getCurrentMember } from "@/lib/auth/server";
 import { sameOrigin } from "@/lib/auth/http";
 import { db } from "@/db";
 import { members } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
+import { MAX_PROFILE_IMAGE_BYTES, ProfileImageError, readProfileForm, validateProfileImage } from "@/lib/profile-image-policy";
 
 // Configure Cloudinary
 if (
@@ -24,15 +25,22 @@ export async function POST(req: Request) {
   if (!sameOrigin(req)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const member = await getCurrentMember();
   // This endpoint uploads member profiles, not staff-managed rewards or coupons.
-    if (!member || (member.role !== "OWNER" && member.role !== "MEMBER")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!member || (member.role !== "OWNER" && member.role !== "MEMBER")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   if (member.role === "MEMBER" && (member.avatarUrl || member.avatarChanged)) return NextResponse.json({ error: "ติดต่อเจ้าหน้าที่เพื่อเปลี่ยนรูปโปรไฟล์" }, { status: 403 });
   try {
-    const formData = await req.formData();
+    const formData = await readProfileForm(req);
+        // Owners retain the upload-only workflow; target assignment belongs to the
+        // separately authorized admin member update, never to this endpoint.
+        if (member.role !== "OWNER" && [...formData.keys()].some(key => key !== "file")) {
+          return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
     const file = formData.get("file");
     if (!(file instanceof File)) return NextResponse.json({ success: false, message: "No file provided" }, { status: 400 });
-    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 5 * 1024 * 1024) {
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > MAX_PROFILE_IMAGE_BYTES) {
       return NextResponse.json({ success: false, message: "รองรับ JPG, PNG หรือ WebP ขนาดไม่เกิน 5MB" }, { status: 400 });
     }
+    const buffer = Buffer.from(await file.arrayBuffer());
+    validateProfileImage(buffer, file.type);
     const folder = `blue-fitness/profiles/${member.memberCode}`;
 
 
@@ -47,8 +55,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+
 
     // Upload using stream to avoid ECONNRESET and memory overhead
     const result = await new Promise<{ secure_url: string; public_id: string; width: number; height: number; format: string }>((resolve, reject) => {
@@ -57,6 +64,7 @@ export async function POST(req: Request) {
           folder,
           resource_type: "image",
           timeout: 60000,
+          allowed_formats: ["jpg", "png", "webp"],
         },
         (error, result) => {
           if (error) {
@@ -73,7 +81,20 @@ export async function POST(req: Request) {
     });
 
     if (member.role === "MEMBER") {
-      await db.update(members).set({ avatarUrl: result.secure_url, avatarChanged: true, updatedAt: new Date() }).where(eq(members.id, member.id));
+      let saved = false;
+      try {
+        const rows = await db.update(members)
+          .set({ avatarUrl: result.secure_url, avatarChanged: true, updatedAt: new Date() })
+          .where(and(eq(members.id, member.id), eq(members.role, "MEMBER"), eq(members.avatarChanged, false), or(isNull(members.avatarUrl), eq(members.avatarUrl, ""))))
+          .returning({ id: members.id });
+        saved = rows.length === 1;
+      } finally {
+        if (!saved) {
+          // Delete only this request's new asset, never the member's current photo.
+          await cloudinary.uploader.destroy(result.public_id, { resource_type: "image" }).catch(() => {});
+        }
+      }
+      if (!saved) return NextResponse.json({ error: "ติดต่อเจ้าหน้าที่เพื่อเปลี่ยนรูปโปรไฟล์" }, { status: 409 });
     }
     return NextResponse.json({
       success: true,
@@ -84,11 +105,11 @@ export async function POST(req: Request) {
       format: result.format,
     });
   } catch (error) {
-    console.error("Cloudinary upload error:", error);
+    if (error instanceof ProfileImageError) return NextResponse.json({ success: false, error: error.message }, { status: error.status });
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Failed to upload image",
+        error: "Failed to upload image",
       },
       { status: 500 }
     );

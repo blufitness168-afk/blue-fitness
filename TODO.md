@@ -1,5 +1,19 @@
 # 📋 MASTER TODO: Blu Fitness (อัปเดตสถานะ 24/10/2026)
 
+## ย้าย DB จริง — 24 ต.ค. 2026 (สถานะล่าสุด ใช้แทนประวัติ mock ด้านล่าง)
+
+- [x] สมาชิก/Dashboardอ่านNeonจริง รวมmemberdetailของสมาชิกDBใหม่; detailเป็นread-onlyไม่ตั้งPAID/expiryเอง
+- [x] Account/profile/wallet/historyใช้DB, ไม่มีOTPจำลองหรือbusinesslocalStorage; เปลี่ยนเบอร์ยังปิดจนมีOTPflowจริง
+- [x] Rewardsหักแต้ม/stock/ledgeratomic, UUIDretryและstaffส่งมอบ; Financeจริงพร้อมaudit/version/แยกPAIDorders
+- [x] คูปอง/โปรจริงพร้อมgrant/cancel/consume/audit; ส่วนลดตรวจและจองโควตาในDBตอนสร้างorder
+- [x] ของแถมแพ็กเกจตรงBUSINESS ออกcouponในPAIDtransaction ไม่แจกย้อนหลัง; expiryตามorderเป็นสมมติฐานต้องยืนยัน
+- [x] Uploadsignature/streamlimit/atomicfirst-photo guards; testsไม่ส่งCloudinaryจริง
+- [x] Review/apply5migrationstransactionเดียว backup `.local-db/backup-2026-10-24T11-34-08.894Z`, ข้อมูลเดิม20ตารางไม่เปลี่ยน
+- [x] Tests230/230,TypeScript,lint,isolatedSQL/ACL,แยกproductionbuildผ่าน; browser/APIจริง54/54 runtimeerrors0 cleanupครบ
+- [ ] CRUD/race/replayของโมดูลใหม่บนPostgreSQLหลายconnectionและbrowserครบเส้นทาง ยังไม่อ้างจากWASMว่าproductionผ่าน
+- [ ] ฟีเจอร์ที่ยังไม่ครบ: เปลี่ยนเบอร์OTP, memberadmineditingที่ปลอดภัย, แลกคะแนนเป็นคูปอง, ผูกบัตรแข็ง, guestwalk-inไม่สมัครเต็ม, packagecatalogCRUD
+- [ ] Productionconfig/บัญชีรับเงินร้าน/productionOTPและacceptance; ไม่ย้ายlocalStorageเก่าเป็นเงินจริงโดยอัตโนมัติ
+
 ## Kiosk USB ล่าสุด — 24 ต.ค. 2026
 
 - [x] ADMIN/OWNERใช้บัญชีเดิมเข้าKioskเข้าอย่างเดียว; เปลี่ยนsessionmodeฝั่งDB/ล็อกnormalroutes/APIs ออกด้วยpassword ไม่ใช่ซ่อนเมนูเฉยๆ
@@ -8,7 +22,8 @@
 - [x] Browser/API TEMPผ่าน58checksและ1assertionredirectmismatchที่/testยังdenyถูก; runtimeerrors0 ผู้ใช้จริงและ20ตารางเดิมไม่เปลี่ยนหลังcleanup
 - [x] QRทดสอบ: BLU-5ผ่านฟรี1ครั้ง/BLU-6หมดอายุ พร้อมPNG/SVGใน.local-db/kiosk-qr; ไม่เคยถูกautomationconsume
 - [x] Suite169/169,TypeScript,fulllintผ่าน
-- [ ] HardwareUAT: สแกนBLU-6ก่อน แล้วBLU-5และbounce3วิ/ใช้ซ้ำ/ออกkioskpasswordจริง ดูKIOSK-01..12ในFINAL_TEST.md
+- [x] USBจริงAdd CR suffix+ENG: BLU-6ปฏิเสธ/BLU-5ผ่านและใช้ซ้ำปฏิเสธ/ออกpasswordถูก; DBvisit1used1points0
+- [ ] Hardwarebounce3วิ/paidmemberจริง ยังไม่ยืนยัน ดูKIOSK-01..12ในFINAL_TEST.md
 - [ ] ยอมรับข้อจำกัดQRคงที่ส่งต่อได้/ไม่มีการพิสูจน์ตัวบุคคล และตั้งbrowser/OSkioskสำหรับไม่มีคนเฝ้าแยกจากfullscreen
 
 

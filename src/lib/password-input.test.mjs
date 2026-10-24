@@ -55,8 +55,8 @@ test('confirmation field has an independent toggle, accessible target and disabl
   assert.equal(confirm.input.props.disabled, true);
 });
 
-test('all discovered password forms use the shared component, preserving validation and admin layout', () => {
-  const paths = ['../app/member/login/page.tsx', '../app/member/register/page.tsx', '../app/admin/members/[memberCode]/MemberDetailClient.tsx'];
+test('member password forms use the shared component and preserve mode reset', () => {
+  const paths = ['../app/member/login/page.tsx', '../app/member/register/page.tsx'];
   for (const path of paths) {
     const source = fs.readFileSync(new URL(path, import.meta.url), 'utf8');
     assert.ok(source.includes('@/components/PasswordInput'));
@@ -64,4 +64,15 @@ test('all discovered password forms use the shared component, preserving validat
   }
   const login = fs.readFileSync(new URL(paths[0], import.meta.url), 'utf8');
   assert.match(login, /PasswordInput key=\{`\$\{mode\}:\$\{Boolean\(ticket\)\}`\}/);
+});
+
+test('admin member detail remains read-only with no password editing controls', () => {
+  const source = fs.readFileSync(new URL('../app/admin/members/[memberCode]/MemberDetailClient.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /PasswordInput|<input\b|<form\b|<button\b|passwordHash|password_hash/);
+  assert.match(source, /ข้อมูลจริงแบบอ่านอย่างเดียว/);
+  assert.match(source, /การเปลี่ยนเบอร์\/รหัสผ่านต้องใช้ขั้นตอนยืนยันตัวตน/);
+  assert.match(source, /href="\/admin\/members"/);
+  assert.match(source, /data\.orders\.map/);
+  assert.match(source, /data\.checkins\.map/);
+  assert.match(source, /data\.coupons\.map/);
 });

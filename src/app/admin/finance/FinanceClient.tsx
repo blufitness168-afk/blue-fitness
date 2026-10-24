@@ -1,21 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Download, Pencil, Plus, RotateCcw, Save, X } from "lucide-react";
 import AdminDashboardChart, { type ChartDatum, type ChartSeries } from "@/components/AdminDashboardCharts";
 import {
   financeCategories,
-  reverseFinanceRecord,
-  FINANCE_EVENT,
-  FINANCE_STORAGE_KEY,
-  readFinanceRecords,
-  saveFinanceRecord,
+  manualCategories,
+  type FinanceData,
   type EditableFinanceInput,
   type FinanceCategory,
   type FinanceRecord,
   type FinanceType,
-} from "@/lib/admin-finance";
-import { MEMBER_ACCOUNT_EVENT, MEMBER_ACCOUNT_KEY } from "@/lib/member-account";
+} from "./types";
 
 interface Filters {
   from: string;
@@ -26,17 +22,17 @@ interface Filters {
 }
 
 const initialFilters: Filters = {
-  from: "2025-10-01",
-  to: "2026-09-30",
+  from: "2000-01-01",
+  to: "2100-12-31",
   type: "ALL",
   category: "ALL",
   sort: "NEWEST",
 };
 
 const emptyForm: EditableFinanceInput = {
-  date: "2026-09-19",
+  date: new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date()),
   type: "INCOME",
-  category: "สมัครสมาชิกใหม่",
+  category: "รายได้อื่น (ไม่ใช่แพ็กเกจ)",
   amount: 0,
   note: "",
 };
@@ -48,9 +44,9 @@ const financeSeries: ChartSeries[] = [
 ];
 
 function totals(records: FinanceRecord[]) {
-  const income = records.filter((item) => item.type === "INCOME").reduce((sum, item) => sum + item.amount, 0);
-  const expense = records.filter((item) => item.type === "EXPENSE").reduce((sum, item) => sum + item.amount, 0);
-  return { income, expense, net: income - expense };
+  const incomeSatang = records.filter((item) => item.type === "INCOME").reduce((sum, item) => sum + Math.round(item.amount * 100), 0);
+  const expenseSatang = records.filter((item) => item.type === "EXPENSE").reduce((sum, item) => sum + Math.round(item.amount * 100), 0);
+  return { income: incomeSatang / 100, expense: expenseSatang / 100, net: (incomeSatang - expenseSatang) / 100 };
 }
 
 function money(value: number) {
@@ -81,12 +77,19 @@ function groupChart(records: FinanceRecord[], mode: "month" | "day"): ChartDatum
 }
 
 function csvCell(value: string | number) {
-  const text = String(value).replaceAll('"', '""');
+  const raw = String(value);
+    const text = (/^[\s]*[=+@-]/.test(raw) ? `'${raw}` : raw).replaceAll('"', '""');
   return `"${text}"`;
 }
 
-export default function FinancePage() {
-  const [records, setRecords] = useState<FinanceRecord[]>([]);
+export default function FinancePage({ initialData }: { initialData: FinanceData }) {
+  const [records, setRecords] = useState<FinanceRecord[]>(initialData.records);
+  const [audit, setAudit] = useState(initialData.audit);
+  const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false);
+  const pending = useRef<{ action: string; body: string } | null>(null);
+  const [uncertain, setUncertain] = useState(false);
+  const [editingVersion, setEditingVersion] = useState<number>();
   const [draftFilters, setDraftFilters] = useState<Filters>(initialFilters);
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [form, setForm] = useState<EditableFinanceInput>(emptyForm);
@@ -96,32 +99,42 @@ export default function FinancePage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
-  const load = useCallback(() => {
-    try {
-      setRecords(readFinanceRecords());
-      setError("");
-    } catch (cause) {
-      setRecords([]);
-      setError(cause instanceof Error ? cause.message : "อ่านข้อมูลรายรับ-รายจ่ายไม่สำเร็จ");
-    }
+  const load = useCallback(async () => {
+    const response = await fetch("/api/admin/finance/read", { cache: "no-store" });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error ?? "โหลดข้อมูลไม่สำเร็จ");
+    setRecords(result.data.records);
+    setAudit(result.data.audit);
   }, []);
 
-  useEffect(() => {
-    // Browser-only mock stores are loaded after hydration.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-    const storage = (event: StorageEvent) => {
-      if ([null, FINANCE_STORAGE_KEY, MEMBER_ACCOUNT_KEY].includes(event.key)) load();
-    };
-    window.addEventListener("storage", storage);
-    window.addEventListener(FINANCE_EVENT, load);
-    window.addEventListener(MEMBER_ACCOUNT_EVENT, load);
-    return () => {
-      window.removeEventListener("storage", storage);
-      window.removeEventListener(FINANCE_EVENT, load);
-      window.removeEventListener(MEMBER_ACCOUNT_EVENT, load);
-    };
-  }, [load]);
+  const mutate = async (action?: string, payload?: object) => {
+    if (inFlight.current) return false;
+    inFlight.current = true;
+    setBusy(true); setError("");
+    let committed = false;
+    try {
+      if (!pending.current) {
+        if (!action || !payload) return false;
+        pending.current = { action, body: JSON.stringify({ ...payload, requestKey: crypto.randomUUID() }) };
+      }
+      const request = pending.current;
+      const response = await fetch(`/api/admin/finance/${request.action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: request.body });
+      const result = await response.json();
+      if (!response.ok) {
+        if (response.status < 500) { pending.current = null; setUncertain(false); }
+        throw new Error(result.error ?? "ทำรายการไม่สำเร็จ");
+      }
+      committed = true; pending.current = null; setUncertain(false);
+      resetForm(); setReversalTarget(null); setReversalReason("");
+      setNotice("บันทึกเรียบร้อย พร้อมประวัติตรวจสอบ");
+      await load();
+      return true;
+    } catch (cause) {
+      setUncertain(pending.current !== null);
+      setError((committed ? "บันทึกแล้ว แต่โหลดข้อมูลใหม่ไม่สำเร็จ: " : "") + (cause instanceof Error ? cause.message : "ไม่สำเร็จ"));
+      return false;
+    } finally { inFlight.current = false; setBusy(false); }
+  };
 
   const filtered = useMemo(() => {
     const rows = records.filter((record) =>
@@ -153,42 +166,27 @@ export default function FinancePage() {
   const resetForm = () => {
     setForm(emptyForm);
     setEditingId(undefined);
+    setEditingVersion(undefined);
   };
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
-    setNotice("");
-    try {
-      if (!form.date || !Number.isSafeInteger(form.amount) || form.amount <= 0) throw new Error("กรุณาระบุวันที่และจำนวนเงินมากกว่า 0 บาท");
-      saveFinanceRecord(form, editingId);
-      setNotice(editingId ? "แก้ไขรายการเรียบร้อย" : "บันทึกรายการเรียบร้อย");
-      resetForm();
-      load();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "บันทึกรายการไม่สำเร็จ");
-    }
+    if (uncertain) return;
+    void mutate(editingId ? "update" : "create", { ...form, ...(editingId ? { id: editingId, version: editingVersion } : {}) });
   };
 
   const edit = (record: FinanceRecord) => {
     if (record.source !== "MANUAL") return;
     setEditingId(record.id);
+    setEditingVersion(record.version);
     setForm({ date: record.date, type: record.type, category: record.category, amount: record.amount, note: record.note });
     setNotice("");
     document.getElementById("finance-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
   const reverse = () => {
-    if (!reversalTarget) return;
-    setError("");
-    try {
-      reverseFinanceRecord(reversalTarget.id, reversalReason);
-      setNotice("ย้อนรายการเรียบร้อย และเก็บรายการเดิมไว้ในประวัติ");
-      setReversalTarget(null);
-      setReversalReason("");
-      load();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "ย้อนรายการไม่สำเร็จ");
-    }
+    if (!reversalTarget || uncertain) return;
+    void mutate("delete", { id: reversalTarget.id, version: reversalTarget.version, reason: reversalReason });
   };
 
   const exportCsv = () => {
@@ -226,10 +224,12 @@ export default function FinancePage() {
   return (
     <div className="mx-auto max-w-375 space-y-6">
       <header className="flex items-end justify-between gap-4">
-        <div><h1 className="text-2xl font-black text-blu-dark">รายรับ - รายจ่าย</h1><p className="mt-1 text-xs text-blu-steel">ระบบการเงินจำลอง เก็บข้อมูลบนเบราว์เซอร์เครื่องนี้</p></div>
+        <div><h1 className="text-2xl font-black text-blu-dark">รายรับ - รายจ่าย</h1><p className="mt-1 text-xs text-blu-steel">บัญชีจริงสำหรับเจ้าของ · รายได้แพ็กเกจ PAID อ่านอย่างเดียว · ไม่กระทบแต้มและวันหมดอายุ</p></div>
         <button type="button" onClick={exportCsv} disabled={!filtered.length} className="btn-blue inline-flex h-10 items-center gap-2 rounded-xl px-4 text-xs disabled:opacity-50"><Download className="h-4 w-4" /> Export CSV</button>
       </header>
 
+      <button type="button" disabled={busy} onClick={() => void load().catch(() => setError("โหลดข้อมูลไม่สำเร็จ"))} className="text-xs underline">โหลดข้อมูลล่าสุด</button>
+      {uncertain && <div role="alert" className="text-sm text-amber-700">ยังยืนยันผลไม่ได้ ห้ามสร้างคำขอใหม่ <button disabled={busy} type="button" onClick={() => void mutate()} className="underline">ลองคำขอเดิมอีกครั้ง</button></div>}
       {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-600">{error}</div>}
       {notice && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-semibold text-emerald-700">{notice}</div>}
 
@@ -252,19 +252,19 @@ export default function FinancePage() {
         <AdminDashboardChart title="กราฟ 2 — รายได้ / รายจ่าย / คงเหลือสุทธิ ตามตัวกรอง" data={filterChart} series={financeSeries} type="line" valueFormatter={money} />
       </div>
 
-      <form id="finance-form" onSubmit={submit} className="rounded-2xl border border-blu-sky/40 bg-white p-5 shadow-sm">
+      <fieldset disabled={busy || uncertain} className="contents"><form id="finance-form" onSubmit={submit} className="rounded-2xl border border-blu-sky/40 bg-white p-5 shadow-sm">
         <div className="flex items-center justify-between"><h2 className="flex items-center gap-2 text-base font-black text-blu-dark">{editingId ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}{editingId ? "แก้ไขรายการ" : "บันทึกรายการใหม่"}</h2>{editingId && <button type="button" onClick={resetForm} className="inline-flex items-center gap-1 text-xs font-semibold text-blu-steel"><X className="h-4 w-4" /> ยกเลิกแก้ไข</button>}</div>
         <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <FilterField label="วันที่"><input required type="date" value={form.date} onChange={(event) => updateForm("date", event.target.value)} className="finance-input" /></FilterField>
-          <FilterField label="ประเภท"><select value={form.type} onChange={(event) => { const type = event.target.value as FinanceType; updateForm("type", type); updateForm("category", type === "INCOME" ? "สมัครสมาชิกใหม่" : "รายจ่ายประจำเดือน"); }} className="finance-input"><option value="INCOME">รายรับ</option><option value="EXPENSE">รายจ่าย</option></select></FilterField>
-          <FilterField label="หมวดหมู่"><select value={form.category} onChange={(event) => updateForm("category", event.target.value as FinanceCategory)} className="finance-input">{financeCategories.map((category) => <option key={category}>{category}</option>)}</select></FilterField>
-          <FilterField label="จำนวนเงิน (บาท)"><input required type="number" min="1" step="1" value={form.amount || ""} onChange={(event) => updateForm("amount", Number(event.target.value))} className="finance-input" /></FilterField>
+          <FilterField label="ประเภท"><select value={form.type} onChange={(event) => { const type = event.target.value as FinanceType; updateForm("type", type); updateForm("category", type === "INCOME" ? "รายได้อื่น (ไม่ใช่แพ็กเกจ)" : "รายจ่ายประจำเดือน"); }} className="finance-input"><option value="INCOME">รายรับ</option><option value="EXPENSE">รายจ่าย</option></select></FilterField>
+          <FilterField label="หมวดหมู่"><select value={form.category} onChange={(event) => updateForm("category", event.target.value as FinanceCategory)} className="finance-input">{manualCategories.filter((category) => form.type === "INCOME" ? category === manualCategories[0] : category !== manualCategories[0]).map((category) => <option key={category}>{category}</option>)}</select></FilterField>
+          <FilterField label="จำนวนเงิน (บาท)"><input required type="number" min="0.01" step="0.01" value={form.amount || ""} onChange={(event) => updateForm("amount", Number(event.target.value))} className="finance-input" /></FilterField>
         </div>
         <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_auto]">
-          <FilterField label="หมายเหตุ"><input maxLength={500} value={form.note} onChange={(event) => updateForm("note", event.target.value)} placeholder="รายละเอียดเพิ่มเติม" className="finance-input" /></FilterField>
+          <FilterField label="หมายเหตุ"><input required maxLength={500} value={form.note} onChange={(event) => updateForm("note", event.target.value)} placeholder="รายละเอียดเพิ่มเติม" className="finance-input" /></FilterField>
           <div className="flex items-end"><button type="submit" className="btn-blue inline-flex h-10 items-center justify-center gap-2 rounded-xl px-5 text-xs"><Save className="h-4 w-4" /> {editingId ? "บันทึกการแก้ไข" : "บันทึกรายการ"}</button></div>
         </div>
-      </form>
+      </form></fieldset>
 
       <section className="overflow-hidden rounded-2xl border border-blu-sky/40 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-blu-sky/30 px-5 py-4"><div><h2 className="text-base font-black text-blu-dark">ประวัติรายรับ-รายจ่าย</h2><p className="mt-1 text-[10px] text-blu-steel">พบ {filtered.length.toLocaleString("th-TH")} รายการ · รายรับจากแพ็กเกจถูกสร้างและป้องกันการแก้ไขอัตโนมัติ</p></div></div>
@@ -275,11 +275,11 @@ export default function FinancePage() {
               {filtered.map((record, index) => <tr key={record.id} className="hover:bg-blu-ice/30">
                 <td className="px-4 py-3 text-blu-steel">{index + 1}</td><td className="whitespace-nowrap px-4 py-3">{thaiDate(record.date)}</td>
                 <td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${record.type === "INCOME" ? "bg-emerald-500/10 text-emerald-600" : "bg-rose-500/10 text-rose-500"}`}>{record.type === "INCOME" ? "รายรับ" : "รายจ่าย"}</span></td>
-                <td className="px-4 py-3 font-semibold">{record.category}{record.source === "MEMBERSHIP" && <span className="ml-1 block text-[9px] font-normal text-blu-steel">อัตโนมัติ</span>}{record.source === "REVERSAL" && <span className="ml-1 block text-[9px] font-normal text-amber-600">ย้อนรายการ</span>}</td>
+                <td className="px-4 py-3 font-semibold">{record.category}{record.source === "MEMBERSHIP" && <span className="ml-1 block text-[9px] font-normal text-blu-steel">อัตโนมัติ</span>}</td>
                 <td className="px-4 py-3">{record.memberName ? <><span>{record.memberName}</span><span className="block font-mono text-[9px] text-blu-steel">{record.memberCode}</span></> : "-"}</td>
                 <td className={`whitespace-nowrap px-4 py-3 text-right font-black ${record.type === "INCOME" ? "text-emerald-600" : "text-rose-500"}`}>{record.type === "INCOME" ? "+" : "-"}{money(record.amount)} ฿</td>
                 <td className="max-w-65 px-4 py-3 text-blu-steel">{record.note || "-"}</td>
-                <td className="px-4 py-3"><div className="flex justify-end gap-1">{record.source === "MANUAL" ? <><button type="button" onClick={() => edit(record)} title="แก้ไข" className="rounded-lg p-2 text-blu-slate hover:bg-blu-ice"><Pencil className="h-4 w-4" /></button><button type="button" disabled={records.some((item) => item.reversalOf === record.id)} onClick={() => { setReversalTarget(record); setReversalReason(""); }} title="ย้อนรายการ" className="rounded-lg p-2 text-amber-600 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-25"><RotateCcw className="h-4 w-4" /></button></> : <span className="px-2 py-2 text-[10px] text-blu-steel">ล็อก</span>}</div></td>
+                <td className="px-4 py-3"><div className="flex justify-end gap-1">{record.source === "MANUAL" ? <><button type="button" disabled={busy || uncertain} onClick={() => edit(record)} title="แก้ไข" className="rounded-lg p-2 text-blu-slate hover:bg-blu-ice"><Pencil className="h-4 w-4" /></button><button type="button" disabled={busy || uncertain} onClick={() => { setReversalTarget(record); setReversalReason(""); }} title="ยกเลิกรายการ" className="rounded-lg p-2 text-amber-600 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-25"><RotateCcw className="h-4 w-4" /></button></> : <span className="px-2 py-2 text-[10px] text-blu-steel">ล็อก</span>}</div></td>
               </tr>)}
               {!filtered.length && <tr><td colSpan={8} className="p-10 text-center text-blu-steel">ไม่พบรายการตามตัวกรอง</td></tr>}
             </tbody>
@@ -287,7 +287,8 @@ export default function FinancePage() {
         </div>
       </section>
 
-      {reversalTarget && <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center bg-blu-dark/60 p-4"><div role="dialog" aria-modal="true" className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.15em] text-blu-steel">ปรับปรุงรายการการเงิน</p><h2 className="mt-1 text-xl font-black text-blu-dark">ย้อนรายการนี้?</h2></div><button type="button" className="rounded-xl p-2 text-blu-steel hover:bg-blu-ice" onClick={() => setReversalTarget(null)} aria-label="ปิดหน้าต่าง"><X className="h-5 w-5" /></button></div><div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm"><p>รายการเดิม: <strong>{reversalTarget.category}</strong></p><p className="mt-1">จำนวน: <strong>{reversalTarget.type === "INCOME" ? "+" : "-"}{money(reversalTarget.amount)} บาท</strong></p><p className="mt-2 text-xs text-amber-800">ระบบจะสร้างรายการฝั่งตรงข้าม และไม่ลบรายการเดิม</p></div><label className="mt-4 block text-xs font-semibold text-blu-steel">เหตุผลที่ย้อนรายการ<textarea required maxLength={500} rows={3} value={reversalReason} onChange={(event) => setReversalReason(event.target.value)} className="finance-input mt-1 h-auto! py-2" placeholder="เช่น บันทึกยอดผิดจำนวน" /></label><div className="mt-5 flex justify-end gap-2"><button type="button" className="btn-blue rounded-xl px-4 py-2 text-xs" onClick={() => setReversalTarget(null)}>ยกเลิก</button><button type="button" className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-40" disabled={!reversalReason.trim()} onClick={reverse}>ยืนยันย้อนรายการ</button></div></div></div>}
+      {reversalTarget && <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center bg-blu-dark/60 p-4"><div role="dialog" aria-modal="true" className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.15em] text-blu-steel">ปรับปรุงรายการการเงิน</p><h2 className="mt-1 text-xl font-black text-blu-dark">ยกเลิกรายการนี้?</h2></div><button type="button" className="rounded-xl p-2 text-blu-steel hover:bg-blu-ice" onClick={() => setReversalTarget(null)} aria-label="ปิดหน้าต่าง"><X className="h-5 w-5" /></button></div><div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm"><p>รายการเดิม: <strong>{reversalTarget.category}</strong></p><p className="mt-1">จำนวน: <strong>{reversalTarget.type === "INCOME" ? "+" : "-"}{money(reversalTarget.amount)} บาท</strong></p><p className="mt-2 text-xs text-amber-800">ระบบจะยกเลิกรายการออกจากยอดรวม โดยเก็บข้อมูลเดิมและเหตุผลใน audit</p></div><label className="mt-4 block text-xs font-semibold text-blu-steel">เหตุผลที่ยกเลิกรายการ<textarea required maxLength={500} rows={3} value={reversalReason} onChange={(event) => setReversalReason(event.target.value)} className="finance-input mt-1 h-auto! py-2" placeholder="เช่น บันทึกยอดผิดจำนวน" /></label><div className="mt-5 flex justify-end gap-2"><button type="button" className="btn-blue rounded-xl px-4 py-2 text-xs" onClick={() => setReversalTarget(null)}>ยกเลิก</button><button type="button" className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-40" disabled={busy || uncertain || !reversalReason.trim()} onClick={reverse}>ยืนยันยกเลิกรายการ</button></div></div></div>}
+      <details className="rounded-xl border p-4"><summary>ประวัติตรวจสอบ ({audit.length})</summary><div className="max-h-96 overflow-auto">{audit.map((item) => <details key={item.id} className="border-b py-2 text-xs"><summary>{item.createdAt} · {item.action} · ผู้ทำรายการ #{item.actorId} · {item.reason}</summary><pre className="whitespace-pre-wrap">{JSON.stringify({ id: item.entryId, before: item.before, after: item.after }, null, 2)}</pre></details>)}</div></details>
       <style jsx>{`.finance-input { width: 100%; height: 2.5rem; border: 1px solid color-mix(in srgb, var(--blu-sky) 55%, transparent); border-radius: .75rem; background: white; padding: 0 .75rem; font-size: .75rem; outline: none; } .finance-input:focus { border-color: var(--blu-slate); }`}</style>
     </div>
   );
