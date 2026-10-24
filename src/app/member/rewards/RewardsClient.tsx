@@ -28,15 +28,16 @@ export default function RewardsPage({ identity: sessionMember }: { identity: { m
   const [records, setRecords] = useState<RedemptionRecord[]>([]);
   const [storageError, setStorageError] = useState("");
   const writing = useRef(false);
+  const isMockIdentity = mockAdminMembers.some(m => m.memberCode === sessionMember.memberCode);
   const refresh = useCallback(() => {
     try {
       const identity = mockAdminMembers.find(m => m.memberCode === sessionMember.memberCode);
-      if (!identity) throw new Error("ร้าน mock รองรับเฉพาะสมาชิกตัวอย่างในรายชื่อ Admin เท่านั้น");
+
       const history = readDeskRewards();
       const rewards = readRewardCatalog();
-      setMember({ ...defaultMockMember, memberCode: sessionMember.memberCode, fullName: sessionMember.fullName, role: sessionMember.role, points: rewardWallet(identity.memberCode, history) });
+      setMember({ ...defaultMockMember, memberCode: sessionMember.memberCode, fullName: sessionMember.fullName, role: sessionMember.role, points: identity ? rewardWallet(identity.memberCode, history) : 0 });
       setCatalog(rewards); setRecords(history);
-      setRedeemed(Object.fromEntries(history.filter(r => r.memberCode === identity.memberCode).map(r => [r.rewardId, true])));
+      setRedeemed(Object.fromEntries(history.filter(r => identity && r.memberCode === identity.memberCode).map(r => [r.rewardId, true])));
       setStorageError("");
     } catch (cause) {
       setCatalog([]); setRecords([]);
@@ -51,7 +52,7 @@ export default function RewardsPage({ identity: sessionMember }: { identity: { m
   }, [refresh]);
   const availableRewards = catalog.filter(r => r.isActive);
   const handleRedeem = async (reward: RewardItem) => {
-    if (!member || writing.current || storageError) return;
+    if (!isMockIdentity || !member || member.memberCode !== sessionMember.memberCode || writing.current || storageError) return;
     writing.current = true;
     setRedeeming({ [reward.id]: true }); setInfoMsg(null);
     try {
@@ -109,6 +110,7 @@ export default function RewardsPage({ identity: sessionMember }: { identity: { m
         </header>
 
         <MockNotice />
+        {!isMockIdentity && <p role="status" className="text-sm text-blu-steel">ดูแค็ตตาล็อกตัวอย่างเท่านั้น (read-only/demo) • บัญชีนี้ไม่ใช่สมาชิก mock จึงมีกระเป๋า MOCK 0 แต้ม ไม่ใช้แต้มจากฐานข้อมูลจริง • ยังแลกรางวัลจริงไม่ได้ เพราะระบบแลกรางวัลยังไม่เชื่อมต่อฐานข้อมูลจริง</p>}
         <p className="text-xs text-blu-steel">แต้มตั้งต้นจากรายชื่อ Admin หักรายการแลกที่บันทึกแล้ว (ไม่นับ seed) • แยกจากแต้มเช็คอินและแพ็กเกจจริง • แลกได้ 1 ครั้ง/รางวัล/สมาชิก • การแลกรางวัลเพิ่มวันไม่ต่ออายุสมาชิกจริง</p>
         <Link href="/member/benefits" className="block text-sm underline">กระเป๋าคูปอง / ส่วนลดที่ได้รับ (mock)</Link>
 
@@ -125,7 +127,7 @@ export default function RewardsPage({ identity: sessionMember }: { identity: { m
               </div>
               <div>
                 <div className="text-[11px] uppercase tracking-wider text-blu-sky/80 font-semibold">
-                  {t("rewards.my_points")}
+                  {t("rewards.my_points")} (MOCK)
                 </div>
                 <div className="text-2xl font-black text-blu-yellow leading-none">
                   {member.points.toLocaleString()}
@@ -154,7 +156,7 @@ export default function RewardsPage({ identity: sessionMember }: { identity: { m
               const isRedeemed = redeemed[reward.id];
               const isRedeeming = redeeming[reward.id];
               const stock = remainingStock(reward, records);
-                            const canRedeem = member.points >= reward.pointCost && stock > 0 && !isRedeemed;
+              const canRedeem = isMockIdentity && member.memberCode === sessionMember.memberCode && member.points >= reward.pointCost && stock > 0 && !isRedeemed;
               const title = lang === "th" ? reward.title : reward.titleEn;
               const desc = lang === "th" ? reward.description : reward.descriptionEn;
 
@@ -208,7 +210,9 @@ export default function RewardsPage({ identity: sessionMember }: { identity: { m
                           : "w-full py-2 rounded-lg text-[11px] font-bold bg-blu-sky/50 text-white cursor-not-allowed"
                       }
                     >
-                      {isRedeemed
+                      {!isMockIdentity
+                        ? "ดูตัวอย่างเท่านั้น"
+                        : isRedeemed
                         ? t("rewards.used")
                         : isRedeeming
                         ? t("rewards.redeeming")

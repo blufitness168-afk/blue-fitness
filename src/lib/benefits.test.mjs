@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import { setupMock } from "./mock-test-harness.mjs";
 const json = value => JSON.parse(JSON.stringify(value));
 const DAY = 86400000;
+const ownGrants = s => s.readBenefits().grants.filter(g => g.definition.id === s.definition.id);
+const ownDefinition = s => s.readBenefits().definitions.find(d => d.id === s.definition.id);
 const packageFor = s => s.load("mock-data").mockPackages.find(p => p.id === 7);
 async function extraFixture() {
   const s = await fixture();
-  const d = { ...s.definition, benefit: "EXTRA_DAYS", amount: 5 };
+  const d = { ...s.definition, benefit: "EXTRA_DAYS", unit: "DAYS", amount: 5 };
   await s.saveDefinition(d, s.definition);
-  s.definition = d;
+  s.definition = ownDefinition(s);
   const [g] = await issue(s);
   return { ...s, coupon: g };
 }
@@ -17,20 +19,112 @@ async function fixture(kind = "COUPON", options = {}) {
   const api = s.load("benefits");
   const definition = { ...api.newDefinition(kind), name: "สิทธิ์ทดสอบ", code: "TEST-01", amount: kind === "PROMO" ? 100 : 1, quota: 100 };
   if (options.locks !== false) await api.saveDefinition(definition, null);
-  return { ...s, ...api, definition, admin: s.load("admin-mock") };
+  const baseline = api.readBenefits();
+  return { ...s, ...api, definition: baseline.definitions.find(d => d.id === definition.id) ?? definition, baseline, admin: s.load("admin-mock") };
 }
 async function issue(s, codes = ["BLU-1001"], mode = "SELECTED") {
   const plan = s.previewGrant(s.definition.id, codes, mode);
   await s.commitGrant(plan);
-  return s.readBenefits().grants;
+  return s.readBenefits().grants.filter(g => g.definition.id === s.definition.id && g.batchId === plan.batchId);
 }
+
+test("demo migration imports only coherent graphs and preserves user entries across round trips", () => {
+  for (const kind of ["COUPON", "PROMO"]) {
+    for (const collision of ["code", "same-id", "identical-id", "cross-kind-id", "batch-id", "grant-id", "grant-code", "payment-id"]) {
+      if (collision === "payment-id" && kind !== "PROMO") continue;
+      const s = setupMock();
+      const api = s.load("benefits");
+      const demo = json(api.readBenefits());
+      const target = demo.definitions.find(d => d.kind === kind);
+      const targetGrants = demo.grants.filter(g => g.definition.id === target.id);
+      const targetBatch = demo.batches.find(b => b.definitionId === target.id);
+      const other = demo.definitions.find(d => d.kind !== kind);
+      const existingGrant = demo.grants.find(g => g.definition.id === other.id);
+      const existingBatch = demo.batches.find(b => b.id === existingGrant.batchId);
+      existingBatch.memberCodes = [existingGrant.memberCode];
+      const user = { ...target, id: "11111111-1111-4111-8111-111111111111", code: "USER-CODE", name: "User terms", quota: 7, maxUses: 3, amount: 2 };
+      if (collision === "code") user.code = target.code;
+      if (["same-id", "cross-kind-id"].includes(collision)) user.id = target.id;
+      if (collision === "identical-id") Object.assign(user, target);
+      if (collision === "cross-kind-id") Object.assign(user, { kind: other.kind, unit: other.unit, couponType: other.couponType });
+      if (collision === "batch-id") {
+        existingBatch.id = targetBatch.id;
+        existingGrant.batchId = targetBatch.id;
+      }
+      if (collision === "grant-id" || collision === "grant-code") {
+        existingGrant.id = targetGrants[0].id;
+        existingGrant.code = `BLU-${other.kind === "COUPON" ? "CP" : "PC"}-${existingGrant.id.toUpperCase()}`;
+        if (collision === "grant-code") {
+          // A valid grant code collision also occupies its ID, even across kinds.
+          Object.assign(other, { kind: target.kind, unit: target.unit, couponType: target.couponType });
+          existingGrant.definition = { ...other };
+          existingGrant.code = targetGrants[0].code;
+        }
+      }
+      if (collision === "payment-id") {
+        existingGrant.status = "USED";
+        existingGrant.usedAt = "2026-09-18T04:00:00.000Z";
+        existingGrant.code = `BLU-PC-${existingGrant.id.toUpperCase()}`;
+        existingGrant.paymentId = targetGrants.find(g => g.paymentId).paymentId;
+        existingGrant.paidAmount = 2;
+        Object.assign(other, { kind: "PROMO", unit: "BAHT" });
+        existingGrant.definition = { ...other };
+      }
+      const original = { version: 1, revision: 9, memberships: [], definitions: [user, other], grants: [existingGrant], batches: [existingBatch] };
+      const before = json(original);
+      let migrated;
+      assert.doesNotThrow(() => { migrated = json(api.parseBenefits(JSON.stringify(original))); }, `${kind}/${collision}: valid migration input`);
+      const again = json(api.parseBenefits(JSON.stringify(migrated)));
+      assert.deepEqual(again, migrated, `${kind}/${collision}: idempotent round trip`);
+      assert.deepEqual(migrated.definitions.slice(0, 2), before.definitions);
+      assert.deepEqual(migrated.grants.slice(0, 1), before.grants);
+      assert.deepEqual(migrated.batches.slice(0, 1), before.batches);
+      assert.equal(migrated.revision, before.revision);
+      assert.deepEqual(migrated.memberships, before.memberships);
+      assert.ok(!migrated.grants.slice(1).some(g => g.definition.id === target.id));
+      assert.ok(!migrated.batches.slice(1).some(b => b.definitionId === target.id));
+      const expectedAdded = demo.definitions.filter(d => d.id !== target.id && !before.grants.some(g => g.definition.kind === d.kind) && !before.definitions.some(existing => existing.id === d.id || (existing.kind === d.kind && existing.code === d.code)));
+      assert.deepEqual(migrated.definitions.slice(2), expectedAdded);
+      assert.deepEqual(migrated.grants.slice(1), demo.grants.filter(g => expectedAdded.some(d => d.id === g.definition.id)));
+      assert.deepEqual(migrated.batches.slice(1), demo.batches.filter(b => expectedAdded.some(d => d.id === b.definitionId)));
+      for (const grant of migrated.grants) {
+        assert.ok(migrated.definitions.some(d => d.id === grant.definition.id && d.kind === grant.definition.kind));
+        const batch = migrated.batches.find(b => b.id === grant.batchId);
+        assert.equal(batch.definitionId, grant.definition.id);
+        assert.ok(batch.memberCodes.includes(grant.memberCode));
+      }
+      for (const batch of migrated.batches) {
+        assert.ok(migrated.definitions.some(d => d.id === batch.definitionId));
+        assert.deepEqual(migrated.grants.filter(g => g.batchId === batch.id).map(g => g.memberCode), batch.memberCodes);
+      }
+      assert.deepEqual(original, before);
+      assert.equal(s.storage.size, 0);
+      assert.deepEqual(s.writes, []);
+      assert.deepEqual(s.events, []);
+    }
+  }
+});
+
+test("collision-free legacy migration carries the unchanged demo graph without writes", () => {
+  const s = setupMock();
+  const api = s.load("benefits");
+  const demo = json(api.readBenefits());
+  const legacy = { version: 1, revision: 0, definitions: [], grants: [], batches: [] };
+  const migrated = json(api.parseBenefits(JSON.stringify(legacy)));
+  assert.deepEqual(migrated, demo);
+  assert.deepEqual(json(api.parseBenefits(JSON.stringify(migrated))), migrated);
+  assert.deepEqual(s.writes, []);
+  assert.equal(s.storage.size, 0);
+});
 
 test("v1 membership defaults and Bangkok end-of-day defaults are backwards compatible", async () => {
   const s = await fixture();
   const old = json(s.readBenefits()); delete old.memberships;
   assert.deepEqual(json(s.parseBenefits(JSON.stringify(old)).memberships), []);
   assert.equal(s.readMembership("BLU-1001"), null);
-  assert.equal(s.newDefinition("COUPON").expiresAt, "2026-10-07T23:59:59+07:00");
+  assert.equal(s.newDefinition("COUPON").expiresAt, "9999-12-31T23:59:59+07:00");
+  assert.equal(s.newDefinition("COUPON").noFixedExpiry, true);
+  assert.equal(s.newDefinition("COUPON").validDays, 30);
   s.clock.now = Date.parse("2026-12-31T20:00:00Z");
   assert.equal(s.newDefinition("PROMO").expiresAt, "2027-01-31T23:59:59+07:00");
 });
@@ -83,7 +177,7 @@ test("purchase consumes promo and creates membership atomically once; failed sto
   const results = await Promise.allSettled([s.purchaseMockPackage(g.memberCode, pkg, p), s.purchaseMockPackage(g.memberCode, pkg, p)]);
   assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
   assert.equal(s.writes.length, writes + 2); // benefits + member account/points ledger
-  assert.equal(s.readBenefits().grants[0].paidAmount, pkg.price - 100);
+  assert.equal(ownGrants(s)[0].paidAmount, pkg.price - 100);
   const account = s.load("member-account").readMemberAccount(g.memberCode);
   assert.equal(account.purchases[0].pointsEarned, Math.floor((pkg.price - 100) / 20));
   assert.equal(s.readMembership(g.memberCode).totalDays, 30);
@@ -102,7 +196,7 @@ test("purchase captures inputs and re-quotes expiry, suspension and revisions un
     if (change === "expiry") s.clock.now = Date.parse(g.definition.expiresAt);
     release();
     if (change === "inputs") { await work; assert.equal(s.readMembership(g.memberCode).totalDays, 30); }
-    else { await assert.rejects(work); assert.equal(s.readMembership(g.memberCode), null); assert.equal(s.readBenefits().grants[0].status, "UNUSED"); }
+    else { await assert.rejects(work); assert.equal(s.readMembership(g.memberCode), null); assert.equal(ownGrants(s)[0].status, "UNUSED"); }
   }
 });
 test("EXTRA_DAYS requires own membership, including after reload; failure never consumes coupon", async () => {
@@ -111,7 +205,7 @@ test("EXTRA_DAYS requires own membership, including after reload; failure never 
   const before = s.storage.get(s.BENEFITS_KEY);
   await assert.rejects(s.redeemCoupon(s.coupon), /แพ็กเกจ/);
   assert.equal(s.storage.get(s.BENEFITS_KEY), before);
-  assert.equal(s.readBenefits().grants[0].status, "UNUSED");
+  assert.equal(ownGrants(s)[0].status, "UNUSED");
   assert.equal(s.readMembership("BLU-1012").totalDays, 30);
 });
 test("EXTRA_DAYS atomically extends active or expired membership and rejects concurrent/reloaded replay", async () => {
@@ -128,7 +222,8 @@ test("EXTRA_DAYS atomically extends active or expired membership and rejects con
     const writes = s.writes.length;
     const results = await Promise.allSettled([s.redeemCoupon(s.coupon), s.redeemCoupon(s.coupon)]);
     assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
-    assert.equal(s.writes.length, writes + 1);
+    assert.equal(s.writes.length, writes + 2);
+    assert.deepEqual(s.writes.slice(writes), [s.BENEFITS_KEY, s.load("member-account").MEMBER_ACCOUNT_KEY]);
     const m = s.readMembership(s.coupon.memberCode);
     assert.equal(Date.parse(m.expiresAt), Math.max(s.clock.now, Date.parse(prior.expiresAt)) + 5 * DAY);
     assert.equal(m.totalDays, 6); assert.equal(m.friendCouponsLeft, 0);
@@ -143,7 +238,7 @@ test("EXTRA_DAYS cap rejects old oversized definitions and issued snapshots with
   await assert.rejects(s.saveDefinition({ ...s.definition, amount: 3651 }, { ...s.definition, amount: 3650 }), /3650/);
   for (const target of ["definition", "grant"]) {
     const old = json(s.readBenefits()); delete old.memberships;
-    (target === "definition" ? old.definitions[0] : old.grants[0].definition).amount = 3651;
+    (target === "definition" ? old.definitions.find(d => d.id === s.definition.id) : old.grants.find(g => g.id === s.coupon.id).definition).amount = 3651;
     assert.throws(() => s.parseBenefits(JSON.stringify(old)), /เสียหาย/);
   }
 });
@@ -166,10 +261,11 @@ test("CRUD creates, edits, reads and deletes only never-issued definitions", asy
     const s = await fixture(kind);
     const edited = { ...s.definition, name: "แก้ไข", amount: 2 };
     await s.saveDefinition(edited, s.definition);
-    assert.equal(s.readBenefits().definitions[0].name, "แก้ไข");
+    assert.equal(ownDefinition(s).name, "แก้ไข");
     await assert.rejects(s.saveDefinition(s.definition, s.definition), /เปลี่ยน/);
     assert.equal(await s.removeDefinition(edited), "DELETED");
-    assert.equal(s.readBenefits().definitions.length, 0);
+    assert.equal(s.readBenefits().definitions.length, s.baseline.definitions.length - 1);
+    assert.equal(ownDefinition(s), undefined);
   }
 });
 test("CRUD validation rejects invalid amounts, duplicate codes, dates and quotas", async () => {
@@ -178,7 +274,7 @@ test("CRUD validation rejects invalid amounts, duplicate codes, dates and quotas
     await assert.rejects(s.saveDefinition({ ...s.definition, ...changes }, s.definition));
   }
   await assert.rejects(s.saveDefinition({ ...s.newDefinition("PROMO"), name: "อื่น", code: s.definition.code }, null), /ซ้ำ/);
-  assert.equal(s.readBenefits().definitions.length, 1);
+  assert.equal(s.readBenefits().definitions.length, s.baseline.definitions.length);
 });
 test("physical card/member code share the roster and selected multiselect deduplicates before preview", async () => {
   const s = await fixture();
@@ -188,9 +284,9 @@ test("physical card/member code share the roster and selected multiselect dedupl
   assert.throws(() => s.previewGrant(s.definition.id, ["CARD-8899"], "SELECTED"));
   const p = s.previewGrant(s.definition.id, ["BLU-1001", "BLU-1001", "BLU-1012"], "SELECTED");
   assert.equal(p.newCodes.length, 2);
-  assert.equal(s.readBenefits().grants.length, 0);
+  assert.equal(ownGrants(s).length, 0);
   assert.equal(await s.commitGrant(p), 2);
-  const grants = s.readBenefits().grants;
+  const grants = ownGrants(s);
   assert.equal(grants.length, 2);
   assert.ok(grants.every(g => g.status === "UNUSED" && g.usedAt === undefined));
 });
@@ -207,9 +303,9 @@ test("ALL takes current roster snapshot, not search results or future users; inc
   const count = p.memberCodes.length;
   s.admin.mockAdminMembers.push({ id: 999, memberCode: "BLU-9999", cardNumber: "CARD-9999", fullName: "สมาชิกใหม่", points: 0 });
   assert.equal(await s.commitGrant(p), count);
-  assert.equal(s.readBenefits().grants.length, count);
+  assert.equal(ownGrants(s).length, count);
   assert.ok(!s.readBenefits().grants.some(g => g.memberCode === "BLU-9999"));
-  assert.equal(s.readBenefits().batches[0].mode, "ALL");
+  assert.equal(s.readBenefits().batches.find(b => b.id === p.batchId).mode, "ALL");
 });
 test("mixed existing recipients are explicitly skipped; no duplicate even after coupon is used", async () => {
   const s = await fixture();
@@ -219,7 +315,7 @@ test("mixed existing recipients are explicitly skipped; no duplicate even after 
   assert.equal(p.skipped, 1); assert.deepEqual(json(p.newCodes), ["BLU-1012"]);
   await s.commitGrant(p);
   assert.throws(() => s.previewGrant(s.definition.id, ["BLU-1001", "BLU-1012"], "SELECTED"), /ได้รับ.*แล้ว/);
-  assert.equal(s.readBenefits().grants.length, 2);
+  assert.equal(ownGrants(s).length, 2);
 });
 test("duplicate and concurrent commits write one grant batch, replay survives reload", async () => {
   const s = await fixture();
@@ -229,7 +325,7 @@ test("duplicate and concurrent commits write one grant batch, replay survives re
   const reload = setupMock({ storage: s.storage }).load("benefits");
   await assert.rejects(reload.commitGrant(p), /บันทึกแล้ว/);
   assert.throws(() => reload.previewGrant(s.definition.id, ["BLU-1001"], "SELECTED"), /ได้รับ.*แล้ว/);
-  assert.equal(reload.readBenefits().batches.length, 1);
+  assert.equal(reload.readBenefits().batches.filter(b => b.definitionId === s.definition.id).length, 1);
 });
 test("latest revision and recipient count are revalidated under lock; stale previews never silently expand", async () => {
   const s = await fixture();
@@ -240,7 +336,7 @@ test("latest revision and recipient count are revalidated under lock; stale prev
   const changed = s.previewGrant(s.definition.id, ["BLU-1012"], "SELECTED");
   await s.saveDefinition({ ...s.definition, name: "เงื่อนไขใหม่" }, s.definition);
   await assert.rejects(s.commitGrant(changed), /ข้อมูลเปลี่ยน/);
-  assert.equal(s.readBenefits().grants.length, 1);
+  assert.equal(ownGrants(s).length, 1);
 });
 test("queued grant captures caller plan and rereads storage corruption before writing", async () => {
   const s = await fixture();
@@ -250,7 +346,7 @@ test("queued grant captures caller plan and rereads storage corruption before wr
   p.memberCodes.push("BLU-1012");
   release();
   assert.equal(await work, 1);
-  assert.equal(s.readBenefits().grants[0].memberCode, "BLU-1001");
+  assert.equal(ownGrants(s)[0].memberCode, "BLU-1001");
   const next = s.previewGrant(s.definition.id, ["BLU-1012"], "SELECTED");
   const unlock = s.holdLock(s.BENEFITS_KEY);
   const queued = s.commitGrant(next);
@@ -272,13 +368,15 @@ test("quota is checked before confirmation and cannot shrink below issued count"
 test("expired or disabled definitions cannot grant, including expiry while waiting for lock", async () => {
   for (const kind of ["PROMO", "COUPON"]) {
     const s = await fixture(kind);
+    await s.saveDefinition({ ...s.definition, noFixedExpiry: false, expiresAt: new Date(s.clock.now + DAY).toISOString() }, s.definition);
+    s.definition = ownDefinition(s);
     const p = s.previewGrant(s.definition.id, ["BLU-1001"], "SELECTED");
     const release = s.holdLock(s.BENEFITS_KEY);
     const commit = s.commitGrant(p);
     s.clock.now = Date.parse(s.definition.expiresAt);
     release();
     await assert.rejects(commit, /หมดอายุ/);
-    assert.equal(s.readBenefits().grants.length, 0);
+    assert.equal(ownGrants(s).length, 0);
     await s.saveDefinition({ ...s.definition, active: false }, s.definition);
     assert.throws(() => s.previewGrant(s.definition.id, ["BLU-1001"], "SELECTED"), /ปิดใช้งาน/);
   }
@@ -292,9 +390,9 @@ test("coupon issue and redeem are separate, confirmation verifies snapshot and p
   await assert.rejects(s.redeemCoupon({ ...preview, memberName: "เปลี่ยนชื่อ" }), /เปลี่ยน/);
   const results = await Promise.allSettled([s.redeemCoupon(preview), s.redeemCoupon(preview)]);
   assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
-  assert.equal(s.readBenefits().grants[0].usedAt, new Date(s.clock.now).toISOString());
+  assert.equal(ownGrants(s)[0].usedAt, new Date(s.clock.now).toISOString());
   assert.throws(() => s.previewCoupon(g.code), /ใช้แล้ว/);
-  assert.ok(s.writes.every(key => key === s.BENEFITS_KEY));
+  assert.deepEqual(s.writes, [s.BENEFITS_KEY, s.BENEFITS_KEY, s.BENEFITS_KEY, s.load("member-account").MEMBER_ACCOUNT_KEY]);
 });
 test("coupon redemption expiry checked again at exact boundary inside queued lock", async () => {
   const s = await fixture();
@@ -305,7 +403,7 @@ test("coupon redemption expiry checked again at exact boundary inside queued loc
   s.clock.now = Date.parse(g.definition.expiresAt);
   release();
   await assert.rejects(redeem, /หมดอายุ/);
-  assert.equal(s.readBenefits().grants[0].status, "UNUSED");
+  assert.equal(ownGrants(s)[0].status, "UNUSED");
   assert.throws(() => s.previewCoupon("BLU-CP-DEMO01"), /ไม่พบ/);
 });
 test("issued definitions soft-disable even before use; immutable granted terms survive edits", async () => {
@@ -316,8 +414,8 @@ test("issued definitions soft-disable even before use; immutable granted terms s
   assert.equal(s.previewCoupon(g.code).definition.amount, 1);
   assert.equal(s.previewCoupon(g.code).definition.name, s.definition.name);
   assert.equal(await s.removeDefinition(edited), "DISABLED");
-  assert.equal(s.readBenefits().definitions.length, 1);
-  assert.equal(s.readBenefits().grants.length, 1);
+  assert.equal(s.readBenefits().definitions.length, s.baseline.definitions.length);
+  assert.equal(ownGrants(s).length, 1);
   assert.throws(() => s.previewCoupon(g.code), /ระงับ/);
 });
 test("promo assignment does not count as usage; quote/cancel has no write; payment records usage atomically once", async () => {
@@ -332,7 +430,7 @@ test("promo assignment does not count as usage; quote/cancel has no write; payme
   assert.throws(() => s.previewMockPayment(g.code, "BLU-1012", 1000), /ไม่ได้แจก/);
   const results = await Promise.allSettled([s.completeMockPayment(p), s.completeMockPayment(p)]);
   assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
-  const used = s.readBenefits().grants[0];
+  const used = ownGrants(s)[0];
   assert.equal(used.status, "USED"); assert.equal(used.paymentId, p.paymentId); assert.equal(used.paidAmount, 900);
   assert.throws(() => s.previewGrant(s.definition.id, [g.memberCode], "SELECTED"), /ได้รับ.*แล้ว/);
   assert.ok(s.writes.every(key => key === s.BENEFITS_KEY));
@@ -358,7 +456,7 @@ test("promo payment rejects stale totals and expiry/disable between quote and pa
     if (change === "disable") await s.removeDefinition(s.definition);
     if (change === "tamper") p.total = 0;
     await assert.rejects(s.completeMockPayment(p));
-    assert.equal(s.readBenefits().grants[0].status, "UNUSED");
+    assert.equal(ownGrants(s)[0].status, "UNUSED");
   }
 });
 test("storage read/write failures and unsupported Web Locks fail closed with no success event", async () => {
@@ -372,9 +470,27 @@ test("storage read/write failures and unsupported Web Locks fail closed with no 
     await assert.rejects(s.commitGrant(p));
     assert.equal(s.storage.get(s.BENEFITS_KEY), before); assert.equal(s.events.length, count);
     s.failures[failure] = false;
-    assert.equal(s.readBenefits().grants.length, 0);
+    assert.equal(ownGrants(s).length, 0);
   }
 });
+test("second-store purchase failure restores absent or existing benefits and never credits points", async () => {
+  for (const populated of [false, true]) {
+    const s = setupMock();
+    const api = s.load("benefits");
+    const accounts = s.load("member-account");
+    if (populated) await api.purchaseMockPackage("BLU-1001", packageFor(s), null);
+    const before = [...s.storage.entries()];
+    const account = json(accounts.readMemberAccount("BLU-1001"));
+    const events = [...s.events];
+    s.failures.writeKey = accounts.MEMBER_ACCOUNT_KEY;
+    await assert.rejects(api.purchaseMockPackage("BLU-1001", packageFor(s), null), /บันทึกบัญชีสมาชิก/);
+    assert.deepEqual([...s.storage.entries()], before);
+    assert.deepEqual(json(accounts.readMemberAccount("BLU-1001")), account);
+    assert.deepEqual(s.events, events);
+    if (!populated) assert.equal(api.readMembership("BLU-1001"), null);
+  }
+});
+
 test("failed coupon/payment writes never consume rights or return success", async () => {
   for (const kind of ["PROMO", "COUPON"]) {
     const s = await fixture(kind);

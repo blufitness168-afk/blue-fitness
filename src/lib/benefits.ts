@@ -121,9 +121,18 @@ function initialBenefitsState(): BenefitsState { return structuredClone(PROMO_DE
 function addDemoBenefitsIfMissing(state: BenefitsState): BenefitsState {
   const demo = initialBenefitsState();
   const missingKinds = new Set(state.grants.map(grant => grant.definition.kind));
-  const definitions = demo.definitions.filter(definition => !missingKinds.has(definition.kind) && !state.definitions.some(current => current.id === definition.id || (current.kind === definition.kind && current.code === definition.code)));
-  const grants = demo.grants.filter(grant => !missingKinds.has(grant.definition.kind));
-  const batches = demo.batches.filter(batch => grants.some(grant => grant.batchId === batch.id) && !state.batches.some(current => current.id === batch.id));
+  // Import each demo definition with its complete graph, or leave it out entirely.
+  // Existing IDs/codes belong to the stored graph, even if they resemble demo data.
+  const definitions = demo.definitions.filter(definition => {
+    if (missingKinds.has(definition.kind) || state.definitions.some(current => current.id === definition.id || (current.kind === definition.kind && current.code === definition.code))) return false;
+    const grants = demo.grants.filter(grant => grant.definition.id === definition.id);
+    const batches = demo.batches.filter(batch => batch.definitionId === definition.id);
+    return !grants.some(grant => state.grants.some(current => current.id === grant.id || current.code === grant.code || (grant.paymentId !== undefined && current.paymentId === grant.paymentId))) &&
+      !batches.some(batch => state.batches.some(current => current.id === batch.id));
+  });
+  const definitionIds = new Set(definitions.map(definition => definition.id));
+  const grants = demo.grants.filter(grant => definitionIds.has(grant.definition.id));
+  const batches = demo.batches.filter(batch => definitionIds.has(batch.definitionId));
   return { ...state, definitions: [...state.definitions, ...definitions], grants: [...state.grants, ...grants], batches: [...state.batches, ...batches] };
 }
 const fail = (message: string): never => { throw new Error(message); };

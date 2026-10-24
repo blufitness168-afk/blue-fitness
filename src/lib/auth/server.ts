@@ -221,10 +221,10 @@ export async function completeRegistration(ticket: string, profile: MemberProfil
   return memberRows.length === 1 ? { token, expiresAt } : null;
 }
 
-export async function getCurrentMember() {
+export async function getCurrentSession() {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token || !/^[a-f0-9]{64}$/.test(token)) return null;
-  const rows = await db.select({ member: members }).from(authSessions)
+  const rows = await db.select({ member: members, session: authSessions }).from(authSessions)
     .innerJoin(members, eq(authSessions.memberId, members.id))
     .where(and(eq(authSessions.tokenHash, hashToken(token)), isNull(authSessions.revokedAt), gt(authSessions.expiresAt, new Date())))
     .limit(1);
@@ -232,7 +232,18 @@ export async function getCurrentMember() {
   if (!member || member.status === "SUSPENDED") return null;
   const { passwordHash: _passwordHash, ...safeMember } = member;
   void _passwordHash;
-  return safeMember;
+  return { member: safeMember, session: rows[0].session };
+}
+
+export async function getCurrentMember() {
+  const current = await getCurrentSession();
+  return current?.session.mode === "NORMAL" ? current.member : null;
+}
+
+export async function requireKioskSession() {
+  const current = await getCurrentSession();
+  if (!current || current.session.mode !== "KIOSK" || current.session.deviceId !== (process.env.KIOSK_STATION_ID || "LOCAL_FRONT_DESK") || !["ADMIN", "OWNER"].includes(current.member.role)) return null;
+  return current;
 }
 
 // Use in server layouts/pages; throws if unauthenticated or lacking the requested persisted role.

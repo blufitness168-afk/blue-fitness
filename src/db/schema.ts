@@ -1,5 +1,7 @@
 import {
   pgTable,
+  primaryKey,
+  check,
   uuid,
   index,
   uniqueIndex,
@@ -305,6 +307,8 @@ export const authLoginLimits = pgTable("auth_login_limits", {
 
 export const authSessions = pgTable("auth_sessions", {
   id: serial("id").primaryKey(),
+  mode: text("mode").notNull().default("NORMAL"),
+  deviceId: text("device_id"),
   memberId: integer("member_id")
     .references(() => members.id, { onDelete: "cascade" })
     .notNull(),
@@ -314,6 +318,7 @@ export const authSessions = pgTable("auth_sessions", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
   index("auth_sessions_member_id_idx").on(table.memberId),
+  check("auth_sessions_mode_check", sql`${table.mode} IN ('NORMAL','KIOSK') AND (${table.mode} <> 'KIOSK' OR ${table.deviceId} IS NOT NULL)`),
 ]);
 
 // ==============================================================================
@@ -326,6 +331,20 @@ export const membersRelations = relations(members, ({ many }) => ({
   redemptions: many(redemptions),
   authSessions: many(authSessions),
 }));
+
+export const kioskRequests = pgTable("kiosk_requests", {
+  station: text("station").notNull(),
+  requestKey: uuid("request_key").notNull(),
+  memberCode: text("member_code").notNull(),
+  result: jsonb("result").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
+}, table => [primaryKey({ columns: [table.station, table.requestKey] }), index("kiosk_requests_created_idx").on(table.createdAt)]);
+
+export const kioskMemberBounce = pgTable("kiosk_member_bounce", {
+  station: text("station").notNull(),
+  memberId: integer("member_id").notNull().references(() => members.id, { onDelete: "cascade" }),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull(),
+}, table => [primaryKey({ columns: [table.station, table.memberId] })]);
 
 export const authSessionsRelations = relations(authSessions, ({ one }) => ({
   member: one(members, {

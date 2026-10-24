@@ -1,6 +1,6 @@
 export type AdminRole = "MEMBER" | "ADMIN" | "OWNER";
 
-const staffPaths = ["/admin/checkin", "/admin/rewards", "/admin/promo-codes", "/admin/coupons"];
+const staffPaths = ["/admin/kiosk", "/admin/checkin", "/admin/rewards", "/admin/promo-codes", "/admin/coupons"];
 
 export function canAccessAdminPath(role: unknown, pathname: string): boolean {
   // Match complete route segments, never prefixes such as /admin/members-extra.

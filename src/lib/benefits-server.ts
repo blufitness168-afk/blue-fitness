@@ -31,7 +31,7 @@ export async function redeemWelcomeEntry(couponId: number) {
         AND c.expire_date IS NOT NULL AND c.expire_date > now()
         AND EXISTS (SELECT 1 FROM auth_sessions s JOIN members m ON m.id = s.member_id
           WHERE s.token_hash = ${digest} AND s.member_id = c.member_id
-            AND s.revoked_at IS NULL AND s.expires_at > now() AND m.status <> 'SUSPENDED')
+            AND s.mode = 'NORMAL' AND s.revoked_at IS NULL AND s.expires_at > now() AND m.status <> 'SUSPENDED')
       RETURNING c.id, c.member_id
     )
     INSERT INTO checkins (member_id, scanner_type, scanner_device_id, points_awarded, notes)

@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
 import {
 
-  Check,
   ChevronDown,
   ChevronUp,
   Clock3,
@@ -26,6 +25,8 @@ import {
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import RealPaymentAccount from "@/components/RealPaymentAccount";
+import WelcomeCoupons from "./benefits/WelcomeCoupons";
+import type { WelcomeCoupon } from "@/lib/benefits-server";
 import { BENEFITS_EVENT, BENEFITS_KEY, readBenefits, readMembership, type BenefitGrant, type MockMembership } from "@/lib/benefits";
 import { CHECKIN_STORAGE_KEY, parseCheckinRecords, type CheckinRecord } from "@/lib/checkin";
 import { DESK_UPDATED_EVENT, readDeskRewards } from "@/lib/front-desk";
@@ -45,7 +46,14 @@ import type { RedemptionRecord } from "@/lib/admin-mock";
 
 const thaiMonths = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
 type Tab = "home" | "qr" | "coupons" | "points";
-type ProfileDraft = Pick<MemberProfile, "fullName" | "nickname" | "phone" | "birthDay" | "birthMonth" | "emergencyContact">;
+type ProfileDraft = Pick<MemberProfile, "fullName" | "nickname" | "phone" | "gender" | "birthDay" | "birthMonth" | "emergencyContact">;
+
+type SavedProfile = { fullName: string; nickname: string | null; gender: MemberProfile["gender"]; birthDay: number | null; birthMonth: number | null; emergencyName: string | null; emergencyPhone: string | null; emergencyRelation: string | null };
+function profileDraft(profile: SavedProfile): Omit<ProfileDraft, "phone"> {
+  return { fullName: profile.fullName, nickname: profile.nickname ?? "", gender: profile.gender,
+    birthDay: profile.birthDay ? String(profile.birthDay) : "", birthMonth: profile.birthMonth ? String(profile.birthMonth) : "",
+    emergencyContact: { name: profile.emergencyName ?? "", phone: profile.emergencyPhone ?? "", relation: profile.emergencyRelation ?? "" } };
+}
 
 const cardClass = "rounded-3xl border border-blu-sky/40 bg-white p-5 shadow-sm";
 const buttonClass = "rounded-xl bg-blu-dark px-4 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40";
@@ -80,7 +88,7 @@ type AccountIdentity = {
   registeredAt: string; status: "PENDING" | "ACTIVE" | "EXPIRED" | "SUSPENDED";
 };
 
-export default function MemberAccountPage({ identity }: { identity: AccountIdentity }) {
+export default function MemberAccountPage({ identity, welcomeCoupons }: { identity: AccountIdentity; welcomeCoupons: WelcomeCoupon[] }) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("home");
   const [member, setMember] = useState<MemberProfile | null>(null);
@@ -97,9 +105,9 @@ export default function MemberAccountPage({ identity }: { identity: AccountIdent
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<ProfileDraft | null>(null);
-  const [pendingDraft, setPendingDraft] = useState<{ memberCode: string; draft: ProfileDraft } | null>(null);
-  const [otp, setOtp] = useState("");
-  const [otpError, setOtpError] = useState("");
+  const [serverProfile, setServerProfile] = useState<Partial<ProfileDraft> | null>(null);
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [profileError, setProfileError] = useState("");
   const [showPurchases, setShowPurchases] = useState(false);
   const [showCheckins, setShowCheckins] = useState(false);
   const [showCouponHistory, setShowCouponHistory] = useState(false);
@@ -107,17 +115,15 @@ export default function MemberAccountPage({ identity }: { identity: AccountIdent
 
   const refresh = useCallback(() => {
     try {
-      const saved = localStorage.getItem("blu_member");
-      const parsed = saved === null ? null : JSON.parse(saved);
-      const localProfile = parsed && typeof parsed === "object" && parsed.memberCode === identity.memberCode ? parsed : {};
       const profile = {
-        ...defaultMockMember, ...localProfile,
+        ...defaultMockMember,
         id: identity.id, memberCode: identity.memberCode, fullName: identity.fullName,
         phone: identity.phone, avatarUrl: identity.avatarUrl, role: identity.role,
         birthDay: identity.birthDay ? String(identity.birthDay) : "", birthMonth: identity.birthMonth ? String(identity.birthMonth) : "",
         registeredAt: identity.registeredAt, status: identity.status === "SUSPENDED" ? "PENDING" : identity.status,
         nickname: "", gender: "OTHER", cardNumber: "", emergencyContact: { name: "", phone: "", relation: "" },
         coupons: {}, activityLogs: [], points: 0,
+        ...serverProfile,
       } as MemberProfile;
       if (typeof profile.memberCode !== "string" || !/^BLU-\d+$/.test(profile.memberCode) || typeof profile.fullName !== "string" ||
         !profile.fullName.trim() || typeof profile.phone !== "string" || typeof profile.birthDay !== "string" || typeof profile.birthMonth !== "string") {
@@ -144,7 +150,7 @@ export default function MemberAccountPage({ identity }: { identity: AccountIdent
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "อ่านข้อมูลบัญชีไม่ได้");
     }
-  }, [identity]);
+  }, [identity, serverProfile]);
 
   useEffect(() => {
     // Hydrate the browser-only mock stores after the client mounts.
@@ -165,6 +171,18 @@ export default function MemberAccountPage({ identity }: { identity: AccountIdent
     };
   }, [refresh]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/member/profile", { cache: "no-store", signal: controller.signal })
+      .then(async response => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "โหลดข้อมูลส่วนตัวไม่สำเร็จ");
+        setServerProfile(profileDraft(data.profile));
+      })
+      .catch(cause => { if (!controller.signal.aborted) setProfileError(cause instanceof Error ? cause.message : "โหลดข้อมูลส่วนตัวไม่สำเร็จ"); });
+    return () => controller.abort();
+  }, [identity.id]);
+
   const purchases = useMemo(() => [...(account?.purchases ?? [])].sort((a, b) => Date.parse(b.purchasedAt) - Date.parse(a.purchasedAt)), [account]);
   const memberCheckins = useMemo(() => [...checkins].sort((a, b) => Date.parse(b.checkedAt) - Date.parse(a.checkedAt)), [checkins]);
   const couponHistory = useMemo(() => [
@@ -184,10 +202,12 @@ export default function MemberAccountPage({ identity }: { identity: AccountIdent
   };
 
   const openEdit = () => {
-    if (!member) return;
+    if (!member || !serverProfile) return;
+    setProfileError("");
     setDraft({
       fullName: member.fullName,
       nickname: member.nickname ?? "",
+      gender: member.gender,
       phone: member.phone,
       birthDay: member.birthDay,
       birthMonth: member.birthMonth,
@@ -197,41 +217,31 @@ export default function MemberAccountPage({ identity }: { identity: AccountIdent
     setMessage("");
   };
 
-  const saveProfile = (next: ProfileDraft, expectedMemberCode = member?.memberCode) => {
-    if (!member || member.memberCode !== expectedMemberCode) {
-      setOtpError("บัญชีสมาชิกเปลี่ยนระหว่างยืนยัน กรุณาปิดหน้าต่างและแก้ไขข้อมูลใหม่");
-      return;
-    }
-    const updated = { ...member, ...next, avatarUrl: member.avatarUrl };
-    localStorage.setItem("blu_member", JSON.stringify(updated));
-    setMember(updated);
-    setEditing(false);
-    setPendingDraft(null);
-    setOtp("");
-    setOtpError("");
-    setMessage("บันทึกข้อมูลส่วนตัวแล้ว");
-  };
-
-  const submitProfile = (event: React.FormEvent) => {
+  const submitProfile = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!member || !draft) return;
-    const cleanPhone = draft.phone.replace(/\D/g, "");
-    if (cleanPhone.length < 9 || cleanPhone.length > 10) return setMessage("กรุณากรอกเบอร์โทร 9–10 หลัก");
-    const cleanDraft = { ...draft, phone: cleanPhone };
-    if (cleanPhone !== member.phone.replace(/\D/g, "")) {
-      setPendingDraft({ memberCode: member.memberCode, draft: cleanDraft });
-      setOtp("");
-      setOtpError("");
-      setMessage("ส่ง OTP จำลองแล้ว ใช้รหัส 123456");
-      return;
+    if (!member || !draft || profileBusy) return;
+    setProfileBusy(true);
+    setProfileError("");
+    try {
+      const response = await fetch("/api/member/profile", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fullName: draft.fullName, nickname: draft.nickname ?? "", gender: draft.gender,
+          birthDay: Number(draft.birthDay), birthMonth: Number(draft.birthMonth),
+          emergencyName: draft.emergencyContact?.name ?? "", emergencyPhone: draft.emergencyContact?.phone ?? "",
+          emergencyRelation: draft.emergencyContact?.relation ?? "" }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "บันทึกข้อมูลไม่สำเร็จ");
+      const saved = profileDraft(data.profile);
+      setServerProfile(saved);
+      setMember({ ...member, ...saved });
+      setEditing(false);
+      setMessage("บันทึกข้อมูลส่วนตัวแล้ว");
+    } catch (cause) {
+      setProfileError(cause instanceof Error ? cause.message : "บันทึกข้อมูลไม่สำเร็จ");
+    } finally {
+      setProfileBusy(false);
     }
-    saveProfile(cleanDraft);
-  };
-
-  const verifyOtp = () => {
-    if (!pendingDraft) return;
-    if (otp !== "123456") return setOtpError("OTP ไม่ถูกต้อง สำหรับ Mock ใช้ 123456");
-    saveProfile(pendingDraft.draft, pendingDraft.memberCode);
   };
 
   const redeemProduct = async (reward: RewardItem) => {
@@ -311,11 +321,12 @@ export default function MemberAccountPage({ identity }: { identity: AccountIdent
       </section>}
 
       {tab === "coupons" && <div className="space-y-5">
+        <WelcomeCoupons key={identity.id} coupons={welcomeCoupons} />
         {membership && membership.friendCouponsLeft > 0 && <section className={`${cardClass} border-blu-yellow/70 bg-gradient-to-br from-blu-dark to-blu-navy text-white`}><div className="flex justify-between gap-3"><div><p className="text-xs font-bold text-blu-yellow">สิทธิ์จากแพ็กเกจ</p><h2 className="mt-1 text-xl font-black">คูปองพาเพื่อน</h2><p className="text-sm text-blu-sky">คงเหลือ {membership.friendCouponsLeft} ครั้ง</p></div><Ticket className="h-10 w-10 text-blu-yellow" /></div><p className="mt-4 text-xs text-white/70">แสดงบัตรสมาชิกและติดต่อเจ้าหน้าที่เพื่อใช้สิทธิ์</p></section>}
         {adminCoupons.map(coupon => <AdminCouponCard key={coupon.id} coupon={coupon} source="Admin แจก" suspended={suspendedBenefitIds.includes(coupon.definition.id)} />)}
         {adminPromos.map(coupon => <AdminCouponCard key={coupon.id} coupon={coupon} source="โปรสมาชิก" suspended={suspendedBenefitIds.includes(coupon.definition.id)} />)}
         {pointCoupons.map(coupon => <PointCouponCard key={coupon.id} coupon={coupon} />)}
-        {!membership?.friendCouponsLeft && !adminCoupons.length && !adminPromos.length && !pointCoupons.length && <section className={cardClass}><Empty>ยังไม่มีคูปองในกระเป๋า<br />คูปองจาก Admin หรือคูปองที่แลกด้วยคะแนนจะแสดงที่นี่</Empty></section>}
+        {!membership?.friendCouponsLeft && !adminCoupons.length && !adminPromos.length && !pointCoupons.length && <section className={cardClass}><Empty>ยังไม่มีคูปองทดลองจาก Admin หรือที่แลกด้วยคะแนน<br />คูปองต้อนรับจากฐานข้อมูลจริงแสดงแยกด้านบน</Empty></section>}
       </div>}
 
       {tab === "points" && <div className="space-y-5">
@@ -333,13 +344,14 @@ export default function MemberAccountPage({ identity }: { identity: AccountIdent
       </div>}
     </div>
 
+    {!editing && profileError && <p role="alert" className="p-4 text-rose-700">{profileError}</p>}
     <nav aria-label="เมนูบัญชีสมาชิก" className="fixed inset-x-0 bottom-0 z-40 border-t border-blu-sky/30 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_30px_rgba(12,55,86,0.12)] backdrop-blur-lg"><div className="mx-auto grid max-w-lg grid-cols-4">{([
       ["home", Home, "หน้าหลัก"], ["qr", QrCode, "QR Code"], ["coupons", Ticket, "คูปอง"], ["points", Coins, "คะแนน"],
     ] as const).map(([key, Icon, label]) => <button key={key} aria-current={tab === key ? "page" : undefined} onClick={() => { setTab(key); window.scrollTo({ top: 0, behavior: "smooth" }); }} className={`flex flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-bold transition ${tab === key ? "bg-blu-dark text-blu-yellow" : "text-blu-steel hover:bg-blu-ice"}`}><Icon className="h-5 w-5" /><span>{label}</span></button>)}</div></nav>
 
-    {editing && draft && <div className="fixed inset-0 z-[60] flex items-end justify-center bg-blu-dark/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onMouseDown={event => { if (event.target === event.currentTarget) setEditing(false); }}><form onSubmit={submitProfile} className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl"><div className="flex items-center justify-between"><div><h2 className="text-xl font-black">แก้ไขข้อมูลส่วนตัว</h2><p className="text-xs text-blu-steel">เปลี่ยนเบอร์โทรต้องยืนยัน OTP</p></div><button type="button" aria-label="ปิด" onClick={() => setEditing(false)}><X /></button></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="space-y-1 text-xs font-bold sm:col-span-2">ชื่อ-นามสกุล<input required maxLength={120} className={inputClass} value={draft.fullName} onChange={e => setDraft({ ...draft, fullName: e.target.value })} /></label><label className="space-y-1 text-xs font-bold">ชื่อเล่น<input maxLength={50} className={inputClass} value={draft.nickname ?? ""} onChange={e => setDraft({ ...draft, nickname: e.target.value })} /></label><label className="space-y-1 text-xs font-bold">เบอร์โทร<input required inputMode="numeric" className={inputClass} value={draft.phone} onChange={e => setDraft({ ...draft, phone: e.target.value.replace(/\D/g, "").slice(0, 10) })} /></label><label className="space-y-1 text-xs font-bold">วันเกิด<input required type="number" min={1} max={31} className={inputClass} value={draft.birthDay} onChange={e => setDraft({ ...draft, birthDay: e.target.value })} /></label><label className="space-y-1 text-xs font-bold">เดือนเกิด<select required className={inputClass} value={draft.birthMonth} onChange={e => setDraft({ ...draft, birthMonth: e.target.value })}><option value="">เลือกเดือน</option>{thaiMonths.map(month => <option key={month}>{month}</option>)}</select></label><div className="sm:col-span-2 rounded-2xl bg-blu-ice p-4"><p className="mb-3 text-xs font-black">ผู้ติดต่อฉุกเฉิน</p><div className="grid gap-3 sm:grid-cols-3"><input aria-label="ชื่อผู้ติดต่อฉุกเฉิน" placeholder="ชื่อ" className={inputClass} value={draft.emergencyContact?.name ?? ""} onChange={e => setDraft({ ...draft, emergencyContact: { ...(draft.emergencyContact ?? { phone: "", relation: "" }), name: e.target.value } })} /><input aria-label="ความสัมพันธ์" placeholder="ความสัมพันธ์" className={inputClass} value={draft.emergencyContact?.relation ?? ""} onChange={e => setDraft({ ...draft, emergencyContact: { ...(draft.emergencyContact ?? { name: "", phone: "" }), relation: e.target.value } })} /><input aria-label="เบอร์ผู้ติดต่อฉุกเฉิน" inputMode="numeric" placeholder="เบอร์โทร" className={inputClass} value={draft.emergencyContact?.phone ?? ""} onChange={e => setDraft({ ...draft, emergencyContact: { ...(draft.emergencyContact ?? { name: "", relation: "" }), phone: e.target.value.replace(/\D/g, "").slice(0, 10) } })} /></div></div><div className="sm:col-span-2 flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900"><UserRound className="h-5 w-5 shrink-0" />รูปโปรไฟล์ไม่สามารถแก้ไขเองได้ กรุณาติดต่อเจ้าหน้าที่</div></div><button className={`${buttonClass} mt-5 w-full`}>บันทึกข้อมูล</button></form></div>}
+    {editing && draft && <div className="fixed inset-0 z-[60] flex items-end justify-center bg-blu-dark/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onMouseDown={event => { if (event.target === event.currentTarget) setEditing(false); }}><form onSubmit={submitProfile} className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl"><div className="flex items-center justify-between"><div><h2 className="text-xl font-black">แก้ไขข้อมูลส่วนตัว</h2><p className="text-xs text-blu-steel">เบอร์โทรแก้ไขไม่ได้ ต้องยืนยันผ่านขั้นตอน OTP สำหรับเปลี่ยนเบอร์</p></div><button type="button" aria-label="ปิด" onClick={() => setEditing(false)}><X /></button></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="space-y-1 text-xs font-bold sm:col-span-2">ชื่อ-นามสกุล<input required maxLength={100} className={inputClass} value={draft.fullName} onChange={e => setDraft({ ...draft, fullName: e.target.value })} /></label><label className="space-y-1 text-xs font-bold">ชื่อเล่น<input maxLength={50} className={inputClass} value={draft.nickname ?? ""} onChange={e => setDraft({ ...draft, nickname: e.target.value })} /></label><label className="space-y-1 text-xs font-bold">เบอร์โทร<input required inputMode="numeric" className={inputClass} value={draft.phone} readOnly /></label><label className="space-y-1 text-xs font-bold">เพศ<select required className={inputClass} value={draft.gender} onChange={e => setDraft({ ...draft, gender: e.target.value as MemberProfile["gender"] })}><option value="MALE">ชาย</option><option value="FEMALE">หญิง</option><option value="OTHER">อื่นๆ</option></select></label><label className="space-y-1 text-xs font-bold">วันเกิด<input required type="number" min={1} max={31} className={inputClass} value={draft.birthDay} onChange={e => setDraft({ ...draft, birthDay: e.target.value })} /></label><label className="space-y-1 text-xs font-bold">เดือนเกิด<select required className={inputClass} value={draft.birthMonth} onChange={e => setDraft({ ...draft, birthMonth: e.target.value })}><option value="">เลือกเดือน</option>{thaiMonths.map(month => <option key={month} value={thaiMonths.indexOf(month) + 1}>{month}</option>)}</select></label><div className="sm:col-span-2 rounded-2xl bg-blu-ice p-4"><p className="mb-3 text-xs font-black">ผู้ติดต่อฉุกเฉิน</p><div className="grid gap-3 sm:grid-cols-3"><input aria-label="ชื่อผู้ติดต่อฉุกเฉิน" placeholder="ชื่อ" className={inputClass} value={draft.emergencyContact?.name ?? ""} onChange={e => setDraft({ ...draft, emergencyContact: { ...(draft.emergencyContact ?? { phone: "", relation: "" }), name: e.target.value } })} /><input aria-label="ความสัมพันธ์" placeholder="ความสัมพันธ์" className={inputClass} value={draft.emergencyContact?.relation ?? ""} onChange={e => setDraft({ ...draft, emergencyContact: { ...(draft.emergencyContact ?? { name: "", phone: "" }), relation: e.target.value } })} /><input aria-label="เบอร์ผู้ติดต่อฉุกเฉิน" inputMode="numeric" placeholder="เบอร์โทร" className={inputClass} value={draft.emergencyContact?.phone ?? ""} onChange={e => setDraft({ ...draft, emergencyContact: { ...(draft.emergencyContact ?? { name: "", relation: "" }), phone: e.target.value.replace(/\D/g, "").slice(0, 10) } })} /></div></div><div className="sm:col-span-2 flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900"><UserRound className="h-5 w-5 shrink-0" />รูปโปรไฟล์ไม่สามารถแก้ไขเองได้ กรุณาติดต่อเจ้าหน้าที่</div></div><p role="alert" className="mt-3 text-sm text-rose-700">{profileError}</p><button disabled={profileBusy} className={`${buttonClass} mt-5 w-full`}>{profileBusy ? "กำลังบันทึก..." : "บันทึกข้อมูล"}</button></form></div>}
 
-    {pendingDraft && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-blu-dark/80 p-4 backdrop-blur-sm"><div className="w-full max-w-sm rounded-3xl bg-white p-6 text-center shadow-2xl"><Phone className="mx-auto h-10 w-10 text-blu-slate" /><h2 className="mt-3 text-xl font-black">ยืนยันเบอร์โทรใหม่</h2><p className="mt-1 text-sm text-blu-steel">กรอกรหัส OTP ที่ส่งไปยัง {pendingDraft.draft.phone}</p><p className="mt-3 rounded-xl bg-amber-50 p-2 text-xs text-amber-800">Mock OTP: <strong>123456</strong></p><input autoFocus inputMode="numeric" maxLength={6} aria-label="OTP" className={`${inputClass} mt-4 text-center font-mono text-xl tracking-[0.4em]`} value={otp} onChange={e => { setOtp(e.target.value.replace(/\D/g, "").slice(0, 6)); setOtpError(""); }} />{otpError && <p role="alert" className="mt-3 rounded-xl bg-rose-100 p-2 text-xs text-rose-700">{otpError}</p>}<div className="mt-4 grid grid-cols-2 gap-3"><button className="rounded-xl border border-blu-sky px-4 py-2.5 text-sm font-bold" onClick={() => { setPendingDraft(null); setOtp(""); setOtpError(""); }}>ยกเลิก</button><button className={buttonClass} disabled={otp.length !== 6} onClick={verifyOtp}><Check className="mr-1 inline h-4 w-4" />ยืนยัน</button></div></div></div>}
+
   </main>;
 }
 

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 import { X, User, HeartHandshake, UploadCloud } from "lucide-react";
 import LanguageToggle from "@/components/LanguageToggle";
+import PasswordInput from "@/components/PasswordInput";
 import { useLanguage } from "@/context/LanguageContext";
 
 type Step = "phone" | "otp" | "register";
@@ -417,10 +418,10 @@ export default function RegisterPage() {
 
               <div className="space-y-4">
                 <label className="block text-sm text-blu-dark">รหัสผ่าน (10–128 ตัวอักษร)
-                  <input type="password" autoComplete="new-password" minLength={10} maxLength={128} value={password} onChange={e => setPassword(e.target.value)} className="w-full border rounded-xl p-3" required />
+                  <PasswordInput autoComplete="new-password" minLength={10} maxLength={128} value={password} onChange={e => setPassword(e.target.value)} className="w-full border rounded-xl p-3" required />
                 </label>
                 <label className="block text-sm text-blu-dark">ยืนยันรหัสผ่าน
-                  <input type="password" autoComplete="new-password" maxLength={128} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} className="w-full border rounded-xl p-3" required />
+                  <PasswordInput visibilityLabel="รหัสผ่านยืนยัน" autoComplete="new-password" maxLength={128} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} className="w-full border rounded-xl p-3" required />
                 </label>
                 {/* 1. Full Name */}
                 <div>

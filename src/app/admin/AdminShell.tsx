@@ -21,6 +21,7 @@ const navItems = [
   { href: "/admin/members", labelTh: "สมาชิก", icon: Users },
   { href: "/admin/finance", labelTh: "รายรับ-รายจ่าย", icon: WalletCards },
   { href: "/admin/checkin", labelTh: "ประวัติการใช้บริการ", icon: ScanLine },
+  { href: "/admin/kiosk", labelTh: "เปิดสถานี Kiosk USB", icon: ScanLine },
   { href: "/admin/rewards", labelTh: "ของรางวัล", icon: Gift },
   { href: "/admin/promo-codes", labelTh: "โค้ดส่วนลด", icon: Ticket },
   { href: "/admin/coupons", labelTh: "คูปอง", icon: Ticket },

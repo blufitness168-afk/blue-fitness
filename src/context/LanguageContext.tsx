@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useSyncExternalStore } from "react";
 import { Language, translations } from "@/lib/translations";
 
 interface LanguageContextType {
@@ -12,24 +12,49 @@ interface LanguageContextType {
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
-export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [lang, setLangState] = useState<Language>("th");
+let memoryLanguage: Language = "th";
+let storageWriteFailed = false;
+const languageEvent = "blu-language-change";
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("blu_lang") as Language;
-      if (saved === "th" || saved === "en") {
-        setLangState(saved);
-      }
-    } catch (e) {}
-  }, []);
+function languageSnapshot(): Language {
+  if (storageWriteFailed) return memoryLanguage;
+  try {
+    const saved = localStorage.getItem("blu_lang");
+    return saved === "en" || saved === "th" ? saved : "th";
+  } catch {
+    return memoryLanguage;
+  }
+}
 
-  const setLang = (newLang: Language) => {
-    setLangState(newLang);
-    try {
-      localStorage.setItem("blu_lang", newLang);
-    } catch (e) {}
+function subscribeLanguage(notify: () => void) {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === "blu_lang" || event.key === null) {
+          storageWriteFailed = false;
+          notify();
+        }
   };
+  window.addEventListener("storage", onStorage);
+  window.addEventListener(languageEvent, notify);
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener(languageEvent, notify);
+  };
+}
+
+function setLang(newLang: Language) {
+  memoryLanguage = newLang;
+  try {
+    localStorage.setItem("blu_lang", newLang);
+    storageWriteFailed = false;
+  } catch {
+    storageWriteFailed = true;
+    // Keep language switching available when browser storage is blocked.
+  }
+  window.dispatchEvent(new Event(languageEvent));
+}
+
+export function LanguageProvider({ children }: { children: React.ReactNode }) {
+  const lang = useSyncExternalStore(subscribeLanguage, languageSnapshot, () => "th" as const);
 
   const toggleLang = () => {
     const nextLang = lang === "th" ? "en" : "th";

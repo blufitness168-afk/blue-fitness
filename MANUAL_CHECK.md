@@ -1,5 +1,64 @@
 # Manual check ก่อนเปิดใช้งานจริง
 
+## Kiosk พร้อม Hardware UAT (2026-10-24)
+
+- เพิ่มsessionmode NORMAL/KIOSK, DBcheckinเข้าอย่างเดียวพร้อมEnter/3secbounce/requestUUIDatomic; ADMIN/OWNERใช้บัญชีเดิมและออกด้วยpassword
+- Review+apply `20261024_kiosk.sql` แล้ว Backup18ตาราง `.local-db/backup-2026-10-24T07-03-23.548Z` เก็บfunctions-before; oldsessions31รายการ NORMALทั้งหมดและข้อมูลเดิมไม่เปลี่ยน
+- Browser/APIสร้างTEMPแยกจากhardwareQRทดสอบconcurrent/replay/permissions/exitผ่าน58checks มี1harnessmismatchเฉพาะ/testใช้deny-bannerไม่redirect ไม่มีsecuritybypass/runtimeerror; cleanupครบ old20tablesเท่าbaseline
+- สร้างhardwarefixture BLU-5welcomevalidครั้งเดียว/BLU-6expired หลังbackup20ตาราง `.local-db/backup-2026-10-24T07-04-43.793Z`; ทั้งคู่ไม่ใช้SMS/password/PAIDorder ไม่กระทบrealOwner
+- PNG/SVGใน `.local-db/kiosk-qr/`; ต้องเก็บBLU-5ไว้ให้ผู้ใช้สแกนครั้งแรก ไม่autoconsumeหรือresetคูปองถ้าทดสอบแล้ว
+- Suite169/169+TypeScript+fulllintผ่าน; USBจริงยังรอผู้ใช้ `/admin/kiosk` → เปิดkiosk → inputพร้อม → ตั้งkeyboardENGและscannerEnter → ทดสอบEXPIREDก่อน
+- ยังไม่อ้างว่ากันยืมQRได้ หรือfullscreenเป็นOSlock; kioskdataretention/deviceconfigก่อนproductionยังต้องตกลง
+
+## ผลล่าสุด 23/10/2026 — Browser/API UAT
+
+- Fixturesผู้ใช้อนุมัติสร้างในDB: BLU-3 MEMBER และBLU-4 ADMIN; รหัสอยู่ `.local-db/role-uat-fixtures.json` protected/ignored ไม่ส่งSMS ไม่ใช้userpasswordหรือuserChromeprofile
+- Playwrightพร้อมใช้ใน `.local-db/role-browser`; สคริปต์role-browserทดสอบ177ผ่านและ1additionalsmokefail (OwnerdetailDBmemberไม่พบเนื่องจากmock)
+- ทดสอบOwnerpositiveผ่านการยกเฉพาะfixtureBLU-4ชั่วคราวแล้วคืนADMIN/revokesessions; MemberBLU-3ถูกเปลี่ยนADMIN→MEMBERผ่านOwnerAPIและguardของsessionเดิมเปลี่ยนจริง ไม่ลดสิทธิ์BLU-2
+- NegativeAuth/OTP75checksผ่านโดยใช้fixturechallenges/tickets ไม่มีSMS: wrong/expired/replay/purpose/scope/stalehash/newer/maxattempts, login5x401→429 และexpired/revokedsession
+- CouponIDORใช้foreignunusedfixtureจริงสองทิศ409และno consume; orderIDORใช้orderจริงของคนอื่น404 ไม่ใช่ทดสอบแต่IDที่ไม่มีอยู่; foreigncouponfixturesลบเฉพาะของรอบtestหลังตรวจ
+- StaffmockUI23subcasesผ่าน เหลือmobilecheckin390overflowที่แก้แล้วretetest20/20ผ่านทั้ง360/390/1440; ไม่ถือว่าUSB/cameraหรือrealcheckinผ่าน
+- แก้RewardsClientให้สมาชิกจริงดูcatalogแบบreadonly/mock0และปิดแลกทั้งhandler/button; แก้graphmigrationcollisionในbenefits; แก้lintด้วยtyping/asyncGET/useSyncExternalStore โดยไม่ปิดrules
+- Parentรันยืนยันล่าสุด: suite165/165,TypeScript,fulllint0/0ผ่าน `.local-db/final-test-2026-10-23.txt`; baseline21failเป็นประวัติ
+- ตรวจแต่ละรอบข้อมูลเดิม18ตาราง/Ownerจริง/เงินไม่เปลี่ยน คืนfixture rolesและrevoke test sessionsแล้ว ยกเว้นแถวsessions/loginlimitsของfixtureที่สร้างเพื่อtestและคงrevokedตามaudit; ไม่มีSMS/paidverify/orderใหม่
+- Scopegapที่ต้องติดตาม: Ownermemberdetailยังmock ไม่เห็นBLU-3DBจริง; upload/authpartial/paymentnegativeconcurrency/realcouponAPIreplay/ส่วนmockอื่นและhardwareยังไม่ครบ ดูรายงานmappedcasesใน `FINAL_TEST.md`
+
+## สรุปก่อนพักงาน 22/10/2026 — เริ่มอ่านตรงนี้
+
+- Checklistหลัก `FINAL_TEST.md`; งาน/จุดต่อพรุ่งนี้ใน `TODO.md` อัปเดตตามผลจริงแล้ว
+- Authผู้ใช้ผ่าน: OTPsetupครั้งแรก, signupใหม่, loginpasswordไม่ใช้OTP, logoutแล้ว/memberถูกป้องกัน, forgotpasswordOTPแล้วsessionเก่าหลุดและรหัสใหม่loginได้; รหัสเก่า/OTPnegative/APIlogout/backcacheยังไม่ทดสอบครบ
+- บัญชีปัจจุบัน `BLU-2` OWNER เบอร์จริงเดิม; `BLU-1`parkedและเก็บรายการ100บาท/5แต้มเดิมไว้ ไม่ย้ายข้อมูลโดยอัตโนมัติ ห้ามpark/promoteซ้ำจากสถานะเก่า
+- WelcomeFREE_ENTRYอายุ30วัน: แก้WALLET-01แล้วผู้ใช้เห็นwalletจริง,Cancelไม่consume,ใช้จริงได้1ครั้ง DBUSED/used1/checkins1/points0, refreshและloginใหม่ยังUSED
+- PasswordInputมีตาทุกช่องรวมconfirm/adminmock ผู้ใช้แจ้งเปิดปิดผ่าน; scopedtests8/8+TypeScript/lintผ่าน ยังไม่เหมารวมkeyboard/ทุกscreen
+- ชุดรวมก่อนพัก151testsผ่าน130ล้ม21; `.local-db/final-test-2026-10-22-close.txt`; fulllintรอบก่อน9errors7warningsยังค้าง ไม่ถือว่าระบบผ่านทุกqualitygate
+- พรุ่งนี้เริ่มrolematrixGuest/MEMBER/ADMIN/OWNER โดยเตรียมบัญชี/fixturesแยก ไม่ลดroleOwnerหลัก/ไม่ส่งSMSสุ่ม จากนั้นnegativeAuth/OTP/coupon, payment/browser/concurrency, scanner/ส่วนmock
+- ยังคงtestingไม่production ไม่จำเป็นต้องmigrateทุกโมดูลเพื่อเดโม ไม่เปลี่ยนDB/env/credentialsหรือส่งSMSในรอบบันทึกนี้
+
+## เตรียม REG-01 ด้วยเบอร์เดียว (2026-10-22)
+
+- ผู้ใช้อนุมัติแล้ว: สำรอง18ตาราง → parkเบอร์Owner `BLU-1` เป็น `TEST-PARKED-BLU-1` → revoke sessions/consume pending OTP/tickets ภายใน Serializable transaction
+- ตอนตรวจหลังพักเบอร์ก่อนสมัคร: เบอร์จริงยังไม่มีผู้ใช้ใหม่, active sessionsเก่า0, financialtables6ตารางตรงbackupทุกแถว ไม่ลบ/ย้ายประวัติชำระหรือแต้ม; ปัจจุบันสมัครBLU-2เสร็จแล้ว
+- Backup `.local-db/backup-2026-10-22T12-25-15.963Z`; operatorrecord `.local-db/owner-phone-uat.json`; helper `scripts/owner-phone-uat.mjs`
+- สมัครจริงผ่านOTPสำเร็จ: `BLU-2` created2026-10-22T12:31:44.662Z, password_set=true, roleMEMBERเดิม/statusPENDING/points0; FREE_ENTRY/WELCOME_REGISTRATION1แถว quota1 used0 AVAILABLE expiry2026-11-21T12:31:44.662Z อายุ30วัน
+- OperatorตรวจgenuineREGISTERchallenge/signup-ticketแล้ว promoteBLU-2เป็นOWNERตามผู้ใช้อนุมัติ; ไม่สร้างpassword/sessionหรือปลอมOTP ไม่มีการย้ายยอดซื้อ/5แต้มจากBLU-1มาบัญชีใหม่
+- REG-01/WELCOME-01ผ่าน; ภายหลังwalletUI/Cancel/redeem/logoutloginผ่านแล้วตามผลปิดรอบด้านบน เหลือroleUI/APIและnegativeที่ยังไม่ทดสอบ
+
+## Final Test รอบใหม่ (2026-10-22)
+
+- Checklist/UATและbugregisterหลักอยู่ `FINAL_TEST.md` แยก realDB/browser/mock/production ไม่ถือว่าofflineผ่านคือproductionผ่าน
+- SenderName `Blufit1`: ผู้ใช้ผ่านsetup/signup/passwordlogin/forgotpasswordจริงแล้ว; OTPnegative/rate-limitและdeploymentยังต้องทดสอบ
+- Baselineต้นวัน143/122/21; ปิดรอบหลังเพิ่มwallet/eye testsเป็น151/130/21; TypeScriptผ่าน fulllint9errors7warningsต้องแก้/retestก่อนsignoffส่วนเกี่ยวข้อง
+- เริ่มทดสอบร่วมกันจากสมัครใหม่ในprofileแยก ไม่ทับOwner session; ไม่ขอOTP/passwordผ่านแชต ไม่ยิงเบอร์สุ่ม ไม่สร้างรายการโอนเอง
+- บันทึกสถานะรอSenderNameในหัวข้อวันที่เก่าเป็นประวัติ; สถานะล่าสุดอ่านหัวข้อนี้
+
+## ขอบเขตปัจจุบัน: บัญชีทดสอบ ไม่ใช่ production
+
+- ผู้ใช้ยืนยันว่าปัจจุบันเป็นบัญชีทดสอบ; ไม่จำเป็นต้อง migrate ทุกโมดูลเพื่อทดลอง UI/เดโม
+- DB จริงกับ environment production เป็นคนละเรื่อง: Neon ปัจจุบันเก็บข้อมูลทดสอบได้ โดย Auth/การชำระจริง/สิทธิ์และแต้มที่เกิดจากการซื้อยังใช้ server DB เพื่อรักษาธุรกรรมและกันสลิปซ้ำ
+- Mock/localStorage ใช้ต่อสำหรับหน้าจอที่ยังไม่เชื่อมจริงได้ แต่ไม่ซิงก์ข้ามเครื่องและผู้ใช้แก้ข้อมูลได้ จึงห้ามใช้เป็นหลักฐานเงินหรือสิทธิ์จริง
+- ย้ายโมดูลเพิ่มเติมเมื่อจำเป็นต่อการทดสอบ flow ร่วมกัน เช่น ซื้อแล้วให้พนักงานเห็นสิทธิ์ผ่าน Check-in หรือรายรับเข้า Finance; ไม่ถือว่าบัญชีทดสอบต้องย้ายทุกอย่างทันที
+- ก่อนส่งมอบเปิดใช้จริง ต้องย้ายข้อมูลธุรกิจที่ใช้ร่วมกันและบังคับสิทธิ์จริงเข้า server/DB รวมถึงแยก config/ข้อมูลทดสอบกับ production; ยังไม่ได้สั่งย้ายหรือล้างบัญชีรอบอัปเดตเอกสารนี้
+
 ## Acceptance จริง: PromptPay 100 บาท และ paid replay (2026-10-10)
 
 - ตรวจ Neon ยืนยัน order `fa7ebd15-3951-4eed-914d-0c70f841458d` = PAID, amount 100 บาท, transRef `Acb0e9d77c0604926` ตรงสลิปที่ผู้ใช้ส่ง
@@ -26,10 +85,10 @@
 - Apply payment migration บน Neon สำเร็จครบ 5 ตาราง/9 functions พร้อม atomic snapshot guards, fixed search_path และ revoke PUBLIC execute; ข้อมูลเดิม 13 ตารางไม่เปลี่ยน Backup `.local-db/backup-2026-10-10T11-39-17.293Z` รายละเอียด `scripts/db-payments-deployment.md`
 - Validation: payment offline tests 30/30, TypeScript, scoped ESLint และ `pnpm build` ผ่าน; migration+SQL transactional fixture ผ่าน PostgreSQL WASM in-memory พร้อม rollback (minimal baseline ไม่ใช่ full Neon schema/concurrency)
 - ไม่มีการส่ง SMS, ตรวจสลิปเสียโควตา, โอนเงิน, ตั้งรหัสสมาชิกเดิม หรือแก้ยอดสมาชิกบน Neon รอบนี้
-- ขั้น acceptance ที่เหลือ: restart local server เพื่อโหลด env ใหม่; สร้าง order จริงก่อน โอนยอดตรงภายใน15นาที แล้วแนบสลิปผ่านหน้าซื้อ (ไม่ใช่ /test) ตรวจ PAID/expiry/แต้ม/ประวัติจาก DB และ replay ไม่เพิ่มสิทธิ์ซ้ำ; ยังไม่ผ่านเงินจริง end-to-end หรือ concurrency หลาย connections
+- Acceptance ล่าสุด: ผู้ใช้โอน100บาทและแนบสลิปผ่าน order จริงสำเร็จ ตรวจ DB เป็น PAID/expiry/5แต้มและ paid-finalizer replay ไม่เพิ่มสิทธิ์ซ้ำแล้ว (ดูหัวข้อ Acceptance จริง); ยังต้องทดสอบ browser negative cases และ concurrency หลาย connections
 - `.env.local` ตั้ง payment key จาก branch key ที่ทดสอบแล้ว, strategy EASYSLIP_V2_REGISTERED_ACCOUNT และ enable=true โดยไม่เปิดเผยค่า key ไม่ได้ตั้งค่า Vercel ให้
 
-> ตอนนี้ยังไม่พร้อม production: Register และ OTP ต่อ Neon แล้ว; มีสมาชิกทดลอง 1 ราย (`BLU-1`) ที่ตั้งบทบาทเป็น OWNER ใน Neon แล้ว; ยังไม่ได้ทดสอบสิทธิ์ครบทุก flow; Account/ธุรกรรมส่วนใหญ่ยังเป็น mock/localStorage, SMS ยังรอ Sender Name; เปิดรับเงินเฉพาะ local ทดลองผ่าน real payment flow แล้ว ยังไม่ผ่าน acceptance/ไม่เปิด production ห้ามใช้ข้อมูล mock เป็นหลักฐานการชำระเงินหรือสิทธิ์เข้าใช้
+> ตอนนี้ยังไม่พร้อม production: Register และ OTP ต่อ Neon แล้ว; มีสมาชิกทดลอง 1 ราย (`BLU-1`) ที่ตั้งบทบาทเป็น OWNER ใน Neon แล้ว; ยังไม่ได้ทดสอบสิทธิ์ครบทุก flow; Account/ธุรกรรมส่วนใหญ่ยังเป็น mock/localStorage, SMSตั้งรหัสครั้งแรก/loginOwnerผ่านแล้วแต่ยังต้องทดสอบครบ; เปิดรับเงินเฉพาะ local ทดลองผ่าน real payment flow และผ่าน happy-path acceptance แล้ว ยังไม่ผ่าน acceptance ทุกเคส/ไม่เปิด production ห้ามใช้ข้อมูล mock เป็นหลักฐานการชำระเงินหรือสิทธิ์เข้าใช้
 
 ## สถานะบริการล่าสุด (2026-10-09)
 

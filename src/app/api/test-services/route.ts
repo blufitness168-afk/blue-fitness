@@ -4,6 +4,27 @@ import { v2 as cloudinary } from "cloudinary";
 import { getCurrentMember } from "@/lib/auth/server";
 import { serviceBalance, testServiceAction } from "@/lib/test-service-actions";
 import { sameOrigin } from "@/lib/auth/http";
+import { z } from "zod";
+
+interface ServiceResult {
+  status: "SUCCESS" | "ERROR";
+  latencyMs: number;
+  data?: Record<string, unknown>;
+  error?: string;
+}
+
+const smsPayload = z.object({ remaining_credit: z.unknown().optional() }).passthrough();
+const linePayload = z.object({
+  displayName: z.string().optional(), basicId: z.string().optional(),
+  premiumId: z.string().optional(), pictureUrl: z.string().optional(),
+  chatMode: z.string().optional(), markAsReadMode: z.string().optional(),
+});
+
+function failureMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.name === "TimeoutError"
+    ? `${fallback} (request timed out)`
+    : fallback;
+}
 
 // Configure Cloudinary
 if (
@@ -22,7 +43,7 @@ if (
 export async function GET() {
   const member = await getCurrentMember();
   if (member?.role !== "OWNER") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  const results: Record<string, any> = {};
+  const results: Record<string, ServiceResult> = {};
 
   // 1. Neon Database Test
   const dbStart = Date.now();
@@ -39,11 +60,11 @@ export async function GET() {
         version: dbRes[0]?.pg_version?.split(" ")[0] || "PostgreSQL",
       },
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     results.database = {
       status: "ERROR",
       latencyMs: Date.now() - dbStart,
-      error: error.message || "Database connection failed",
+      error: failureMessage(error, "Database connection failed"),
     };
   }
 
@@ -66,11 +87,11 @@ export async function GET() {
         pingResult: pingRes.status || "ok",
       },
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     results.cloudinary = {
       status: "ERROR",
       latencyMs: Date.now() - cldStart,
-      error: error.message || "Cloudinary ping failed",
+      error: failureMessage(error, "Cloudinary ping failed"),
     };
   }
 
@@ -96,7 +117,8 @@ export async function GET() {
       headers: { Authorization: `Basic ${authHeader}` },
       cache: "no-store", signal: AbortSignal.timeout(12000),
     });
-    const smsData = await smsRes.json().catch(() => ({}));
+    const smsBody: unknown = await smsRes.json().catch(() => ({}));
+    const smsData = smsPayload.parse(smsBody);
 
     results.thaibulksms = {
       status: smsRes.ok ? "SUCCESS" : "ERROR",
@@ -106,13 +128,13 @@ export async function GET() {
             credit: JSON.stringify(smsData?.remaining_credit ?? null),
             raw: smsData,
           }
-        : { statusCode: smsRes.status, message: smsData?.error?.message || "ThaiBulkSMS authentication failed" },
+        : { statusCode: smsRes.status, message: "ThaiBulkSMS authentication failed" },
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     results.thaibulksms = {
       status: "ERROR",
       latencyMs: Date.now() - smsStart,
-      error: error.message || "Failed to reach ThaiBulkSMS API",
+      error: failureMessage(error, "Failed to reach ThaiBulkSMS API"),
     };
   }
 
@@ -128,7 +150,8 @@ export async function GET() {
       cache: "no-store", signal: AbortSignal.timeout(12000),
     });
 
-    const lineData = await lineRes.json();
+    const lineBody: unknown = await lineRes.json();
+    const lineData = linePayload.parse(lineBody);
     results.line = {
       status: lineRes.ok ? "SUCCESS" : "ERROR",
       latencyMs: Date.now() - lineStart,
@@ -141,13 +164,13 @@ export async function GET() {
             chatMode: lineData.chatMode,
             markAsReadMode: lineData.markAsReadMode,
           }
-        : { statusCode: lineRes.status, message: lineData.message || "Invalid LINE Channel Access Token" },
+        : { statusCode: lineRes.status, message: "Invalid LINE Channel Access Token" },
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     results.line = {
       status: "ERROR",
       latencyMs: Date.now() - lineStart,
-      error: error.message || "Failed to reach LINE Messaging API",
+      error: failureMessage(error, "Failed to reach LINE Messaging API"),
     };
   }
 

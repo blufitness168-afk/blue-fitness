@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import PasswordInput from "@/components/PasswordInput";
 
 type Mode = "LOGIN" | "PASSWORD_SETUP" | "PASSWORD_RESET";
 export default function LoginPage() {
@@ -56,10 +57,10 @@ export default function LoginPage() {
             <input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ""))} required className="w-full border rounded-xl p-3" />
           </label>}
           {(mode === "LOGIN" || ticket) && <label className="block">รหัสผ่าน{ticket ? "ใหม่ (10–128 ตัวอักษร)" : ""}
-            <input type="password" autoComplete={ticket ? "new-password" : "current-password"} minLength={ticket ? 10 : 1} maxLength={128} value={password} onChange={e => setPassword(e.target.value)} required className="w-full border rounded-xl p-3" />
+            <PasswordInput key={`${mode}:${Boolean(ticket)}`} autoComplete={ticket ? "new-password" : "current-password"} minLength={ticket ? 10 : 1} maxLength={128} value={password} onChange={e => setPassword(e.target.value)} required className="w-full border rounded-xl p-3" />
           </label>}
           {ticket && <label className="block">ยืนยันรหัสผ่านใหม่
-            <input type="password" autoComplete="new-password" maxLength={128} value={confirmation} onChange={e => setConfirmation(e.target.value)} required className="w-full border rounded-xl p-3" />
+            <PasswordInput visibilityLabel="รหัสผ่านยืนยัน" autoComplete="new-password" maxLength={128} value={confirmation} onChange={e => setConfirmation(e.target.value)} required className="w-full border rounded-xl p-3" />
           </label>}
           {message && <p role="status" className="text-sm text-rose-700">{message}</p>}
           <button disabled={loading} className="w-full btn-gold rounded-xl p-3 disabled:opacity-50">{loading ? "กำลังดำเนินการ..." : mode === "LOGIN" ? "เข้าสู่ระบบ" : ticket ? "บันทึกรหัสผ่าน" : challengeId ? "ยืนยัน OTP" : "รับ OTP"}</button>

@@ -63,8 +63,11 @@ test("sessions store unique token hashes with member FK, expiry and revocation",
   const config = getTableConfig(authSessions);
   assert.equal(config.name, "auth_sessions");
   assert.deepEqual(columnNames(authSessions), [
-    "id", "member_id", "token_hash", "expires_at", "revoked_at", "created_at",
+    "id", "mode", "device_id", "member_id", "token_hash", "expires_at", "revoked_at", "created_at",
   ]);
+  assert.equal(authSessions.mode.default, "NORMAL");
+  assert.equal(authSessions.mode.notNull, true);
+  assert.equal(authSessions.deviceId.notNull, false);
   assert.equal(authSessions.tokenHash.isUnique, true);
   assert.equal(authSessions.memberId.notNull, true);
   assert.equal(authSessions.expiresAt.notNull, true);

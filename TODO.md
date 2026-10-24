@@ -1,8 +1,85 @@
-# 📋 MASTER TODO: Blu Fitness (อัปเดตสถานะ 26/09/2026)
+# 📋 MASTER TODO: Blu Fitness (อัปเดตสถานะ 24/10/2026)
+
+## Kiosk USB ล่าสุด — 24 ต.ค. 2026
+
+- [x] ADMIN/OWNERใช้บัญชีเดิมเข้าKioskเข้าอย่างเดียว; เปลี่ยนsessionmodeฝั่งDB/ล็อกnormalroutes/APIs ออกด้วยpassword ไม่ใช่ซ่อนเมนูเฉยๆ
+- [x] Enterท้ายรหัส, samecode3วินาทีfrontend+DB, atomicUUID replay/concurrency, no checkout/no points, คนละcodeไม่ติดglobalcooldown
+- [x] ตรวจpaid DB/timeSlotหรือwelcomeFREE_ENTRY1ครั้ง ไม่อาศัยmock/ไม่สร้างPAIDปลอม; review+applymigrationพร้อมbackupแล้ว
+- [x] Browser/API TEMPผ่าน58checksและ1assertionredirectmismatchที่/testยังdenyถูก; runtimeerrors0 ผู้ใช้จริงและ20ตารางเดิมไม่เปลี่ยนหลังcleanup
+- [x] QRทดสอบ: BLU-5ผ่านฟรี1ครั้ง/BLU-6หมดอายุ พร้อมPNG/SVGใน.local-db/kiosk-qr; ไม่เคยถูกautomationconsume
+- [x] Suite169/169,TypeScript,fulllintผ่าน
+- [ ] HardwareUAT: สแกนBLU-6ก่อน แล้วBLU-5และbounce3วิ/ใช้ซ้ำ/ออกkioskpasswordจริง ดูKIOSK-01..12ในFINAL_TEST.md
+- [ ] ยอมรับข้อจำกัดQRคงที่ส่งต่อได้/ไม่มีการพิสูจน์ตัวบุคคล และตั้งbrowser/OSkioskสำหรับไม่มีคนเฝ้าแยกจากfullscreen
+
+
+## ผลทดสอบอัตโนมัติล่าสุด — 23 ต.ค. 2026
+
+- [x] สร้างบัญชีทดสอบโดยได้รับอนุมัติ: `BLU-3` MEMBER / `BLU-4` ADMIN พร้อม password hash; ไม่ส่งSMSไปเบอร์ทดสอบ ไม่แก้Ownerจริง `BLU-2` หรือประวัติ `BLU-1`
+- [x] ตั้งPlaywrightใน `.local-db/role-browser` และรันChromeแยกจากของผู้ใช้ มีภาพ/รายงาน ไม่ต้องใช้BrowserMCP
+- [x] ทดสอบGuest/Member/Staff/Ownerfixture ผ่านเมนู/URL/API, roleเปลี่ยนผ่านAPIแล้วsessionเดิมเห็นผล, protectOWNER, CSRFและIDORตามroutesที่ตรวจ
+- [x] Rolebrowserchecks177ผ่าน มี1smokefailที่ยังเป็นscopegap: OwnerเปิดdetailสมาชิกDBใหม่ไม่พบเพราะอ่านmock ไม่ใช่permissionbypass ดู `FINAL_TEST.md`
+- [x] Auth/OTPnegativeผ่าน75checks: wrong/expired/consumed/maxattempts/newer/stalehash, ticketpurpose/scope/replay, login5x401→429, expired/revokedsession; ใช้DBfixtures ไม่ส่งSMS
+- [x] StaffmockCRUD/grant/Cancel/redeem/reload, coupon7types/units, promo/rewardcatalogและcheckinmanualผ่านตาม23subcases ไม่ถือว่าallrecipientscommit/rewardspend/hardwareผ่าน
+- [x] แก้ร้านรางวัลของสมาชิกจริงให้ดูcatalogread-onlyได้ ไม่เอาแต้มDBไปแลกผ่านmock
+- [x] แก้migrationmockdefinitions/grants/batchesที่code/IDชนให้graphสอดคล้อง คงข้อมูลเดิม ไม่resetสิทธิ์ พร้อมregressiontests
+- [x] แก้checkinmobileoverflow; browserretetest360/390/1440และAutoScanว่าง20/20ผ่าน ตาราง/กราฟยังเลื่อนในcontainer
+- [x] ชุดtestsทั้งหมด165/165ผ่าน, TypeScriptผ่าน, fulllint0errors0warnings; baseline21fail/9errorsเดิมปิดแล้ว
+- [ ] Ownerสมาชิกหลังบ้านยังmock: `/admin/members/BLU-3` ไม่พบสมาชิกDBจริง ต้องตัดสินขอบเขตread-only/เชื่อมDBเมื่อจำเป็น ไม่ถือว่าพร้อมproduction
+- [ ] ยังเหลือAuth/APIบางส่วนเช่นupload/checkoutCSRFและlocalStorageforgery, realcouponAPIreplay, paymentnegative/concurrency, profile/Finance/benefitsที่ยังไม่ได้ครอบคลุม
+- [ ] ผู้ใช้ช่วยเมื่อพร้อม: USBscannerจริง/กล้องจริง และโอนเงินเฉพาะเคสที่ต้องการสลิปใหม่; Agentยังทดสอบส่วนอื่นต่อเองได้
+
+**บัญชีหลังcleanup:** `BLU-3=MEMBER`, `BLU-4=ADMIN`, sessionทดสอบrevoked; `BLU-2`ยังOWNERเดิม การเงินจริง/coupon/checkinของผู้ใช้ไม่เปลี่ยน Credentialsfixturesอยู่protectedignored file ไม่ลงGit/แชต
+
+**หลักฐาน:** `FINAL_TEST.md`, `.local-db/role-uat-2026-10-23T08-21-15.656Z/`, `.local-db/auth-negative-uat-2026-10-23T08-28-07.144Z/`, `.local-db/staff-mock-uat-2026-10-23T08-56-13.102Z/combined-coverage.md`, `.local-db/checkin-layout-2026-10-23T09-08-02.170Z/report.md`, `.local-db/final-test-2026-10-23.txt`
+
+---
 
 เอกสารวางแผนและติดตามสถานะการพัฒนา: **ไล่ทำตามลำดับ Requirement จากการประชุมล่าสุด พร้อมเตรียมต่อยอดสู่ระบบจริง**
 
-> **สถานะปัจจุบัน (อัปเดต 26 ก.ย. 2026):**
+## ประวัติสถานะ / ขอบเขตช่วงทดสอบ (22 ต.ค. 2026 — ผลล่าสุดดูด้านบน)
+
+- Final Test/UAT รวมทุกโมดูลและ scope gaps ดู `FINAL_TEST.md` ใช้เป็น checklist หลักของรอบร่วมกัน; HISTORY ไม่ใช่ PASS รอบปัจจุบัน
+
+- ขณะนี้เป็นบัญชีและสภาพแวดล้อม **ทดสอบ ยังไม่ production**; ไม่จำเป็นต้องย้ายทุกโมดูลเข้า DB เพื่อทดสอบ UI หรือสาธิต flow
+- Auth/session/รหัสผ่าน, คูปองแรกสมัคร และการชำระจริง/วันหมดอายุ/แต้มใช้ Neon แล้ว แม้เป็นบัญชีทดสอบ เพราะต้องตรวจธุรกรรมและป้องกันใช้สลิปซ้ำ
+- EasySlip v2 ผ่านชำระจริง 100 บาทด้วย PromptPay: PAID, เพิ่มสิทธิ์รายวันและ 5 แต้ม; ทดสอบ paid-finalizer replay บน Neon สองครั้งไม่เพิ่มวัน/แต้มซ้ำ รายละเอียดใน `MANUAL_CHECK.md`
+- ผู้ใช้ 3 ระดับ MEMBER/ADMIN/OWNER; พนักงานจัดการได้เฉพาะประวัติบริการ, รางวัล, โค้ดส่วนลด, คูปอง มี server guards แล้ว ยังต้องทดสอบ browser/API ทุกระดับครบ
+- SMS Sender Name `Blufit1` ใช้งานใน local แล้ว: ผู้ใช้ผ่าน OTPตั้งรหัสครั้งแรก, สมัครใหม่, loginด้วยเบอร์+passwordโดยไม่ขอOTP, logout/direct/member guard และลืมรหัสแล้วsessionเก่าถูกยกเลิก; ยังเหลือ OTPnegative/APIsecurity/deployment acceptance
+- บัญชีใช้งานต่อพรุ่งนี้: `BLU-2` เป็น OWNER ใช้เบอร์จริงและรหัสล่าสุดที่ผู้ใช้ตั้งเอง; `BLU-1` ถูกพักเบอร์เป็น `TEST-PARKED-BLU-1` และ revoke sessionแล้ว ประวัติซื้อ100บาท/5แต้มยังเก็บอยู่บัญชีเก่า ไม่ลบ/ย้ายให้อัตโนมัติ
+- สมัคร `BLU-2` ได้ FREE_ENTRY1ครั้งอายุ30วันจริง; walletหลักแก้ให้แสดงDBแล้ว ผู้ใช้ผ่านยกเลิกก่อนใช้, ใช้จริง, refreshและlogout/loginแล้วยังUSED; DBused1/checkins1/points0 ไม่เติมแต้มจากคูปอง
+- เพิ่มรูปตาทุกช่องpassword/confirmทั้งสมาชิกและหลังบ้านแล้ว ผู้ใช้แจ้งเปิดปิดผ่าน; testsยืนยันปุ่มไม่submit/ไม่เปลี่ยนค่า ยังไม่ถือว่าkeyboardและทุกหน้าผ่านครบ
+- ข้อมูล admin/profile, Check-in, rewards, promo/coupons ทั่วไป และ Finance ยังมี mock/localStorage; ย้ายเฉพาะส่วนที่ต้องการทดสอบข้ามเครื่องหรือเชื่อม flow จริงก่อน ไม่เร่ง migrate ทุกอย่างในรอบทดสอบนี้
+- ก่อนเปิดใช้จริง ต้องย้ายข้อมูลธุรกิจที่ใช้ร่วมกัน/มีผลต่อสิทธิ์หรือเงินไปฝั่งเซิร์ฟเวอร์, เชื่อมหน้าร้านและ Finance, เปลี่ยนบัญชีรับเงินเป็นของร้าน, ทำ acceptance/security/production deployment
+
+### Final Test — ผลปิดรอบ 22/10/2026
+- [x] OTPตั้งรหัสครั้งแรก → password loginOwner
+- [x] สมัครใหม่ด้วยเบอร์เดิมที่พักบัญชีเก่าแล้ว → profile/password/sessionจริง → welcomeFREE_ENTRY1ครั้ง30วัน
+- [x] สมัครเบอร์ซ้ำผ่านAPIถูกปฏิเสธ409 ไม่มีสมาชิก/คูปองซ้ำ; UIduplicateยังไม่retest
+- [x] walletหลักแสดงcouponDBจริงหลังแก้WALLET-01; ไม่ใช้emptyจากmockกลบคูปองจริง
+- [x] ยกเลิกใช้couponไม่consume; ใช้จริงได้1ครั้ง checkins1/points0; refreshและloginใหม่ยังUSED/ไม่มีปุ่มซ้ำ
+- [x] logoutแล้ว/memberกลับlogin; loginpasswordไม่ขอOTP
+- [x] ลืมรหัสด้วยOTP → ตั้งรหัสใหม่ → sessionเก่าหลุด → passwordใหม่เข้าได้
+- [x] ปุ่มตาเปิด/ปิดpassword ผู้ใช้retestผ่าน; ค่าเริ่มต้นซ่อนและไม่submitจากcomponenttests
+- [x] TypeScriptและfocusedtestsล่าสุดผ่าน; รายละเอียดข้อจำกัด/หลักฐานใน `FINAL_TEST.md`
+- [ ] ตรวจรหัสเก่าเข้าไม่ได้, OTPผิด/หมดอายุ/ใช้ซ้ำ/quotas, APIใช้คูปองซ้ำ และback-cacheหลังlogout
+- [ ] ทดสอบสิทธิ์3ระดับผ่าน UI/URL/API โดยไม่ลดroleOwnerหลักหรือยิงSMSเบอร์สุ่ม
+- [ ] ทดสอบpaymentnegative/browser/concurrencyเพิ่มเติม ไม่ต้องโอนใหม่ทุกเคส; happy-pathและDBpaidreplayผ่านรอบก่อน
+- [ ] Check-in/scanner/camera, profile/rewards/promo/couponAdmin/Finance mock และmobile/keyboardUXที่ยังไม่ทดสอบ
+- [ ] แก้และretestbenefits suite21failures และfulllint9errors7warnings
+
+**Automated suiteก่อนพักงาน:** 151เคส ผ่าน130 ล้ม21 (ไม่ซ่อนfail/ไม่อ้างว่าผ่านทั้งหมด) รายงาน `.local-db/final-test-2026-10-22-close.txt`; 143/122/21คือbaselineก่อนเพิ่มwallet/eye tests
+
+### สรุปงานค้างที่ผู้ใช้ยืนยัน
+
+**รอบทดสอบนี้:** ทำรายการที่ยังไม่ติ๊กใน Final Test ต่อ ไม่ต้องย้ายทุกโมดูลเข้าDBเพื่อเดโม; mockทดสอบUXได้ แต่ตรวจเงินจริง/สิทธิ์ร่วมกันต้องใช้serverDB
+
+**ก่อน production:** ย้ายข้อมูลธุรกิจที่ยังเป็น mock และเชื่อม Check-in/Finance กับการซื้อจริง, เปลี่ยนบัญชีรับเงินเป็นของร้าน, ตั้งค่าและทดสอบ Vercel/โดเมนจริง, ทำ LINE ตามขอบเขตงาน, ปิดหน้าทดสอบ, จัดการข้อมูลทดลองและคู่มือ
+
+**เริ่มพรุ่งนี้:** เปิด `FINAL_TEST.md` แล้วเริ่ม ROLE-01 ถึง ROLE-12 (Guest/MEMBER/ADMIN/OWNER) ก่อนกลับไปnegative Auth/OTP/coupon และpayment; เตรียมบัญชี/fixturesแยกที่มีแผนrecovery ไม่เปลี่ยนrole/ลบOwner `BLU-2` โดยไม่อนุมัติ ไม่ต้องสมัครใหม่หรือตั้งรหัสใหม่อีกรอบ
+
+**ข้อจำกัดคงเดิม:** ไม่มีBrowserMCPโดยตรง; Playwrightสำหรับรอบนี้ยังไม่ติดตั้ง/ไม่ได้ใช้ควบคุมbrowser ข้อที่ผู้ใช้ทำถือUSER_PASSเฉพาะขั้นที่รายงาน ไม่เหมาว่าครบทุกbrowsercase
+
+> **ประวัติสถานะ UI mock (26 ก.ย. 2026 ไม่ใช่สถานะล่าสุด):**
 > — ของเดิมที่มี: ธีม, หน้าแพ็กเกจ, ฟอร์มสมัคร, Reward Shop, Admin Dashboard และระบบ Check-in / Rewards / Promo Codes / Coupons แบบ browser-only mock
 > — หน้า Admin Members / Check-in / Rewards / Promo Codes / Coupons / Finance ใช้งาน flow หลักได้แล้ว
 > — Check-in มี Auto Scan สำหรับเครื่อง USB Keyboard Wedge: เปิดโหมดแล้วรับรหัสสมาชิกพร้อม Enter, ดูประวัติวันนี้ และสลับเข้า/ออกอัตโนมัติ พร้อมสถานะกำลังทำงาน
@@ -165,34 +242,42 @@
 ---
 
 ### 🔌 8. การเชื่อมต่อระบบจริง (Backend Wiring & Database Integration)
-- [ ] **8.0 Auth และสิทธิ์ผู้ใช้ 4 ระดับ (Guest / Member / Admin / Owner):**
-  - [x] ตั้งบัญชี `BLU-1` เป็น Owner แรกใน Neon; ผู้ว่าจ้างยังต้องยืนยันว่าเป็นบัญชีของเจ้าของกิจการ
+- [ ] **8.0 Auth และสิทธิ์ผู้ใช้ 3 ระดับ (Member / พนักงาน Admin / Owner; Guest คือยังไม่ล็อกอิน):**
+  - [x] Ownerทดสอบปัจจุบัน `BLU-2`; เก็บ `BLU-1` ที่พักเบอร์พร้อมประวัติเงินจริงไว้; Ownerของร้านก่อนproductionยังต้องยืนยันแยก
   - [x] เตรียม schema role/OTP hash/session/signup ticket; เพิ่ม API ขอ/ยืนยัน OTP, สมัครสมาชิกใหม่, ออกจากระบบ และ Owner ตั้ง/ปลด Admin; ตั้ง `BLU-1` เป็น OWNER ใน Neon ตามคำขอ
   - [x] ป้องกันหน้า Account, Admin และ Finance ฝั่งเซิร์ฟเวอร์; หน้า Login เลิกยอมรับรหัส mock
   - [x] เชื่อม flow สมัครและ OTP เข้าฐานข้อมูล Neon; upload รูปสมัครหลังยืนยันตัวตนและตรวจสิทธิ์
-  - [ ] ย้ายข้อมูล Account/ธุรกรรม Admin กับ DB จริง; ตรวจทุก API และทดสอบ OTP/SMS จริงกับผู้ว่าจ้าง
-  - [ ] Guest ยังไม่ login: ไม่มีหน้า Account และเข้า Admin ไม่ได้
-  - [ ] Member: มีหน้า Account ของตนเอง แต่เข้า Admin ไม่ได้
-  - [ ] Admin (พนักงาน): มีหน้า Account และเมนู Admin ยกเว้นการเงิน; เข้า `/admin/finance` โดยตรงไม่ได้
-  - [ ] Owner: มีหน้า Account และเมนู Admin รวมถึง `/admin/finance`
-  - [ ] ตรวจสิทธิ์ฝั่งเซิร์ฟเวอร์ทั้งหน้าและ API ที่เกี่ยวข้อง ไม่พึ่งแค่การซ่อนเมนู; ของปัจจุบันยังเป็น mock
+  - [x] ทดสอบAuth/SMS happy-pathจริงร่วมผู้ใช้: setup/register/login/logout/resetและwelcomecoupon ผ่านตาม `FINAL_TEST.md`
+  - [ ] ย้ายAccount/ธุรกรรมAdminส่วนที่จำเป็นกับDBจริง; API/OTPnegativeและrolematrixยังต้องทดสอบ
+  - [x] Guestถูกป้องกันAccount/Adminผ่านPlaywrightจริง; APIที่ทดสอบไม่คืนข้อมูล
+  - [x] Memberเข้าหน้าตนได้และถูกปฏิเสธAdmin/OwnerAPIsที่ทดสอบด้วยบัญชีBLU-3
+  - [x] Implemented พนักงาน: เฉพาะ `/admin/checkin`, `/admin/rewards`, `/admin/promo-codes`, `/admin/coupons` พร้อม server guards และกรองเมนู
+  - [x] StaffBLU-4 เข้าได้สี่เมนูเท่านั้น ไม่เข้าMembers/Overview/Finance/OwnerAPIsผ่านURL/APIจริง
+  - [x] Ownerfixtureเข้าหน้าAccountและทุกเมนูAdmin/Finance/testได้ โดยคืนrolefixtureหลังtest; detailของสมาชิกDBใหม่ยังไม่เชื่อมmock
+  - [ ] ทดสอบสิทธิ์ฝั่งเซิร์ฟเวอร์ทุกหน้า/API ไม่พึ่งการซ่อนเมนู; guards มีแล้ว แต่ CRUD mock บางส่วนยังอยู่ใน browser
 - [ ] **8.1 Database Migration (Neon PostgreSQL + Drizzle ORM):**
   - [x] เพิ่ม schema role/OTP/session และรัน `pnpm db:push` บน Neon ที่ `public` เดิมไม่มีตาราง (ยังต้อง migrate domain schema mock ให้ครบก่อน production)
 - [ ] **8.2 เชื่อมต่อ Third-Party APIs:**
-  - [ ] ThaiBulkSMS (OTP): 2026-10-09 อ่านเครดิตได้ แต่ส่งทดสอบ HTTP 400; ผู้ใช้กำลังขอ Sender Name รอผู้ให้บริการอนุมัติ พักทดสอบส่งจริงแล้วทดสอบครบวงจรหลังอนุมัติ
-  - [ ] EasySlip API (ตรวจสลิปอัตโนมัติ): ทดสอบจริงผ่าน `/test` สำเร็จ HTTP 200 และโควตาลด 1 ครั้งแล้ว; ยังต้องเชื่อมการชำระจริง ตรวจผู้รับ/ยอด/เวลา ป้องกันสลิปซ้ำ และเพิ่มสิทธิ์ใน transaction
+  - [x] ThaiBulkSMSเชื่อมและส่งOTPจริงผ่าน setup/register/resetแล้ว (Sender `Blufit1`); HTTP400เมื่อ2026-10-09เป็นประวัติ
+  - [x] OTP/ticketnegativeผ่านlocalAPIด้วยDBfixtures และloginrate-limit5x401→429; ไม่ส่งSMS
+  - [ ] SMSrequestquotas/providerfailureและdeploymentจริง ยังไม่ถือว่าทุกsecuritycaseผ่าน
+  - [x] EasySlip v2: เชื่อม order/QR/ตรวจผู้รับบัญชีธนาคารและ PromptPay/ยอด/เวลา/transRef และเพิ่มวัน/แต้มแบบ transaction; migration บน Neon แล้ว; ผู้ใช้ชำระจริง 100 บาทสำเร็จและ paid replay ไม่เพิ่มสิทธิ์ซ้ำ
+  - [ ] Payment acceptance เพิ่ม: negative/browser/concurrency และทดสอบ deployment จริง ไม่ถือว่าผ่าน production ทุกเคส
   - [ ] Cloudinary (อัปโหลดรูปภาพ)
   - [ ] LINE Messaging API (แจ้งเตือนหมดอายุผ่าน LINE OA `@816hbkyl`)
 
 ---
 
-### 🚀 9. เช็กลิสต์ส่งมอบงานจริง (Production Handover Checklist)
+### 🚀 9. เช็กลิสต์เปิดใช้จริง / ส่งมอบ Production (ยังไม่บังคับทำครบเพื่อเดโมบัญชีทดสอบ)
+- [ ] ย้ายข้อมูลสมาชิก/Check-in/สิทธิ์/รางวัล/โปร/คูปองทั่วไป/Finance ที่ใช้จริงร่วมกันเข้า DB และ server APIs; mock สำหรับเดโมยังคงใช้ได้เมื่อระบุชัด
+- [ ] เชื่อมรายรับจาก real payment orders เข้า Finance และสิทธิ์จริงเข้าระบบหน้าร้าน
+- [ ] ตั้งค่าและทดสอบ Vercel/โดเมนจริง, ปิด/ลบหน้าทดสอบชั่วคราว และจัดทำคู่มือ/backup
 - [ ] เปลี่ยนบัญชี PromptPay เป็นเบอร์ลูกค้า (`089-772-0282`) และเปลี่ยนชื่อบัญชี
 - [ ] ตรวจสอบการต่ออายุ EasySlip รายเดือน
 - [ ] ตรวจสอบเครดิต ThaiBulkSMS
 - [ ] เปลี่ยนรหัสผ่าน Admin และ Rotate Keys
 - [ ] โอนย้ายโปรเจกต์ Vercel สู่บัญชีลูกค้า (`blufitness168@gmail.com`)
-- [ ] ล้าง Mock Data ในฐานข้อมูล Neon
+- [ ] แยกหรือ archive ข้อมูลทดสอบก่อนเปิดจริงตามรายการที่อนุมัติ; ห้ามลบสมาชิก/หลักฐานชำระเงินจริงแบบกว้าง
 - [ ] ติดตั้ง Rich Menu บน LINE OA (`@816hbkyl`)
 
 ---

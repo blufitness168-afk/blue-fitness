@@ -2,7 +2,8 @@
 
 import CredentialTests from "./CredentialTests";
 import Image from "next/image";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { z } from "zod";
 import {
   Database,
   Cloud,
@@ -12,53 +13,76 @@ import {
   CheckCircle2,
   XCircle,
   RefreshCw,
-  Send,
-  Zap,
+
   ShieldCheck,
-  Activity,
-  ArrowRight,
+
 } from "lucide-react";
 
-interface ServiceResult {
-  status: "SUCCESS" | "ERROR" | "IDLE" | "TESTING";
-  latencyMs?: number;
-  data?: any;
-  error?: string;
+const serviceResultSchema = z.object({
+  status: z.enum(["SUCCESS", "ERROR", "IDLE", "TESTING"]),
+  latencyMs: z.number().optional(),
+  error: z.string().optional(),
+  data: z.object({
+    serverTime: z.string().optional(), version: z.string().optional(),
+    cloudName: z.string().optional(), message: z.string().optional(),
+    statusText: z.string().optional(), credit: z.union([z.string(), z.number()]).optional(),
+    pictureUrl: z.string().optional(), botName: z.string().optional(), basicId: z.string().optional(),
+  }).optional(),
+});
+const resultsSchema = z.object({
+  database: serviceResultSchema.optional(), cloudinary: serviceResultSchema.optional(),
+  easyslip: serviceResultSchema.optional(), thaibulksms: serviceResultSchema.optional(),
+  line: serviceResultSchema.optional(),
+});
+type ServiceResult = z.infer<typeof serviceResultSchema>;
+type ServiceResults = z.infer<typeof resultsSchema>;
+const testingResults: ServiceResults = {
+  database: { status: "TESTING" }, cloudinary: { status: "TESTING" },
+  easyslip: { status: "TESTING" }, thaibulksms: { status: "TESTING" },
+  line: { status: "TESTING" },
+};
+
+async function fetchResults(signal: AbortSignal): Promise<ServiceResults> {
+  try {
+    const res = await fetch("/api/test-services", { cache: "no-store", signal });
+    if (!res.ok) throw new Error("Diagnostics unavailable");
+    const body: unknown = await res.json();
+    return z.object({ results: resultsSchema }).parse(body).results;
+  } catch {
+    return Object.fromEntries(Object.keys(testingResults).map(key => [key, {
+      status: "ERROR", error: "ไม่สามารถอ่านสถานะระบบได้ กรุณาลองอีกครั้ง",
+    }]));
+  }
 }
 
 export default function TestServicesPage() {
-  const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<{
-    database?: ServiceResult;
-    cloudinary?: ServiceResult;
-    easyslip?: ServiceResult;
-    thaibulksms?: ServiceResult;
-    line?: ServiceResult;
-  }>({});
+  const [loading, setLoading] = useState(true);
+  const [results, setResults] = useState<ServiceResults>(testingResults);
+  const request = useRef<AbortController | null>(null);
 
   const runAllTests = async () => {
     setLoading(true);
-    setResults({
-      database: { status: "TESTING" },
-      cloudinary: { status: "TESTING" },
-      easyslip: { status: "TESTING" },
-      thaibulksms: { status: "TESTING" },
-      line: { status: "TESTING" },
-    });
-
-    try {
-      const res = await fetch("/api/test-services", { cache: "no-store" });
-      const data = await res.json();
-      setResults(data.results || {});
-    } catch (err: any) {
-      console.error("Test fetch error:", err);
-    } finally {
+    setResults(testingResults);
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
+    const nextResults = await fetchResults(controller.signal);
+    if (!controller.signal.aborted) {
+      setResults(nextResults);
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    runAllTests();
+    const controller = new AbortController();
+    request.current = controller;
+    void fetchResults(controller.signal).then(nextResults => {
+      if (!controller.signal.aborted) {
+        setResults(nextResults);
+        setLoading(false);
+      }
+    });
+    return () => request.current?.abort();
   }, []);
 
   const getStatusBadge = (res?: ServiceResult) => {
@@ -258,9 +282,12 @@ export default function TestServicesPage() {
                 <>
                   <div className="flex items-center gap-3">
                     {results.line.data?.pictureUrl && (
-                      <img
+                      <Image
                         src={results.line.data.pictureUrl}
                         alt="Bot Profile"
+                        width={40}
+                        height={40}
+                        unoptimized
                         className="w-10 h-10 rounded-full border border-emerald-500/50"
                       />
                     )}

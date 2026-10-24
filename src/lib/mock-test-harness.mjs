@@ -12,14 +12,15 @@ export function setupMock({ locks = true, storage = new Map() } = {}) {
     constructor(...args) { super(...(args.length ? args : [clock.now])); }
     static now() { return clock.now; }
   }
-  const failures = { read: false, write: false };
+  const failures = { read: false, write: false, writeKey: null };
   const writes = [], events = [], requests = [];
   const queues = new Map();
   const globals = {
     Date: MockDate, Intl, Error, structuredClone, crypto: { randomUUID }, performance: { now: () => 0 },
     localStorage: {
       getItem(key) { if (failures.read) throw new Error("denied"); return storage.get(key) ?? null; },
-      setItem(key, value) { if (failures.write) throw new Error("quota"); writes.push(key); storage.set(key, value); },
+      setItem(key, value) { if (failures.write || failures.writeKey === key) throw new Error("quota"); writes.push(key); storage.set(key, value); },
+      removeItem(key) { if (failures.write || failures.writeKey === key) throw new Error("quota"); writes.push(key); storage.delete(key); },
     },
     CustomEvent: class { constructor(type) { this.type = type; } },
     window: { dispatchEvent(event) { events.push(event.type); return true; } },
