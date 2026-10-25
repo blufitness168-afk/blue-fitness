@@ -2,6 +2,17 @@
 
 อัปเดต: 2026-10-24 | สภาพแวดล้อม: localhost + Neon บัญชีทดสอบ | ยังไม่ใช่ production sign-off
 
+## รอบทดสอบอัตโนมัติเพิ่ม — 24 ต.ค. 2026
+
+- **DBจริง installed schema/functions: 23 checksผ่าน** ผ่าน `scripts/real-modules-live-rollback-uat.mjs`: rewardscreate/redeem/stock/debit/replay/deliver, financeCRUD/version/audit/replay/role, friendcoupon grant/use/quota/guest/audit, bonusเพิ่มวันครั้งเดียว, cancel/deactivate, KIOSK/suspended/revokeddenial ทดสอบภายในsubtransactionแล้วrollback; hashข้อมูลทุกpublictableก่อน/หลังเหมือนเดิม ไม่มีPAID/SMS/providercalls ยกเว้นsequenceอาจขยับ
+- **Browser/APIจริงซ้ำ54/54ผ่าน** `.local-db/real-modules-browser-2026-10-24T12-19-35.941Z/`; temporaryaccounts/sessionsล้างแล้ว สมาชิก/points/visits/couponsเดิมไม่เปลี่ยน
+- **Native PostgreSQLหลายconnectionผ่าน8กลุ่ม** บนloopbackdisposableDB: stockสุดท้าย/debitreplay/delivery, duplicategrant/bonus, financesamekey/staleedit/delete, frontdeskwelcome replay, paymentclaim/transRef/paidreplay/packagecoupons, persistedpromoquotaสุดท้าย, rewardcatalogsave-vs-redeem4รอบ; ตรวจdistinctbackendPID ไม่ใช่WASM รายละเอียด `scripts/real-modules-local-postgres.md`; serverปิดและportclosedแล้ว ใช้libpqadapterไม่ใช่stockpsql และminimalbaseไม่ใช่schemaNeonเต็ม
+- **UI/security121/121ผ่าน** `.local-db/real-ui-security-2026-10-24T12-32-50.980Z/`: 75role/page/viewportที่360/390/1440, XSStext, APIrole/method/CSRF/tamper, ownsessionrevoke, paymentread403/networktimeout/retry/disabledwhilebusy; ไม่สร้างorderหรือส่งสลิปจากbrowser
+- พบบั๊กและแก้แล้ว: memberdetail360pxล้น379px → min-width/wrapping; PaymentModalย้ายfocusเข้าdialog/trapTab/Escape/คืนfocus/lockbodyscroll (Escapeไม่ปิดระหว่างกำลังทำคำขอ) ตรวจซ้ำ13failเดิมผ่านหมด
+- Regression230/230,TypeScript,lint,diffcheckผ่าน; lintignoreเฉพาะ `.local-db` ซึ่งเป็นdownloadedtools/database/buildcopies ไม่ใช่source
+- **สิ่งที่เหลือไม่ควรโยนให้ผู้ใช้:** coverageCRUDผ่านbrowserทุกstateยังไม่ครบแม้DBrollbackและAPIreadผ่าน, fullproduction-equivalentschema/load/poolและcontentionทุกแบบไม่ใช่สิ่งที่8racegroupsพิสูจน์, IDORexistingorderในbrowserและuploadproviderจริงยังไม่ได้เพิ่มในรอบนี้; ฟีเจอร์ขาดด้านล่างยังเป็นงานพัฒนา ไม่ใช่manualtestที่ผู้ใช้ต้องทำ
+- **ผู้ใช้ลงมือเฉพาะ:** อุปกรณ์จริงกล้อง/USBถ้าต้องยืนยันเพิ่มเติมและเครื่องที่จะติดตั้งจริง; ยืนยันกฎ/ราคา/ของแถมและอายุคูปอง; productionOTP/ธนาคารเมื่อพร้อม โดยเปลี่ยนบัญชีรับเงินร้านเป็นขั้นท้ายสุด ห้ามเปลี่ยน/โอนเพิ่มล่วงหน้า
+
 ## ระบบ DB จริง — ผลล่าสุด 24 ต.ค. 2026 (ใช้แทนสถานะ mock ด้านล่าง)
 
 - ผู้ใช้เปลี่ยนขอบเขตให้เลิก mock: สมาชิก/Dashboard/โปรไฟล์/wallet/rewards/checkin/finance/coupon/promo เชื่อมฐานข้อมูลจริงแล้ว; หน้า `/member/benefits` ไม่อ่าน browser business stores อีก

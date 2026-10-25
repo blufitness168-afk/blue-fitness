@@ -10,7 +10,9 @@
 - [x] Uploadsignature/streamlimit/atomicfirst-photo guards; testsไม่ส่งCloudinaryจริง
 - [x] Review/apply5migrationstransactionเดียว backup `.local-db/backup-2026-10-24T11-34-08.894Z`, ข้อมูลเดิม20ตารางไม่เปลี่ยน
 - [x] Tests230/230,TypeScript,lint,isolatedSQL/ACL,แยกproductionbuildผ่าน; browser/APIจริง54/54 runtimeerrors0 cleanupครบ
-- [ ] CRUD/race/replayของโมดูลใหม่บนPostgreSQLหลายconnectionและbrowserครบเส้นทาง ยังไม่อ้างจากWASMว่าproductionผ่าน
+- [x] DBจริงrollback23checksทุกtableไม่เปลี่ยน; browser/APIจริง54/54; UI/security121/121รวมแก้mobileoverflowและPaymentModalkeyboardครบ
+- [x] NativePostgreSQLหลายconnection8racegroupsผ่าน (rewards/benefits/finance/frontdesk/payment/promocapacity/catalogsave) ไม่ใช่WASM; ดูscripts/real-modules-local-postgres.md
+- [ ] เหลือcoverageเชิงวิศวกรรม: browserCRUDทุกstate/fullproduction-equivalentschema/load/pooling/contentionเพิ่ม ไม่ใช่งานที่ต้องให้ผู้ใช้ทำแทน
 - [ ] ฟีเจอร์ที่ยังไม่ครบ: เปลี่ยนเบอร์OTP, memberadmineditingที่ปลอดภัย, แลกคะแนนเป็นคูปอง, ผูกบัตรแข็ง, guestwalk-inไม่สมัครเต็ม, packagecatalogCRUD
 - [ ] Productionconfig/บัญชีรับเงินร้าน/productionOTPและacceptance; ไม่ย้ายlocalStorageเก่าเป็นเงินจริงโดยอัตโนมัติ
 

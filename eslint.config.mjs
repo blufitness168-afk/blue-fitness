@@ -9,6 +9,8 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    // Isolated databases, downloaded tools and production-build copies are not source.
+    ".local-db/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

@@ -35,6 +35,40 @@ function PaymentForm({ pkg, onClose }: { pkg: MockPackage; onClose: () => void }
   const [now, setNow] = useState(0);
   const lock = useRef(false);
   const requestKey = useRef<string | null>(null);
+  const dialog = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  useEffect(() => { close.current = onClose; }, [onClose]);
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const panel = dialog.current;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const controls = () => Array.from(panel?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), a[href], select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? []).filter(element => element.getClientRects().length > 0);
+    const focusFirst = () => (controls()[0] ?? panel)?.focus();
+    focusFirst();
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (!lock.current) close.current();
+      } else if (event.key === "Tab") {
+        const items = controls();
+        const first = items[0], last = items.at(-1);
+        if (!first) { event.preventDefault(); panel?.focus(); }
+        else if (!panel?.contains(document.activeElement) || (event.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+          event.preventDefault(); (event.shiftKey ? last : first)?.focus();
+        }
+      }
+    };
+    const focusin = (event: FocusEvent) => { if (panel && event.target instanceof Node && !panel.contains(event.target)) focusFirst(); };
+    document.addEventListener("keydown", keydown);
+    document.addEventListener("focusin", focusin);
+    return () => {
+      document.removeEventListener("keydown", keydown);
+      document.removeEventListener("focusin", focusin);
+      document.body.style.overflow = overflow;
+      if (previous?.isConnected) previous.focus();
+    };
+  }, []);
   const expired = !!order && now >= Date.parse(order.expiresAt);
   const uploadExpired = !!order && now >= Date.parse(order.uploadDeadline);
   const transfersEnabled = (order?.readiness ?? readiness).transfersEnabled;
@@ -110,7 +144,7 @@ function PaymentForm({ pkg, onClose }: { pkg: MockPackage; onClose: () => void }
     else throw Error("ระบบยังไม่ยืนยันการชำระ");
   }
   const button = "rounded-xl bg-blu-dark px-4 py-3 font-bold text-white disabled:opacity-40";
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-blu-dark/80 p-4" role="dialog" aria-modal="true" aria-labelledby="payment-title">
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-blu-dark/80 p-4" ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="payment-title">
     <div className="max-h-[92vh] w-full max-w-md space-y-4 overflow-y-auto rounded-3xl bg-white p-6 text-blu-dark">
       <header className="flex items-center justify-between"><h2 id="payment-title" className="text-lg font-black">ชำระแพ็กเกจ</h2><button aria-label="ปิด" onClick={onClose} disabled={busy}><X /></button></header>
       <p className="text-sm">{order?.package.name ?? pkg.name}</p>
