@@ -1,5 +1,14 @@
 # ชำระแพ็กเกจจริง — deployment / security runbook
 
+## ล่าสุด 2026-10-31 — กู้สลิปที่ติดบั๊ก currency764
+
+- `payment-policy.ts` รับTHB/'764'/764แล้วโดยตรวจamountเหมือนเดิม ไม่ลดreceiveridentity/เวลา/duplicatepolicy
+- Apply `20261031_payment_currency_recheck.sql` ด้วย `scripts/db-payment-currency-recheck.mjs` หลังreceiverbankfixแล้ว; อ่านtargetจาก.env.localที่ผู้ใช้ใช้เป็นproductionconfig, backup `.local-db/backup-2026-10-31T12-19-18.712Z`, data30tablesและfunctionsเดิมไม่เปลี่ยน
+- Ownerเปิดmodalพบpendingเดิม→เลือกไฟล์สลิปเดิม→กดปุ่ม **OWNER: ตรวจสลิปเดิมอีกครั้งหลังแก้สกุลเงิน (1 ครั้ง)**→ยืนยันใช้โควตา1ครั้ง ปุ่มเรียกprepareauditและverifyreconcileตามลำดับ ต้องdeploywebcodeล่าสุดก่อน
+- แค่installfunctionไม่เปิดattemptและไม่ตรวจprovider; ห้ามreopenด้วยUPDATEตรงหรือsetPAID ผู้ใช้อนุญาตquotaเพิ่มแล้วแต่ต้องใช้sessionและfileจริงในbrowser ไม่ใช้JSONจากแชตเป็นหลักฐานsettlement
+- งบOWNER_RECHECKใช้ร่วมฟังก์ชันเก่า หนึ่งครั้ง/order รองรับไฟล์hashเดิมหลังuploaddeadlineถ้าความพยายามแรกอยู่ในเวลา, จำนวนprovidercallsสูงสุด2 การprepareล้มต้องไม่เรียกverify ตรวจซ้ำล้มอีกให้reconcileกับผู้รับ ไม่โอนเพิ่ม
+- Tests239/239,Chromeintercept6/6,TypeScript/lint/buildผ่าน ยังไม่อ้างว่าเคสสลิปจริงPAIDจนproviderresponseจริงผ่านfinalizer
+
 ## ล่าสุด 2026-10-31 — รองรับธนาคารกรุงเทพ
 
 - แก้ hardcode BANK_ACCOUNT004 ใน finalizer ด้วย `20261031_payment_receiver_bank.sql` โดยเปลี่ยนเพียงguardให้ตรวจรูปแบบbankcodeของimmutable receiver snapshot; การเทียบevidencebank/identitybank/fullaccount/name/order/amountยังอยู่ครบ ไม่อนุมัติจากเลขmaskหรือชื่ออย่างเดียว

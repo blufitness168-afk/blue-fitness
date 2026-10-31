@@ -83,6 +83,10 @@ function PaymentForm({ pkg, onClose }: { pkg: MockPackage; onClose: () => void }
       const body = await response.json();
       if (!response.ok) throw Error(body.error ?? "กรุณาเข้าสู่ระบบ");
       if (active && body.readiness) setReadiness(body.readiness);
+      if (active) {
+        setOwnerRecheckAvailable(body.ownerRecheckAvailable === true);
+        setOwnerRecheckPrepared(body.ownerRecheckPrepared === true);
+      }
       if (active && body.pendingOrder) {
         setOrder(body.pendingOrder);
         setNotice("พบคำสั่งซื้อเดิม จึงแสดงรายการเดิมเพื่อป้องกันโอนซ้ำ กรุณาตรวจชื่อแพ็กเกจและยอดก่อนโอน");
@@ -128,16 +132,18 @@ function PaymentForm({ pkg, onClose }: { pkg: MockPackage; onClose: () => void }
     if (["PROCESSING", "UNKNOWN"].includes(body.verification?.state)) setNotice("กำลังตรวจหรือยังไม่ทราบผล ห้ามโอนซ้ำ ตรวจซ้ำได้ด้วยรูปเดิมหลัง 2 นาที สูงสุด 1 ครั้งเพิ่มเติม");
   }
   async function prepareRecheck() {
-    if (!order || !window.confirm("เปิดตรวจภาพเดิมหนึ่งครั้งเพื่อแก้บั๊ก PromptPay อาจใช้โควตาเพิ่ม ห้ามโอนซ้ำ ยืนยันหรือไม่?")) return;
-    const response = await fetch(`/api/admin/payments/${order.id}/recheck`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmed: true, reason: "PROMPTPAY_REGISTRATION_FIX" }) });
+    if (!order || !file) throw Error("กรุณาเลือกไฟล์สลิปเดิมก่อนเปิดตรวจซ้ำ");
+    if (!window.confirm("ตรวจสลิปเดิมอีก 1 ครั้งหลังแก้บั๊กสกุลเงินบาท อาจใช้โควตา EasySlip เพิ่ม ห้ามโอนเงินซ้ำ ยืนยันหรือไม่?")) return;
+    const response = await fetch(`/api/admin/payments/${order.id}/recheck`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmed: true, reason: "THB_NUMERIC_CURRENCY_FIX" }) });
     const body = await response.json();
     if (!response.ok) throw Error(body.error);
-    await refresh();
-    setNotice(body.message);
+    setOwnerRecheckAvailable(false);
+    setOwnerRecheckPrepared(true);
+    await verify(true, true);
   }
-  async function verify(reconcile = false) {
+  async function verify(reconcile = false, alreadyConfirmed = false) {
     if (!order || !file) throw Error("กรุณาเลือกรูปสลิป");
-    if (reconcile && !window.confirm("ตรวจซ้ำหลัง 2 นาทีด้วยรูปเดิม อาจใช้โควตา EasySlip เพิ่มอีก 1 ครั้ง ยืนยันหรือไม่? ห้ามโอนเงินซ้ำ")) return;
+    if (reconcile && !alreadyConfirmed && !window.confirm("ตรวจซ้ำหลัง 2 นาทีด้วยรูปเดิม อาจใช้โควตา EasySlip เพิ่มอีก 1 ครั้ง ยืนยันหรือไม่? ห้ามโอนเงินซ้ำ")) return;
     const form = new FormData(); form.append("file", file); form.append("reconcile", String(reconcile));
     const response = await fetch(`/api/payments/orders/${order.id}/verify`, { method: "POST", body: form });
     const body = await response.json();
@@ -168,7 +174,7 @@ function PaymentForm({ pkg, onClose }: { pkg: MockPackage; onClose: () => void }
           {transfersEnabled && !expired && order.qrPayload ? <div className="flex justify-center rounded-xl border bg-white p-4"><QRCodeSVG value={order.qrPayload} size={200} /></div> : <p className="font-bold text-rose-700">ห้ามโอนเพิ่ม {uploadExpired ? "พ้นเวลาอัปโหลดใหม่แล้ว กู้ได้เฉพาะผลตรวจที่บันทึกไว้ หรือติดต่อเจ้าของ" : "หากโอนทันกำหนด ส่งรูปสลิปได้ภายใน upload deadline"}</p>}
           <label className="block text-sm">รูปสลิป (ไม่เกิน 4 MB)<input className="mt-2 block w-full" type="file" accept="image/jpeg,image/png,image/gif,image/webp" disabled={busy} onChange={e => setFile(e.target.files?.[0] ?? null)} /></label>
           <button className={`${button} w-full`} disabled={busy || !file} onClick={() => void run(() => verify())}>{transfersEnabled ? "ตรวจสลิปจริง / บันทึกผลเดิม" : "กู้ผลตรวจที่บันทึกไว้เท่านั้น"}</button>
-          {ownerRecheckAvailable && <button className="block text-xs underline" disabled={busy} onClick={() => void run(prepareRecheck)}>OWNER: ขอแก้บั๊ก PromptPay และตรวจภาพเดิมอีกหนึ่งครั้ง</button>}
+          {ownerRecheckAvailable && <button className="block text-sm font-bold underline" disabled={busy || !file} onClick={() => void run(prepareRecheck)}>OWNER: ตรวจสลิปเดิมอีกครั้งหลังแก้สกุลเงิน (1 ครั้ง)</button>}
           <button className="text-xs underline disabled:opacity-40" disabled={busy || !file || (uploadExpired && !ownerRecheckPrepared) || !transfersEnabled} onClick={() => void run(() => verify(true))}>ยังไม่ทราบผล: ยืนยันตรวจรูปเดิมซ้ำ (อาจใช้โควตาเพิ่ม)</button>
           {uploadExpired && <button className="block text-xs underline" disabled={busy} onClick={() => { setOrder(null); setFile(null); requestKey.current = null; setNotice("รายการเดิมยังเก็บใน DB หากมีผลตรวจค้าง เซิร์ฟเวอร์จะไม่อนุญาตสร้างใหม่"); }}>เลือกสร้างรายการใหม่ (เฉพาะยังไม่ได้โอน)</button>}
         </>}

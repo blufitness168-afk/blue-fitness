@@ -2,6 +2,15 @@
 
 อัปเดต: 2026-10-24 | สภาพแวดล้อม: localhost + Neon บัญชีทดสอบ | ยังไม่ใช่ production sign-off
 
+## Currency764 owner recovery พร้อมใช้งาน — 31 ต.ค. 2026
+
+- เพิ่ม `20261031_payment_currency_recheck.sql`: invoker/publicEXECUTEปิด/pinnedsearch_path, NORMAL OWNER sessionของเจ้าของorderเท่านั้น, auditreasonTHB_NUMERIC_CURRENCY_FIX, ใช้OWNER_RECHECKbudgetร่วมlegacyหนึ่งครั้ง, imagehash/createdAt/order/ยอดไม่เปลี่ยน ไม่มีPAIDหรือแต้มจากprepare
+- Deployเฉพาะfunctionใหม่ลงฐานที่ `.env.local` ชี้ตามผู้ใช้ยืนยัน (ไม่มี.env.productionแล้ว) backup `.local-db/backup-2026-10-31T12-19-18.712Z`; ทุกrow30ตารางและfunctionเดิมไม่เปลี่ยน ไม่มีattemptreopened/provider/SMS/โอนเงิน
+- เพิ่มserverrecheckreasonและให้initialpaymentAccountส่งownerrecoveryflags; ปุ่มใหม่ **OWNER: ตรวจสลิปเดิมอีกครั้งหลังแก้สกุลเงิน (1 ครั้ง)** เลือกภาพเดิมแล้วconfirmครั้งเดียว → prepareaudit → verifyreconcile=true มีguardห้ามprovidercallที่3และห้ามไฟล์ใหม่
+- Tests239/239,TypeScript,lint,diffcheckและproductionbuildแยกผ่าน; ChromeUI6/6ที่360/390/1440พร้อมprepare409ไม่ส่งverify/alreadypreparedretry/memberไม่เห็นปุ่ม แบบinterceptทั้งหมด ไม่มีbackendwrite; รายงาน `.local-db/currency-recovery-ui-1793449284225/`
+- localhost3000ตอนทดสอบปิดอยู่ จึงใช้disposableNextที่3001ไม่มีenv/secretsและหยุดหลังจบ ไม่แตะuserserver
+- ตรวจorderจริงล่าสุดแบบread-only: PENDING, ownerroleOWNER, attemptREJECTED/provider_calls1/owner_rechecks0 ยังไม่ตรวจสลิปเพิ่ม ผู้ใช้ยินยอมโควตาแล้วแต่ขั้นverifyจริงต้องใช้ไฟล์สลิปเดิมและOWNERsessionในbrowserของผู้ใช้ หลังdeployล่าสุดเท่านั้น ห้ามโอนใหม่
+
 ## แก้สกุลเงิน numeric THB764 — 31 ต.ค. 2026
 
 - ผู้ใช้ส่งผลตรวจเดิมจากEasySlipdashboard: amountmatched/name matched แต่ rawSlip.amount.local.currency='764'; policyเดิมยอมรับแค่THB จึงเกิดPROVIDER_VALIDATION_FAILED เป็นบั๊กของเรา ไม่ใช่หลักฐานสลิปปลอม

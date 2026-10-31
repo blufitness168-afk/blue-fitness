@@ -15,6 +15,8 @@ function setup({ authenticated = true, masked = false, timeout = false, failFina
   const sql = async (parts, ...values) => {
     const text = parts.join('?'); queries.push({ text, values });
     if (text.includes('create_package_payment_order')) return [state.order];
+    if (text.includes('prepare_owner_payment_currency_recheck') || text.includes('prepare_owner_payment_recheck')) { state.recheckPrepared = true; return [{ id: 'offline-attempt' }]; }
+    if (text.includes('FROM package_payment_resolution_audit')) return state.recheckPrepared ? [{ id: 'offline-audit' }] : [];
     if (text.includes('reject_unresolved_package_payment')) { state.order.status = 'REJECTED'; state.order.rejection_reason = 'OWNER_RECONCILED_REJECTION'; state.audit = (state.audit ?? 0) + 1; return [state.order]; }
     if (text.includes('claim_package_payment_attempt')) {
       if (state.attempt) return [state.attempt];
@@ -150,6 +152,33 @@ test('payment v2 requires its dedicated key, never falls back to diagnostics or 
   app.env.EASYSLIP_V2_API_KEY = 'diagnostic-secret';
   assert.equal((await app.verifyOrder(upload(), orderId)).status, 503);
   assert.equal(app.calls.length, 0); assert.equal(app.state.attempt, null);
+});
+test('currency recovery is explicit owner-only, rejects forged reasons and prepares no credit/provider call', async () => {
+  const request = body => new Request('https://local/api/admin/payments/recheck', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  for (const role of ['MEMBER', 'ADMIN']) {
+    const app = setup({ role });
+    assert.equal((await app.prepareOwnerRecheck(request({ confirmed: true, reason: 'THB_NUMERIC_CURRENCY_FIX' }), orderId)).status, 403);
+    assert.equal(app.queries.length, 0);
+  }
+  const app = setup({ role: 'OWNER' });
+  for (const body of [{ confirmed: false, reason: 'THB_NUMERIC_CURRENCY_FIX' }, { confirmed: true, reason: 'MANUAL_PAID' }, { confirmed: true, reason: 'THB_NUMERIC_CURRENCY_FIX', paid: true }])
+    assert.equal((await app.prepareOwnerRecheck(request(body), orderId)).status, 400);
+  assert.equal((await app.prepareOwnerRecheck(request({ confirmed: true, reason: 'THB_NUMERIC_CURRENCY_FIX' }), orderId)).status, 200);
+  assert.equal(app.queries.filter(q => q.text.includes('prepare_owner_payment_currency_recheck')).length, 1);
+  assert.equal(app.calls.length, 0);
+  assert.equal(app.state.benefits, 0);
+  assert.equal(app.state.order.status, 'PENDING');
+});
+test('owner recovery is advertised on initial payment account load without extra user refresh', async () => {
+  const app = setup({ role: 'OWNER' });
+  app.state.attempt = { state: 'REJECTED', rejection_reason: 'PROVIDER_VALIDATION_FAILED', provider_calls: 1 };
+  assert.equal((await app.paymentAccount()).ownerRecheckAvailable, true);
+  app.state.recheckPrepared = true;
+  app.state.attempt.state = 'UNKNOWN';
+  const prepared = await app.paymentAccount();
+  assert.equal(prepared.ownerRecheckAvailable, false);
+  assert.equal(prepared.ownerRecheckPrepared, true);
+  assert.equal(app.calls.length, 0);
 });
 test('provider timeout or error remains pending; repeated requests do not consume quota', async () => {
   for (const options of [{ timeout: true }, { status: 500 }]) {

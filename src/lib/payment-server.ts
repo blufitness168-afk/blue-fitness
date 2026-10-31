@@ -105,11 +105,19 @@ export async function paymentAccount() {
   const sql = sqlClient();
   const orders = await sql`SELECT * FROM package_payment_orders WHERE member_id = ${auth.member.id} ORDER BY created_at DESC LIMIT 30`;
   const paid = orders.filter(o => o.status === "PAID");
+  const pending = orders.find(o => o.status === "PENDING");
+  let ownerRecheckAvailable = false, ownerRecheckPrepared = false;
+  if (pending && auth.member.role === "OWNER") {
+    const attempts = await sql`SELECT state, rejection_reason, provider_calls FROM package_payment_attempts WHERE order_id = ${pending.id}::uuid ORDER BY created_at DESC LIMIT 1`;
+    const audits = await sql`SELECT id FROM package_payment_resolution_audit WHERE order_id = ${pending.id}::uuid AND action = 'OWNER_RECHECK' LIMIT 1`;
+    ownerRecheckAvailable = attempts[0]?.state === "REJECTED" && attempts[0]?.rejection_reason === "PROVIDER_VALIDATION_FAILED" && attempts[0]?.provider_calls === 1 && !audits[0];
+    ownerRecheckPrepared = !!audits[0] && attempts[0]?.state === "UNKNOWN" && attempts[0]?.provider_calls === 1;
+  }
   return { memberCode: auth.member.memberCode, status: auth.member.status === "ACTIVE" && (!auth.member.expireDate || auth.member.expireDate.getTime() <= Date.now()) ? "EXPIRED" : auth.member.status, expiresAt: auth.member.expireDate?.toISOString() ?? null,
     points: auth.member.points, package: paid[0]?.package_snapshot ?? null,
     purchases: paid.map(o => publicOrder(o as PaymentOrder)),
     readiness: paymentReadiness(process.env),
-    pendingOrder: orders.find(o => o.status === "PENDING") ? publicOrder(orders.find(o => o.status === "PENDING") as PaymentOrder) : null };
+    pendingOrder: pending ? publicOrder(pending as PaymentOrder) : null, ownerRecheckAvailable, ownerRecheckPrepared };
 }
 export async function getPaymentAccount() {
   try { return json(await paymentAccount()); }
@@ -122,10 +130,14 @@ export async function prepareOwnerRecheck(request: Request, orderId: string) {
   try {
     const auth = await identity();
     if (!auth || auth.member.role !== "OWNER") return json({ error: "OWNER เท่านั้น" }, 403);
-    const body = JSON.parse((await boundedBody(request, 1024)).toString("utf8"));
-    if (body.confirmed !== true || body.reason !== "PROMPTPAY_REGISTRATION_FIX") return json({ error: "ต้องยืนยันตรวจภาพเดิมอีกหนึ่งครั้ง" }, 400);
+    const parsed = z.object({ confirmed: z.literal(true), reason: z.enum(["PROMPTPAY_REGISTRATION_FIX", "THB_NUMERIC_CURRENCY_FIX"]) }).strict().safeParse(JSON.parse((await boundedBody(request, 1024)).toString("utf8")));
+    if (!parsed.success) return json({ error: "ต้องยืนยันตรวจภาพเดิมอีกหนึ่งครั้ง" }, 400);
     const sql = sqlClient();
-    await sql`SELECT id FROM prepare_owner_payment_recheck(${orderId}::uuid, ${auth.member.id}, ${auth.digest})`;
+    if (parsed.data.reason === "THB_NUMERIC_CURRENCY_FIX") {
+      await sql`SELECT id FROM prepare_owner_payment_currency_recheck(${orderId}::uuid, ${auth.member.id}, ${auth.digest})`;
+    } else {
+      await sql`SELECT id FROM prepare_owner_payment_recheck(${orderId}::uuid, ${auth.member.id}, ${auth.digest})`;
+    }
     return json({ prepared: true, message: "เลือกรูปเดิมแล้วตรวจซ้ำได้หนึ่งครั้ง ไม่มีการเพิ่มสิทธิ์จากคำขอนี้" });
   } catch { return json({ error: "ไม่สามารถเปิดตรวจซ้ำได้ หรือใช้สิทธิ์ไปแล้ว" }, 409); }
 }
