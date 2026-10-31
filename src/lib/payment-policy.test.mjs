@@ -81,6 +81,22 @@ test('null registered match, altered full identity/name/bank and contradictory m
   ]) { const s = slip(); change(s); assert.throws(() => validateSlip(s, order, now)); }
   assert.throws(() => validateSlip(slip(), { ...order, receiver_snapshot: { ...receiver, name: 'เปลี่ยนชื่อผู้รับ' } }, now));
 });
+test('registered bank-account receiver validation supports Bangkok bank code 002 without changing full identity checks', () => {
+  const bblOrder = { ...order, receiver_snapshot: { ...receiver, bankCode: '002', bankAccount: '4920276021', name: 'นาย คณิตพงศ์ จิตต์โสภณ' } };
+  const proof = slip();
+  proof.data.matchedAccount.bank = { code: '002' };
+  proof.data.matchedAccount.bankNumber = '492-0-27602-1';
+  proof.data.matchedAccount.nameTh = 'คณิตพงศ์ จิตต์โสภณ';
+  proof.data.rawSlip.receiver.bank.id = '002';
+  proof.data.rawSlip.receiver.account.bank.account = 'XXX-X-X7602-X';
+  assert.equal(validateSlip(proof, bblOrder, now).receiverIdentity.bankAccount, '4920276021');
+  for (const code of ['004', '006']) {
+    const wrong = structuredClone(proof);
+    wrong.data.matchedAccount.bank.code = code;
+    wrong.data.rawSlip.receiver.bank.id = code;
+    assert.throws(() => validateSlip(wrong, bblOrder, now));
+  }
+});
 test('v2 success, transRef, all exact amount fields and domestic currency required', () => {
   for (const change of [
     s => s.success = false, s => delete s.data.rawSlip.transRef,
@@ -92,6 +108,30 @@ test('v2 success, transRef, all exact amount fields and domestic currency requir
     s => s.data.amountInSlip = 20.001, s => s.data.amountInOrder = 21,
     s => s.data.isAmountMatched = false,
   ]) { const s = slip(); change(s); assert.throws(() => validateSlip(s, order, now)); }
+});
+test('ISO 4217 numeric THB code 764 accepts the registered PromptPay shape without receiver bank fields', () => {
+  const expected = { ...order, receiver_snapshot: { promptpay: '0890000000', bankCode: '002', bankAccount: '1234567890', name: 'นาย ทดสอบ ระบบ' } };
+  for (const currency of ['THB', '764', 764]) {
+    const s = slip();
+    s.data.matchedAccount = { bank: { code: 'PROMPTPAY' }, bankNumber: '0890000000', nameTh: 'ทดสอบ ระบบ' };
+    s.data.rawSlip.receiver = { account: { name: { th: 'นาย ทดสอบ ร' }, proxy: { type: 'MSISDN', account: 'xxx-xxx-0000' } }, merchantId: '' };
+    s.data.rawSlip.amount.local = { amount: 20, currency };
+    assert.equal(validateSlip(s, expected, now).receiverIdentity.matchingType, 'PROMPTPAY');
+    s.data.rawSlip.amount.local.amount = 19;
+    assert.throws(() => validateSlip(s, expected, now), /ยอดโอนไม่ตรง/);
+    s.data.rawSlip.amount.local = { amount: 20, currency };
+    for (const field of [s.data, s.data.rawSlip.amount]) {
+      field.currency = currency;
+      assert.ok(validateSlip(s, expected, now));
+      field.currency = '840';
+      assert.throws(() => validateSlip(s, expected, now), /เงินบาท/);
+      delete field.currency;
+    }
+    for (const foreign of ['USD', '840', 840, '978', 978, '0764', null, {}]) {
+      s.data.rawSlip.amount.local.currency = foreign;
+      assert.throws(() => validateSlip(s, expected, now), /เงินบาท/);
+    }
+  }
 });
 test('old transfer, late transfer, future and invalid timestamps reject across orders', () => {
   for (const date of ['2026-10-10T11:18:59Z', '2026-10-10T11:35:01Z', '2026-10-10T11:26:01Z', '2026-10-10 18:23:28', '2026-02-30T03:05:00Z']) {

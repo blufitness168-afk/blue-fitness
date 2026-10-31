@@ -2,6 +2,39 @@
 
 อัปเดต: 2026-10-24 | สภาพแวดล้อม: localhost + Neon บัญชีทดสอบ | ยังไม่ใช่ production sign-off
 
+## แก้สกุลเงิน numeric THB764 — 31 ต.ค. 2026
+
+- ผู้ใช้ส่งผลตรวจเดิมจากEasySlipdashboard: amountmatched/name matched แต่ rawSlip.amount.local.currency='764'; policyเดิมยอมรับแค่THB จึงเกิดPROVIDER_VALIDATION_FAILED เป็นบั๊กของเรา ไม่ใช่หลักฐานสลิปปลอม
+- แก้ `src/lib/payment-policy.ts` ให้THB/'764'/764หมายถึงเงินบาทเหมือนกัน และตรวจlocal.amountให้ตรงด้วยทั้งสามรูปแบบ; ยังrejectUSD/840/EUR978/invalidcurrency/name/account/amount/timeตามเดิม
+- Testsเพิ่มใช้ข้อมูลสังเคราะห์รูปแบบPromptPayที่ไม่มีreceiver.bank มีproxyปิดบัง ไม่เก็บpayload/transRef/ข้อมูลผู้โอนของจริงลงrepo; servermocktestยืนยัน764settle/replayไม่เพิ่มโควตาหรือเครดิตซ้ำ
+- Fulltests236/236,TypeScript/lintผ่าน; ไม่เรียกprovider/SMS/ไม่แก้attemptหรือPAIDจริง ต้องdeploycodeล่าสุดก่อน
+- รายการที่ถูกREJECTEDเดิมไม่หายเองจากการdeploy; ห้ามกดตรวจซ้ำปกติ/รีเซ็ตDB/โอนใหม่ ต้องใช้recoveryที่มีauditและยืนยันก่อนใช้โควตาตรวจซ้ำ เมื่อreviewเส้นทางกู้เสร็จ
+
+## Incident สลิปจริงตอบ422แต่ผู้ใช้ไม่เห็นข้อความ — 31 ต.ค. 2026
+
+- ตรวจorderที่ผู้ใช้ส่งจากภาพแบบread-only: PENDING100บาท, attemptREJECTED/PROVIDER_VALIDATION_FAILED, provider_calls1, ไม่มีverifiedevidenceหรือpaid_at; การกดซ้ำคืนcachedrejection ไม่ได้เรียกproviderเพิ่ม ไม่ใช่หลักฐานว่าSQLsettlementล้ม
+- สาเหตุpolicyข้อใดที่rejectครั้งแรกยังระบุไม่ได้ เพราะรายละเอียดvalidationไม่ได้persistไว้ ต้องดูResponseของrequestแรกหรือEasySlipรายการตรวจสลิปครั้งนั้น ห้ามรีเซ็ตattempt/reopen/โอนซ้ำเพื่อเดา
+- แก้PaymentModalให้scrollไปfeedbackเมื่อerror/noticeเปลี่ยน เพราะผู้ใช้เลื่อนอยู่ช่วงuploadแล้วข้อความerrorด้านบนพ้นจอ; เพิ่มserverwarnเฉพาะorder/attempt/reason ไม่มีrawslip/providerpayload/credentialsสำหรับวิเคราะห์เคสครั้งถัดไป
+- Browser9/9ผ่านที่360/390/1440: จำลอง422/202/409แล้วข้อความอยู่ในvisiblemodalและverifyหนึ่งครั้งต่อเคส ไม่มีbackendAPIwrites/provider/SMScalls หลักฐาน `.local-db/payment-feedback-1793440457876/`
+- Fulltests234/234,TypeScript/lint/diffcheckผ่าน; ต้องdeployUI/servercodeใหม่ไปVercelก่อนใช้งาน ส่วนสลิปจริงเคสนี้ยังไม่ผ่านacceptanceและไม่อนุมัติPAIDด้วยมือ
+
+## แก้ receiver ธนาคารกรุงเทพ — 31 ต.ค. 2026
+
+- พบTSรับBANK_ACCOUNT002แต่finalizerยังล็อก004; เพิ่ม `20261031_payment_receiver_bank.sql` เปลี่ยนเฉพาะguardหนึ่งจุดโดยรักษาsnapshotidentity/name/amount/order/replay/sessionทั้งหมด
+- อิสระreviewผ่านหลังแก้runnerJSreplacementtoken `$'` ด้วยcallbackพร้อมregression; deployreviewSHA `35695290f730f6d62df8fc7ceb71ef3da1d214a696217658e925c5b78e6ced31`
+- ApplyในDBที่อ่านจาก `.env.production` โดยตรงแล้ว (ไม่อาศัย `.env.local`); backup `.local-db/backup-2026-10-31T09-20-54.249Z`; 30publictablesทุกrow/columnไม่เปลี่ยน functionACL/NORMAL/search_pathและschema/functionอื่นเหมือนเดิม
+- Tests **234/234**,TypeScript,lint,diffcheckผ่าน; actual9migrationPGliteทดสอบBBL BANK_ACCOUNT+BBL PromptPay+KBank/replay/fullidentitynegatives/KIOSK/globalduplicateผ่าน รวมbaseline/reapplyrefusalไม่ทำข้อมูลเสีย
+- ไม่เรียกSMS/EasySlipหรือโอนเงินจริง ไม่สร้างPAIDจำลองในDBจริง; **PAYMENT_TRANSFERS_ENABLEDยังfalse**
+- ยังต้องdeploycodeล่าสุดไปVercel (localwebpolicy/UIมีchangesยังไม่ยืนยันdeployment), ตรวจconfig/branchพร้อม และrealQR/realSlipacceptanceครั้งสุดท้ายก่อนเปิดรับเงินจริง ดู `scripts/bangkok-receiver-uat-results.md`
+
+## เปลี่ยนผู้รับบัญชี (local UAT only) — 24 ต.ค. 2026
+
+- เจ้าของเลือก Bangkok Bank เท่านั้น และยืนยันเลขบัญชี/ชื่อที่ส่งในบทสนทนา; ปรับ `.env.local` ที่ถูก gitignored เป็น bank code 002 และชื่อ/บัญชีดังกล่าว ไม่บันทึกค่าลง Git/docs
+- ล้าง PAYMENT_PROMPTPAY_MOBILE และตั้ง PAYMENT_TRANSFERS_ENABLED=false; จึงยังสร้าง order/QR หรือโอนจริงไม่ได้ ป้องกันเบอร์/บัญชี KBank เดิมถูกใช้ต่อโดยไม่ตั้งใจ
+- ปรับ slip policy ให้รับ BANK_ACCOUNT ที่ matched bank code ตรงกับ snapshot แทน hardcode KBank; เพิ่ม regression fixture BBL 002 ที่ตรวจชื่อเต็ม/เลขเต็ม/เลข mask และปฏิเสธธนาคารอื่น
+- Tests เฉพาะ payment30 ผ่านก่อนปรับเพิ่ม และ regressionsหลังแก้ 34/34 + TypeScript/lint ผ่าน
+- **ยังไม่พร้อมเปิดรับเงินจริง:** ต้องยืนยันเบอร์ PromptPay ที่ผูกกับบัญชีกรุงเทพ (ไม่ใช้เบอร์ KBank เดิมโดยอนุมาน), ผูก/ลงทะเบียนบัญชีกรุงเทพกับ EasySlip v2 branch และทดสอบ QR/สลิปปลายทางในขั้นตอนสุดท้าย เจ้าของต้องยืนยันก่อน enable; Vercel/production ยังไม่เปลี่ยน
+
 ## รอบทดสอบอัตโนมัติเพิ่ม — 24 ต.ค. 2026
 
 - **DBจริง installed schema/functions: 23 checksผ่าน** ผ่าน `scripts/real-modules-live-rollback-uat.mjs`: rewardscreate/redeem/stock/debit/replay/deliver, financeCRUD/version/audit/replay/role, friendcoupon grant/use/quota/guest/audit, bonusเพิ่มวันครั้งเดียว, cancel/deactivate, KIOSK/suspended/revokeddenial ทดสอบภายในsubtransactionแล้วrollback; hashข้อมูลทุกpublictableก่อน/หลังเหมือนเดิม ไม่มีPAID/SMS/providercalls ยกเว้นsequenceอาจขยับ

@@ -1,6 +1,14 @@
 # ชำระแพ็กเกจจริง — deployment / security runbook
 
-## สถานะและขอบเขต
+## ล่าสุด 2026-10-31 — รองรับธนาคารกรุงเทพ
+
+- แก้ hardcode BANK_ACCOUNT004 ใน finalizer ด้วย `20261031_payment_receiver_bank.sql` โดยเปลี่ยนเพียงguardให้ตรวจรูปแบบbankcodeของimmutable receiver snapshot; การเทียบevidencebank/identitybank/fullaccount/name/order/amountยังอยู่ครบ ไม่อนุมัติจากเลขmaskหรือชื่ออย่างเดียว
+- ลงฐานที่ `.env.production` ชี้อยู่แล้วผ่าน `scripts/db-receiver-bank-migrate.mjs` หลังreview+backup `.local-db/backup-2026-10-31T09-20-54.249Z`; snapshotก่อน/หลัง30ตารางเหมือนเดิม ACL/NORMAL/search_pathไม่เปลี่ยน
+- Tests234/234,TypeScript,lintผ่าน; isolatedBBL BANK_ACCOUNT/PromptPay/KBank+replay/negative+safe-rerunผ่าน ไม่เรียกprovider/SMS/โอนเงินหรือสร้างPAIDบนฐานจริง
+- **ยังปิดรับเงินจริง** จนdeploywebcodeล่าสุดและทดสอบQR/สลิปจริงของบัญชีร้าน; ห้ามrerunmigrationเก่าหรือเปิดenableเพื่อซ่อนblocker รายการเก่าคงreceiver snapshotเดิม ไม่มีbackfill
+- สถานะmock/catalog/ผู้รับเก่าในส่วนถัดไปเป็นประวัติ ดูสถานะปัจจุบันในFINAL_TEST.md
+
+## สถานะและขอบเขต (ประวัติ)
 
 - โค้ดผ่าน offline/isolated SQL acceptance และ **apply payment migration บน Neon สำเร็จแล้ว 2026-10-10** ด้วย guarded deployment; 13 existing tables ไม่เปลี่ยน รายละเอียด `scripts/db-payments-deployment.md`
 - default ยังคงปิดจนตั้ง config; **local ช่วงทดลองเปิดแล้ว** ด้วย `PAYMENT_TRANSFERS_ENABLED=true` และ `PAYMENT_PROVIDER_STRATEGY=EASYSLIP_V2_REGISTERED_ACCOUNT` หลัง schema พร้อม ไม่ต้องใช้ `PAYMENT_RECEIVER_CONTRACT` v1; restart server โหลด env ใหม่ก่อนทดลอง ไม่ได้ตั้ง enable บน Vercel

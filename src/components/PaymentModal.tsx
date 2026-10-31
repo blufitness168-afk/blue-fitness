@@ -36,6 +36,10 @@ function PaymentForm({ pkg, onClose }: { pkg: MockPackage; onClose: () => void }
   const lock = useRef(false);
   const requestKey = useRef<string | null>(null);
   const dialog = useRef<HTMLDivElement>(null);
+  const feedback = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error || notice) feedback.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [error, notice]);
   const close = useRef(onClose);
   useEffect(() => { close.current = onClose; }, [onClose]);
   useEffect(() => {
@@ -150,14 +154,16 @@ function PaymentForm({ pkg, onClose }: { pkg: MockPackage; onClose: () => void }
       <p className="text-sm">{order?.package.name ?? pkg.name}</p>
       <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900">บัญชีผู้รับทดสอบชั่วคราวที่ได้รับอนุญาต กรุณาตรวจชื่อผู้รับก่อนโอน • รูปสลิปจะส่งให้ EasySlip และอาจใช้โควตาบริการ • ตรวจผู้รับด้วย EasySlip v2 และบัญชีที่ลงทะเบียน เลขปิดบังหรือชื่ออย่างเดียวไม่ใช้อนุมัติ</p>
       {!transfersEnabled && <p role="alert" className="rounded-xl bg-rose-100 p-3 text-sm font-bold">{(order?.readiness ?? readiness).blocker ?? RECEIVER_BLOCKER} ห้ามโอนเงินจริง หากเคยโอนแล้วให้ติดต่อเจ้าของ</p>}
-      {error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
-      {notice && <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm">{notice}</p>}
+      <div ref={feedback} className="scroll-mt-4">
+        {error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
+        {notice && <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm">{notice}</p>}
+      </div>
       {!loaded && <p>กำลังโหลดรายการค้าง...</p>}
       {order?.status === "PAID" ? <section className="space-y-3 text-center"><CheckCircle2 className="mx-auto text-emerald-600" size={48} /><h3 className="font-bold">ชำระสำเร็จและบันทึกสมาชิกจริงแล้ว</h3><p>หมดอายุ {order.membershipExpiresAt ? date(order.membershipExpiresAt) : "—"}</p><p>ได้รับ {order.pointsEarned} แต้ม</p><Link href="/member" className={button} onClick={onClose}>ดูบัญชีสมาชิก</Link></section> : order?.status === "REJECTED" ? <section role="alert" className="rounded-xl bg-rose-50 p-3 text-sm">รายการถูกปิดโดยไม่เพิ่มสิทธิ์ ({order.rejectionReason}) หากโอนแล้วติดต่อเจ้าของเรื่องยอดโอน ห้ามโอนซ้ำ</section> : <>
         {!order && <><label className="block text-sm">โค้ดส่วนลด (ถ้ามี)<input value={promoCode} maxLength={40} disabled={busy} onChange={e => { setPromoCode(e.target.value); requestKey.current = null; }} className="mt-1 w-full rounded-xl border p-3" /></label><p className="text-xs">ราคาและโควตาส่วนลดตรวจโดยเซิร์ฟเวอร์ สิทธิ์ทดลองในเบราว์เซอร์ใช้ลดเงินจริงไม่ได้</p><button className={`${button} w-full`} disabled={busy || !loaded || !transfersEnabled} onClick={() => void run(create)}>สร้างคำสั่งซื้อ / แสดงยอดจริง</button></>}
         {order && <>
           <p className="text-sm">ราคา ฿{money(order.subtotalSatang)} • ลด ฿{money(order.discountSatang)}</p><p className="text-2xl font-black">ยอดโอน ฿{money(order.amountSatang)}</p>
-          {transfersEnabled && <p className="text-sm">{order.receiver.name}<br />PromptPay {order.receiver.promptpay}<br />บัญชี {order.receiver.bankAccount} • ธนาคาร {order.receiver.bankCode === "004" ? "กสิกรไทย" : order.receiver.bankCode}</p>}
+          {transfersEnabled && <p className="text-sm">{order.receiver.name}<br />PromptPay {order.receiver.promptpay}<br />บัญชี {order.receiver.bankAccount} • ธนาคาร {{ "002": "กรุงเทพ", "004": "กสิกรไทย" }[order.receiver.bankCode] ?? order.receiver.bankCode}</p>}
           <p className="text-xs">คำสั่งซื้อ {order.id}<br />โอนภายใน {date(order.expiresAt)} (15 นาที)<br />อัปโหลดสลิปได้ถึง {date(order.uploadDeadline)} (เพิ่ม 30 นาที เฉพาะโอนทันเวลา)</p>
           {transfersEnabled && !expired && order.qrPayload ? <div className="flex justify-center rounded-xl border bg-white p-4"><QRCodeSVG value={order.qrPayload} size={200} /></div> : <p className="font-bold text-rose-700">ห้ามโอนเพิ่ม {uploadExpired ? "พ้นเวลาอัปโหลดใหม่แล้ว กู้ได้เฉพาะผลตรวจที่บันทึกไว้ หรือติดต่อเจ้าของ" : "หากโอนทันกำหนด ส่งรูปสลิปได้ภายใน upload deadline"}</p>}
           <label className="block text-sm">รูปสลิป (ไม่เกิน 4 MB)<input className="mt-2 block w-full" type="file" accept="image/jpeg,image/png,image/gif,image/webp" disabled={busy} onChange={e => setFile(e.target.files?.[0] ?? null)} /></label>

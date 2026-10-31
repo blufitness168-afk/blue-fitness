@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 const code = name => ts.transpileModule(fs.readFileSync(new URL(`./${name}.ts`, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const orderId = '3c1f10a6-55de-4ad1-b8bc-37bded452778';
 const receiver = { promptpay: '0973355322', bankCode: '004', bankAccount: '0528938965', name: 'ชื่อผู้รับทดสอบ' };
-function setup({ authenticated = true, masked = false, timeout = false, failFinalize = false, status = 200, transfersEnabled = true, role = 'MEMBER', terminalReason = null } = {}) {
+function setup({ authenticated = true, masked = false, timeout = false, failFinalize = false, status = 200, transfersEnabled = true, role = 'MEMBER', terminalReason = null, currency = '' } = {}) {
   const modules = new Map(), calls = [], queries = [];
   const state = { order: { id: orderId, member_id: 1, package_snapshot: { id: 2, name: 'BLU 30 วัน', durationDays: 30 }, receiver_snapshot: receiver, amount_satang: 90000, subtotal_satang: 90000, discount_satang: 0, created_at: new Date(Date.now() - 300000).toISOString(), expires_at: new Date(Date.now() + 600000).toISOString(), upload_deadline: new Date(Date.now() + 2400000).toISOString(), status: 'PENDING', points_earned: 45 }, attempt: null, benefits: 0, failFinalize };
   const sql = async (parts, ...values) => {
@@ -48,7 +48,7 @@ function setup({ authenticated = true, masked = false, timeout = false, failFina
       vm.runInNewContext(code(name.slice(2)), { ...globals, exports, require: load, fetch: async (url, init) => {
         calls.push({ url, init });
         if (timeout) throw Error('timeout');
-        return Response.json({ success: true, data: { remark: state.providerRemark ?? orderId, isDuplicate: false, amountInOrder: 900, amountInSlip: 900, isAmountMatched: true, matchedAccount: masked ? null : { bank: { code: '004' }, bankNumber: receiver.bankAccount, nameTh: receiver.name }, rawSlip: { transRef: 'OFFLINE-REF', date: state.providerPaidAt ?? new Date().toISOString(), countryCode: 'TH', amount: { amount: 900 }, receiver: { bank: { id: '004' }, account: { bank: { type: 'BANKAC', account: 'XXXXX3896X' }, name: { en: 'MR NATNATEE R' } } } } } }, { status });
+        return Response.json({ success: true, data: { remark: state.providerRemark ?? orderId, isDuplicate: false, amountInOrder: 900, amountInSlip: 900, isAmountMatched: true, matchedAccount: masked ? null : { bank: { code: '004' }, bankNumber: receiver.bankAccount, nameTh: receiver.name }, rawSlip: { transRef: 'OFFLINE-REF', date: state.providerPaidAt ?? new Date().toISOString(), countryCode: 'TH', amount: { amount: 900, local: { amount: 900, currency } }, receiver: { bank: { id: '004' }, account: { bank: { type: 'BANKAC', account: 'XXXXX3896X' }, name: { en: 'MR NATNATEE R' } } } } } }, { status });
       } });
     }
     return modules.get(name);
@@ -121,6 +121,18 @@ test('exact v2 image FormData + timeout, no private filename/raw data exposed; r
   assert.equal((await app.verifyOrder(upload(), orderId)).status, 200);
   assert.equal(app.calls.length, 1); assert.equal(app.state.benefits, 1);
   assert.doesNotMatch(JSON.stringify(result), /offline-secret|user-private-filename|sender|payload/);
+});
+test('provider ISO 4217 THB currency code 764 reaches settlement and replay without extra provider calls', async () => {
+  for (const currency of ['764', 764]) {
+    const app = setup({ currency });
+    const response = await app.verifyOrder(upload(), orderId);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).order.status, 'PAID');
+    assert.equal(app.state.benefits, 1);
+    assert.equal((await app.verifyOrder(upload(), orderId)).status, 200);
+    assert.equal(app.calls.length, 1);
+    assert.equal(app.state.benefits, 1);
+  }
 });
 test('masked receiver without registered account match never credits member', async () => {
   const app = setup({ masked: true }); assert.equal((await app.verifyOrder(upload(), orderId)).status, 422);

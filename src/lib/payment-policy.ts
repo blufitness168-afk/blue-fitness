@@ -68,6 +68,10 @@ export function mobile(value: unknown) {
   return null;
 }
 
+function isThaiBahtCurrency(value: unknown): boolean {
+  return value === "THB" || value === "764" || value === 764;
+}
+
 export function validateSlip(result: unknown, order: { id: string; amount_satang: number; receiver_snapshot: Receiver; created_at: string; expires_at: string }, now = Date.now()): PaymentEvidence {
   const envelope = object(result), details = object(envelope.data), data = object(details.rawSlip), amount = object(data.amount), local = object(amount.local);
   if (envelope.success !== true || typeof data.transRef !== "string" || !/^[A-Za-z0-9._:/-]{1,100}$/.test(data.transRef)) throw Error("ผู้ให้บริการไม่ได้ยืนยันสลิป");
@@ -76,8 +80,8 @@ export function validateSlip(result: unknown, order: { id: string; amount_satang
   if (details.isDuplicate !== undefined && typeof details.isDuplicate !== "boolean") throw Error("ผลตรวจรายการซ้ำไม่ถูกต้อง");
   if ((details.isAmountMatched !== undefined && details.isAmountMatched !== true) || [details.amountInSlip, details.amountInOrder, details.requestedAmount].some(v => v !== undefined && satang(v) !== order.amount_satang)) throw Error("ยอดตรวจสอบไม่ตรงกับคำสั่งซื้อ");
   // Domestic rawSlip amounts are THB; reject any explicit foreign currency.
-  if ((data.countryCode !== undefined && data.countryCode !== "TH") || [local.currency, amount.currency, details.currency].some(c => c !== undefined && c !== "" && c !== "THB")) throw Error("รองรับการชำระเงินบาทในประเทศไทยเท่านั้น");
-  if (satang(amount.amount) !== order.amount_satang || (local.amount !== undefined && local.currency === "THB" && satang(local.amount) !== order.amount_satang)) throw Error("ยอดโอนไม่ตรงกับคำสั่งซื้อ");
+  if ((data.countryCode !== undefined && data.countryCode !== "TH") || [local.currency, amount.currency, details.currency].some(c => c !== undefined && c !== "" && !isThaiBahtCurrency(c))) throw Error("รองรับการชำระเงินบาทในประเทศไทยเท่านั้น");
+  if (satang(amount.amount) !== order.amount_satang || (local.amount !== undefined && isThaiBahtCurrency(local.currency) && satang(local.amount) !== order.amount_satang)) throw Error("ยอดโอนไม่ตรงกับคำสั่งซื้อ");
   if (typeof data.date !== "string" || !z.iso.datetime({ offset: true }).safeParse(data.date).success || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d\d)$/.test(data.date)) throw Error("เวลาสลิปไม่ถูกต้อง");
   const paidAt = Date.parse(data.date);
   if (!Number.isFinite(paidAt) || paidAt < Date.parse(order.created_at) - SLIP_TOLERANCE_MS || paidAt > Date.parse(order.expires_at) || paidAt > now + SLIP_TOLERANCE_MS) throw Error("เวลาการโอนอยู่นอกช่วงคำสั่งซื้อ");
@@ -100,7 +104,7 @@ export function validateSlip(result: unknown, order: { id: string; amount_satang
     }
     return { transRef: data.transRef, paidAt: new Date(paidAt).toISOString(), amountSatang: order.amount_satang, receiverEvidence: "REGISTERED_ACCOUNT_V2", providerStrategy: PROVIDER_STRATEGY, orderId: order.id, bankCode: expected.bankCode, receiverIdentity: { matchingType: "PROMPTPAY", providerBankCode: "PROMPTPAY", promptpay: number, bankAccount: "", name: matchedName, expectedName: expected.name, normalizedName: normalizeReceiverName(matchedName), bankCode: "PROMPTPAY" } };
   }
-  if (expected.bankCode !== "004" || bank.id !== expected.bankCode || matchedBank.code !== expected.bankCode) throw Error("ธนาคารผู้รับไม่ตรง");
+  if (!/^\d{3}$/.test(expected.bankCode) || bank.id !== expected.bankCode || matchedBank.code !== expected.bankCode) throw Error("ธนาคารผู้รับไม่ตรง");
   if (!expectedNumber || matchedNumber !== expectedNumber || !matchedName || normalizeReceiverName(matchedName) !== normalizeReceiverName(expected.name)) throw Error("บัญชีที่ลงทะเบียนไม่ตรงกับผู้รับคำสั่งซื้อ");
   // A mask is only a contradiction check, never proof of recipient identity.
   const visible = typeof bankAccount.account === "string" ? bankAccount.account.replace(/[ -]/g, "") : "";

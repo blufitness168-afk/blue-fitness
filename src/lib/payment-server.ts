@@ -190,6 +190,8 @@ export async function verifyOrder(request: Request, orderId: string) {
       let evidence;
       try { evidence = validateSlip(result, order); }
       catch (cause) {
+        // Record the policy failure without the slip, provider payload or credentials.
+        console.warn("[payment] slip validation rejected", { orderId, attemptId: attempt.id, reason: cause instanceof Error ? cause.message : "INVALID_PAYMENT_EVIDENCE" });
         await sql`UPDATE package_payment_attempts SET state = 'REJECTED', rejection_reason = 'PROVIDER_VALIDATION_FAILED', updated_at = now() WHERE id = ${attempt.id}::uuid AND lease_token = ${lease}::uuid AND state = 'PROCESSING'`;
         return json({ error: cause instanceof Error ? cause.message : "สลิปไม่ผ่าน" }, 422);
       }
