@@ -1,6 +1,28 @@
 # BLU FITNESS — Final Test / UAT
 
-อัปเดต: 2026-10-24 | สภาพแวดล้อม: localhost + Neon บัญชีทดสอบ | ยังไม่ใช่ production sign-off
+อัปเดต: 2026-10-31 | สภาพแวดล้อม: localhost/Vercel + Neon ฐานเดิมที่ผู้ใช้ใช้ Production | real payment acceptance ผ่านเคสด้านล่าง แต่ยังไม่ใช่ full production sign-off
+
+## OWNER จัดการแพ็กเกจ DB จริง — 31 ต.ค. 2026
+
+- เพิ่มหน้า `/admin/packages` และเมนูOWNERเท่านั้น ปรับชื่อ/ป้าย/รายละเอียด/ราคา/ระยะวัน/ช่วงเวลา/จำนวนคูปองพาเพื่อน/วันในคูปองโบนัส/เปิดปิดแพ็กเกจเดิม10รายการ ไม่มีharddeleteหรือเพิ่มIDใหม่; pending/expiredOWNERทำงานได้แต่SUSPENDED/KIOSK/ADMIN/MEMBERไม่ได้
+- หน้าhomeอ่าน `/api/packages` no-storeจากDB ไม่มีstatic/mockfallback; loading/error/retryและfocusrefresh ส่งcatalogVersionไปcreateorder
+- SQLสร้างquoteจากcatalogที่lockFORSHARE, ตรวจversionก่อนorderใหม่, staleแสดงให้โหลดใหม่; UUIDเดิมคืนsnapshotเดิมแม้ราคาเปลี่ยน/ปิดขาย; OWNERupdateมีexpectedVersion+audit+UUIDreplay ป้องกันเขียนทับ
+- ของแถมsnapshotVersion2รองรับfriend0..100/bonus0..365 เป็นคูปอง ไม่ต่อวันทันที; snapshotเก่าคงwhitelistและสิทธิ์เดิม
+- Applycatalogพร้อมbackup `.local-db/backup-2026-10-31T13-54-42.067Z` ข้อมูล30ตารางเดิมไม่เปลี่ยน seed10/audit0; applyinsertguardเพิ่มพร้อมbackup `.local-db/backup-2026-10-31T14-23-48.864Z` ทุก32ตาราง/function/triggerเดิมไม่เปลี่ยน
+- Insertguardกันolddeploymentส่งราคา/สิทธิ์เก่าหลังOWNERปรับ แต่legacyseedตรงcatalogยังใช้ได้; oldpendingและPAIDไม่มีrewriteหรือbackfill finalizerไม่เปลี่ยน
+- **Validation257/257tests**,TypeScript,lint,diffcheck,productionbuildแยกผ่าน; Browsercatalog7/7ที่360/390/1440 (save/409/network503sameUUID/reloadfail), paymentcurrencyrecovery6/6และfeedback9/9regressionผ่านแบบinterceptทั้งหมด
+- LiveDBrollback18checksผ่าน+hash32/32ตรงก่อนหลัง ไม่สร้างPAID/provider/SMS/แตะsessionผู้ใช้; nativePG4backendทดสอบdeploymentlockรอwritercommit→เห็นdriftและabort, writerใหม่ถูกblockจนcommit,64snapshotguardsผ่าน ไม่ใช่loadacceptanceทุกแบบ
+- ReviewพบbackupguardMVCCissueและแก้catalogrunnersเป็นREADCOMMITTED+tablelocksก่อนadvisorySELECT; nativeevidence `.local-db/portable-postgres-uat/catalog_lock_2d949e62b2/result.json`
+- **ต้องdeploywebcodeล่าสุดไปVercel** ก่อนใช้หน้าและAPIใหม่; สิ่งที่ปิดในรอบนี้คือpackagecatalogเท่านั้น ไม่เหมารวมOTPเปลี่ยนเบอร์/pointscoupon/physicalcard/guestwalkin/adminmembereditingว่าเสร็จ
+
+## Real payment receiver กรุงเทพผ่านแล้ว — 31 ต.ค. 2026
+
+- ผู้ใช้ส่งภาพPAIDsuccessหลังownerrecovery และparentตรวจDBจริงแบบread-only snapshotเดียว: orderPAID amount10000satang/points_earned5/memberACTIVE/memberpoints5
+- paid_at2026-10-31T09:47:30Z,confirmed_at2026-10-31T12:29:42.876Z,membership_expires_at/memberexpire2026-11-01T12:29:42.876Z ตรงภาพไทย1พ.ย.256919:29:42 ระยะเวลา1วันนับเมื่อยืนยัน ไม่มีเพิ่มซ้ำ
+- attemptVERIFIED/evidencepresent/provider_calls2; OWNER_RECHECK/THB_NUMERIC_CURRENCY_FIX audit1; pointsledger1รวม+5; globaltransferclaim1 ไม่มีsecondpayment/duplicatecredit
+- parentไม่เรียกprovider/ส่งSMS/แก้DBในรอบตรวจนี้; fullregression239/239,TypeScriptและlintรันใหม่ผ่าน
+- **ก่อนส่งมอบยังต้องปิด/ยอมรับเป็นลายลักษณ์อักษร:** ChromeDangerousในภาพdeploymentยังไม่ยืนยันแก้, credentialsที่เปิดเผยยังไม่มีหลักฐานrotate, `.env.local`ยังมีLOCAL_UAT_OWNER_PASSWORD_NOTEต้องไม่เอาขึ้นVercel, ฐานเดียวกับUATต้องจัดการtestaccounts/dataโดยไม่ลบเงินจริง, สิทธิ์บัญชี/ownership/backup/handover
+- ฟีเจอร์ขาดเดิมยังไม่ปิด: packagecatalogCRUD (เจ้าของปรับราคา/ของแถมเองยังไม่ได้), OTPเปลี่ยนเบอร์, adminmemberediting, pointsแลกcoupon, physicalcardmapping,guestwalkinไม่สมัครเต็ม; paymentpositivecaseผ่านไม่เท่ากับฟีเจอร์เหล่านี้เสร็จ
 
 ## Currency764 owner recovery พร้อมใช้งาน — 31 ต.ค. 2026
 

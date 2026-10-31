@@ -5,17 +5,17 @@ import { cookies } from "next/headers";
 import { getCurrentMember, SESSION_COOKIE } from "./auth/server";
 import { json, sameOrigin } from "./auth/http";
 import { generatePromptPayPayload } from "./promptpay";
-import { MAX_SLIP_BYTES, paymentReadiness, quotePackage, validateSlip, validImageSignature, type Receiver } from "./payment-policy";
+import { MAX_SLIP_BYTES, paymentReadiness, validateSlip, validImageSignature, type Receiver, type PaymentQuote } from "./payment-policy";
 import { z } from "zod";
 
 const uuid = z.string().uuid();
-const createInput = z.object({ packageId: z.number().int().positive(), promoCode: z.string().max(40).default(""), requestKey: uuid }).strict();
+const createInput = z.object({ packageId: z.number().int().positive(), promoCode: z.string().max(40).default(""), requestKey: uuid, catalogVersion: z.number().int().positive() }).strict();
 const sqlClient = () => {
   if (!process.env.DATABASE_URL) throw Error("Database unavailable");
   return neon(process.env.DATABASE_URL);
 };
 export type PaymentOrder = {
-  id: string; member_id: number; package_snapshot: ReturnType<typeof quotePackage>["package"];
+  id: string; member_id: number; package_snapshot: PaymentQuote["package"];
   receiver_snapshot: Receiver; amount_satang: number; subtotal_satang: number; discount_satang: number;
   created_at: string; expires_at: string; upload_deadline: string; status: "PENDING" | "PAID" | "REJECTED"; paid_at: string | null;
     rejection_reason: string | null; confirmed_at: string | null;
@@ -71,16 +71,16 @@ export async function createOrder(request: Request) {
     if (request.headers.get("content-type")?.split(";")[0] !== "application/json") return json({ error: "ข้อมูลไม่ถูกต้อง" }, 400);
     const parsed = createInput.safeParse(JSON.parse((await boundedBody(request, 4096)).toString("utf8")));
     if (!parsed.success) return json({ error: "ข้อมูลคำสั่งซื้อไม่ถูกต้อง" }, 400);
-    let quote;
-    try { quote = { ...quotePackage(parsed.data.packageId, ""), promo: parsed.data.promoCode.trim() ? { code: parsed.data.promoCode.trim().toUpperCase() } : null }; }
-    catch (cause) { return json({ error: cause instanceof Error ? cause.message : "แพ็กเกจไม่ถูกต้อง" }, 400); }
+    // Database locks the catalog version and constructs the authoritative price/benefits.
+    const quote = { package: { id: parsed.data.packageId, catalogVersion: parsed.data.catalogVersion }, promo: parsed.data.promoCode.trim() ? { code: parsed.data.promoCode.trim().toUpperCase() } : null };
     const readiness = paymentReadiness(process.env);
     if (!readiness.transfersEnabled) return json({ error: readiness.blocker, readiness }, 503);
     const receiver = receiverConfig();
     const sql = sqlClient();
-    const rows = await sql`SELECT * FROM create_package_payment_order(${randomUUID()}::uuid, ${auth.member.id}, ${auth.digest}, ${parsed.data.requestKey}::uuid, ${JSON.stringify(quote)}::jsonb, ${JSON.stringify(receiver)}::jsonb)`;
+    const rows = await sql`SELECT * FROM create_catalog_package_payment_order(${randomUUID()}::uuid, ${auth.member.id}, ${auth.digest}, ${parsed.data.requestKey}::uuid, ${JSON.stringify(quote)}::jsonb, ${JSON.stringify(receiver)}::jsonb)`;
     return json({ order: publicOrder(rows[0] as PaymentOrder) }, 201);
-  } catch {
+  } catch (error) {
+    if ((error as { message?: string }).message === "Stale catalog version") return json({ code: "PACKAGE_CATALOG_CHANGED", error: "แพ็กเกจมีการเปลี่ยนราคา/สิทธิ์แล้ว กรุณาปิดหน้าต่างและโหลดแพ็กเกจใหม่ก่อนยืนยัน" }, 409);
     return json({ error: "สร้างคำสั่งซื้อไม่ได้ กรุณาโหลดรายการค้างก่อน (อาจมีรายการค้าง/โควตาเต็ม/ระบบยังไม่พร้อม)" }, 409);
   }
 }

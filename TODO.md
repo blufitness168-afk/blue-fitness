@@ -1,4 +1,19 @@
-# 📋 MASTER TODO: Blu Fitness (อัปเดตสถานะ 24/10/2026)
+# 📋 MASTER TODO: Blu Fitness (อัปเดตสถานะ 31/10/2026)
+
+## OWNER แก้แพ็กเกจเอง — 31 ต.ค. 2026
+
+- [x] `/admin/packages` OWNERแก้ชื่อ/ราคา/วัน/ช่วงเวลา/ของแถม/เปิดปิด10แพ็กเกจ DBจริง มีversion/audit/UUIDretry ไม่มีmockfallback
+- [x] หน้าร้านอ่านDBและorderquoteSQLauthoritative; staleversionให้โหลดใหม่, pending/PAIDเก่าราคาและสิทธิ์ไม่เปลี่ยน
+- [x] Catalog+INSERTguardลงฐานพร้อมbackupแล้ว กันdeploymentเก่าส่งราคาเก่าหลังOWNERแก้ ไม่มีrewriteข้อมูลเดิม
+- [x] Tests257/257,TypeScript/lint/build,Chromecatalog7/7+paymentregression6/6+9/9,liveDBrollback18checks/hash32tablesตรง,nativePGdeploymentlockผ่าน
+- [ ] Deploycodeล่าสุดขึ้นVercelเพื่อเปิดเมนูและAPIใหม่ (ไม่commit/push/deployให้อัตโนมัติ)
+
+## ตรวจรับเงินจริงเข้าบัญชีร้าน — 31 ต.ค. 2026
+
+- [x] ผู้ใช้ตรวจสลิปจริง100บาทผ่านหลังแก้currency764และownerrecovery; DBPAID/ACTIVE+1วัน/points5, ledger1/audit1/transferclaim1/provider_calls2 ไม่มีเพิ่มซ้ำ
+- [x] Parentตรวจread-onlyและรันregressionใหม่239/239+TypeScript+lintผ่าน
+- [ ] ก่อนส่งมอบ: ตรวจChromeDangerous, rotateexposedcredentials, เอาLOCAL_UAT_OWNER_PASSWORD_NOTEออกจากProduction, testdata/accountcleanupแบบรักษาประวัติเงินจริง, owneraccess/backup/contractscope
+- [x] เจ้าของปรับราคา/ของแถมแพ็กเกจเดิมผ่านAdminได้แล้ว ดูหัวข้อOWNERแก้แพ็กเกจด้านบน; ยังไม่มีเพิ่ม/ลบแพ็กเกจ
 
 ## ย้าย DB จริง — 24 ต.ค. 2026 (สถานะล่าสุด ใช้แทนประวัติ mock ด้านล่าง)
 
@@ -13,7 +28,7 @@
 - [x] DBจริงrollback23checksทุกtableไม่เปลี่ยน; browser/APIจริง54/54; UI/security121/121รวมแก้mobileoverflowและPaymentModalkeyboardครบ
 - [x] NativePostgreSQLหลายconnection8racegroupsผ่าน (rewards/benefits/finance/frontdesk/payment/promocapacity/catalogsave) ไม่ใช่WASM; ดูscripts/real-modules-local-postgres.md
 - [ ] เหลือcoverageเชิงวิศวกรรม: browserCRUDทุกstate/fullproduction-equivalentschema/load/pooling/contentionเพิ่ม ไม่ใช่งานที่ต้องให้ผู้ใช้ทำแทน
-- [ ] ฟีเจอร์ที่ยังไม่ครบ: เปลี่ยนเบอร์OTP, memberadmineditingที่ปลอดภัย, แลกคะแนนเป็นคูปอง, ผูกบัตรแข็ง, guestwalk-inไม่สมัครเต็ม, packagecatalogCRUD
+- [ ] ฟีเจอร์ที่ยังไม่ครบ: เปลี่ยนเบอร์OTP, memberadmineditingที่ปลอดภัย, แลกคะแนนเป็นคูปอง, ผูกบัตรแข็ง, guestwalk-inไม่สมัครเต็ม; packagecatalogแก้ไขรายการเดิมเสร็จแล้ว
 - [ ] Productionconfig/บัญชีรับเงินร้าน/productionOTPและacceptance; ไม่ย้ายlocalStorageเก่าเป็นเงินจริงโดยอัตโนมัติ
 
 ## Kiosk USB ล่าสุด — 24 ต.ค. 2026

@@ -23,7 +23,8 @@ try{
     if(u.origin!==base)return route.abort();
     if(u.pathname.startsWith('/api/')){
      if(req.method()==='GET'&&u.pathname==='/api/member/payment-account')return json(200,{pendingOrder:order,readiness:order.readiness,ownerRecheckAvailable:!['member-no-recovery','already-prepared'].includes(scenario.name),ownerRecheckPrepared:scenario.name==='already-prepared'});
-     if(req.method()==='GET'&&u.pathname==='/api/auth/me')return json(200,{member:null});
+     if(req.method()==='GET'&&u.pathname==='/api/packages')return json(200,{packages:[{...order.package,label:'รายวัน',description:'UAT',isActive:true,friendCoupons:0,bonusDays:0,version:1,catalogVersion:1}]});
+          if(req.method()==='GET'&&u.pathname==='/api/auth/me')return json(200,{member:null});
      if(req.method()==='POST'&&u.pathname===`/api/admin/payments/${id}/recheck`){
       writes.push('prepare');assert.deepEqual(req.postDataJSON(),{confirmed:true,reason:'THB_NUMERIC_CURRENCY_FIX'});
       return json(scenario.name==='prepare-rejected'?409:200,scenario.name==='prepare-rejected'?{error:'UAT recovery refused'}:{prepared:true});

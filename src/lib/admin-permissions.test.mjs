@@ -10,7 +10,7 @@ test("persisted role matrix and safe route boundaries", () => {
     assert.equal(canAccessAdminPath("OWNER", path), true);
     assert.equal(canAccessAdminPath("MEMBER", path), false);
   }
-  for (const path of ["/admin", "/admin/members", "/admin/members/BLU-1", "/admin/finance"]) {
+  for (const path of ["/admin", "/admin/members", "/admin/members/BLU-1", "/admin/finance", "/admin/packages"]) {
     assert.equal(canAccessAdminPath("ADMIN", path), false);
     assert.equal(canAccessAdminPath("OWNER", path), true);
   }
@@ -22,7 +22,7 @@ test("persisted role matrix and safe route boundaries", () => {
 
 test("restricted pages and staff sections have server guards", () => {
   const read = (path) => fs.readFileSync(new URL(`../app/${path}`, import.meta.url), "utf8");
-  for (const path of ["admin/page.tsx", "admin/members/page.tsx", "admin/members/[memberCode]/page.tsx", "admin/finance/page.tsx"]) {
+  for (const path of ["admin/page.tsx", "admin/members/page.tsx", "admin/members/[memberCode]/page.tsx", "admin/finance/page.tsx", "admin/packages/page.tsx"]) {
     assert.match(read(path), /await requireAdminPage\(/);
     assert.doesNotMatch(read(path), /[\"']use client[\"']/);
   }

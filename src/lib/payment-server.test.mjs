@@ -14,7 +14,10 @@ function setup({ authenticated = true, masked = false, timeout = false, failFina
   const state = { order: { id: orderId, member_id: 1, package_snapshot: { id: 2, name: 'BLU 30 วัน', durationDays: 30 }, receiver_snapshot: receiver, amount_satang: 90000, subtotal_satang: 90000, discount_satang: 0, created_at: new Date(Date.now() - 300000).toISOString(), expires_at: new Date(Date.now() + 600000).toISOString(), upload_deadline: new Date(Date.now() + 2400000).toISOString(), status: 'PENDING', points_earned: 45 }, attempt: null, benefits: 0, failFinalize };
   const sql = async (parts, ...values) => {
     const text = parts.join('?'); queries.push({ text, values });
-    if (text.includes('create_package_payment_order')) return [state.order];
+    if (text.includes('create_catalog_package_payment_order')) {
+          if (state.staleCatalog) throw Error('Stale catalog version');
+          return [state.order];
+        }
     if (text.includes('prepare_owner_payment_currency_recheck') || text.includes('prepare_owner_payment_recheck')) { state.recheckPrepared = true; return [{ id: 'offline-attempt' }]; }
     if (text.includes('FROM package_payment_resolution_audit')) return state.recheckPrepared ? [{ id: 'offline-audit' }] : [];
     if (text.includes('reject_unresolved_package_payment')) { state.order.status = 'REJECTED'; state.order.rejection_reason = 'OWNER_RECONCILED_REJECTION'; state.audit = (state.audit ?? 0) + 1; return [state.order]; }
@@ -70,29 +73,25 @@ test('unauthenticated and cross-origin requests never consume quota', async () =
 });
 test('client price, unknown fields, invalid UUID and forged signature are rejected', async () => {
   const app = setup();
-  const req = new Request('https://local/api/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: 2, requestKey: randomUUID(), amount: 1 }) });
+  const req = new Request('https://local/api/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: 2, catalogVersion: 7, requestKey: randomUUID(), amount: 1 }) });
   assert.equal((await app.createOrder(req)).status, 400);
   assert.equal((await app.verifyOrder(upload(), 'invalid')).status, 404);
   assert.equal((await app.verifyOrder(upload({ spoof: true }), orderId)).status, 400);
   assert.equal((await app.verifyOrder(upload({ extra: true }), orderId)).status, 400);
   assert.equal(app.calls.length, 0);
 });
-test('order creation sends server base quote and normalized promo; response uses DB discount and points', async () => {
+test('order creation sends catalog identity and normalized promo only; response uses DB amounts and points', async () => {
   const app = setup();
-  // Model the DB-resolved result, deliberately different from the input base quote.
+  // Only the DB resolves amounts and benefits; the request supplies catalog identity.
   Object.assign(app.state.order, { amount_satang: 80000, discount_satang: 10000, points_earned: 40 });
   const requestKey = randomUUID();
-  const req = new Request('https://local/api/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: 2, promoCode: ' blu100 ', requestKey }) });
+  const req = new Request('https://local/api/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: 2, catalogVersion: 7, promoCode: ' blu100 ', requestKey }) });
   const response = await app.createOrder(req);
   assert.equal(response.status, 201);
-  const query = app.queries.find(q => q.text.includes('create_package_payment_order'));
+  const query = app.queries.find(q => q.text.includes('create_catalog_package_payment_order'));
+    assert.ok(query);
   const quote = JSON.parse(query.values[4]);
-  assert.equal(quote.package.id, 2);
-  assert.equal(quote.subtotalSatang, 90000);
-  assert.equal(quote.amountSatang, 90000);
-  assert.equal(quote.discountSatang, 0);
-  assert.equal(quote.pointsEarned, 45);
-  assert.deepEqual(quote.promo, { code: 'BLU100' });
+  assert.deepEqual(quote, { package: { id: 2, catalogVersion: 7 }, promo: { code: 'BLU100' } });
   assert.equal(query.values[1], 1);
   assert.match(query.values[2], /^[a-f0-9]{64}$/);
   assert.notEqual(query.values[2], 'a'.repeat(64));
@@ -105,6 +104,19 @@ test('order creation sends server base quote and normalized promo; response uses
   assert.equal(order.pointsEarned, 40);
   assert.equal(order.status, 'PENDING');
   assert.equal(order.qrPayload, app.load('./promptpay').generatePromptPayPayload(receiver.promptpay, 800));
+  assert.equal(app.calls.length, 0);
+  assert.equal(app.state.benefits, 0);
+});
+test('missing catalog version rejects before SQL and stale catalog returns actionable 409', async () => {
+  const app = setup();
+  const request = body => new Request('https://local/api/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  assert.equal((await app.createOrder(request({ packageId: 2, requestKey: randomUUID() }))).status, 400);
+  assert.equal(app.queries.length, 0);
+  app.state.staleCatalog = true;
+  const response = await app.createOrder(request({ packageId: 2, catalogVersion: 7, requestKey: randomUUID() }));
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, 'PACKAGE_CATALOG_CHANGED');
+  assert.equal(app.queries.length, 1);
   assert.equal(app.calls.length, 0);
   assert.equal(app.state.benefits, 0);
 });
@@ -243,7 +255,7 @@ test('upload grace accepts first image after transfer expiry but rejects late tr
 });
 test('receiver blocker disables creating orders, QR and new provider calls by default', async () => {
   const app = setup({ transfersEnabled: false });
-  const req = new Request('https://local/api/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: 2, requestKey: randomUUID() }) });
+  const req = new Request('https://local/api/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: 2, catalogVersion: 7, requestKey: randomUUID() }) });
   assert.equal((await app.createOrder(req)).status, 503);
   assert.equal(app.publicOrder(app.state.order).qrPayload, null);
   assert.equal((await app.verifyOrder(upload(), orderId)).status, 503);

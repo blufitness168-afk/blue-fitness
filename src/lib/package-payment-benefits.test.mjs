@@ -17,7 +17,7 @@ function load(path, dependencies = {}) {
 const catalog = load('./mock-data.ts');
 const { quotePackage } = load('./payment-policy.ts', { './mock-data': catalog });
 const expected = [[90,0,0],[900,5,0],[2400,5,15],[4200,5,30],[7200,10,60],[100,0,0],[1000,5,0],[2700,5,15],[4800,5,30],[8400,10,60]];
-test('all ten BUSINESS prices/benefits use the real server quote and copied snapshot', () => {
+test('all ten initial BUSINESS prices/benefits match the legacy seed and production creation uses versioned DB catalog', () => {
  assert.equal(catalog.mockPackages.length, 10);
  for (const [index, [price, friends, days]] of expected.entries()) {
   const quote = quotePackage(index + 1, '');
@@ -27,7 +27,9 @@ test('all ten BUSINESS prices/benefits use the real server quote and copied snap
   assert.notEqual(quote.package, catalog.mockPackages[index]);
  }
  const server = read('./payment-server.ts');
- assert.match(server, /quotePackage\(parsed.data.packageId, ""\)/);
+ assert.doesNotMatch(server, /quotePackage\(parsed.data.packageId/);
+ assert.match(server, /create_catalog_package_payment_order/);
+ assert.match(server, /catalogVersion: parsed.data.catalogVersion/);
  assert.match(server, /JSON.stringify\(quote\)/);
  assert.match(server, /createInput = z.object\(\{ packageId:/);
 });

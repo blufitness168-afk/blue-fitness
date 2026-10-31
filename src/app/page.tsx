@@ -4,7 +4,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getPackagesBySlot, type TimeSlot, type MockPackage } from "@/lib/mock-data";
+import type { TimeSlot } from "@/lib/mock-data";
+import type { PackageCatalogItem } from "@/lib/package-catalog";
 import PaymentModal from "@/components/PaymentModal";
 import Navbar from "@/components/Navbar";
 import { useLanguage } from "@/context/LanguageContext";
@@ -17,7 +18,50 @@ export default function Home() {
   const { t, lang } = useLanguage();
   const router = useRouter();
   const [activeSlot, setActiveSlot] = useState<TimeSlot>("07:00-22:00");
-  const [selectedPackage, setSelectedPackage] = useState<MockPackage | null>(null);
+  const [selectedPackage, setSelectedPackage] = useState<PackageCatalogItem | null>(null);
+    const [catalog, setCatalog] = useState<PackageCatalogItem[]>([]);
+    const [catalogStatus, setCatalogStatus] = useState<"loading" | "ready" | "error">("loading");
+    const [catalogRequest, setCatalogRequest] = useState(0);
+
+    useEffect(() => {
+      let controller: AbortController;
+      let active = true;
+
+      async function loadCatalog() {
+        controller?.abort();
+        const request = new AbortController();
+        controller = request;
+        try {
+          const response = await fetch("/api/packages", {
+            cache: "no-store",
+            signal: request.signal,
+          });
+          if (!response.ok) throw new Error("Package catalog request failed");
+          const result = await response.json();
+          if (!Array.isArray(result?.packages)) throw new Error("Invalid package catalog");
+          if (!active || request.signal.aborted) return;
+          setCatalog(result.packages);
+          setCatalogStatus("ready");
+        } catch {
+          if (!active || request.signal.aborted) return;
+          setCatalog([]);
+          setCatalogStatus("error");
+        }
+      }
+
+      function refreshCatalog() {
+        setCatalogStatus("loading");
+        void loadCatalog();
+      }
+
+      void loadCatalog();
+      window.addEventListener("focus", refreshCatalog);
+      return () => {
+        active = false;
+        controller?.abort();
+        window.removeEventListener("focus", refreshCatalog);
+      };
+    }, [catalogRequest]);
   const [member, setMember] = useState<{
     fullName?: string;
     avatarUrl?: string;
@@ -42,7 +86,7 @@ export default function Home() {
     router.refresh();
   };
 
-  const packages = getPackagesBySlot(activeSlot);
+  const packages = catalog.filter((pkg) => pkg.isActive && pkg.timeSlot === activeSlot);
 
   return (
     <main className="min-h-screen bg-white text-blu-dark">
@@ -138,7 +182,7 @@ export default function Home() {
             </p>
 
             {/* Time Slot Toggle */}
-            <div className="mt-6 inline-flex items-center bg-white rounded-xl p-1.5 shadow-sm border border-blu-sky/60">
+            <div className="mt-6 inline-flex max-w-full items-center bg-white rounded-xl p-1.5 shadow-sm border border-blu-sky/60">
               <button
                 onClick={() => setActiveSlot("07:00-14:00")}
                 className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all cursor-pointer ${activeSlot === "07:00-14:00"
@@ -160,7 +204,26 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          {catalogStatus === "loading" ? (
+            <p role="status" className="text-center text-blu-steel py-10">
+              {lang === "en" ? "Loading packages…" : "กำลังโหลดแพ็กเกจ…"}
+            </p>
+          ) : catalogStatus === "error" ? (
+            <div role="alert" className="text-center py-10 space-y-4">
+              <p>{lang === "en" ? "Unable to load packages. Please try again." : "โหลดแพ็กเกจไม่สำเร็จ กรุณาลองใหม่"}</p>
+              <button type="button" className="btn-blue px-5 py-2.5 rounded-xl" onClick={() => {
+                setCatalogStatus("loading");
+                setCatalogRequest((request) => request + 1);
+              }}>
+                {lang === "en" ? "Retry" : "ลองใหม่"}
+              </button>
+            </div>
+          ) : packages.length === 0 ? (
+            <p role="status" className="text-center text-blu-steel py-10">
+              {lang === "en" ? "No packages available for this time slot." : "ยังไม่มีแพ็กเกจสำหรับช่วงเวลานี้"}
+            </p>
+          ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 min-w-0">
             {packages.map((pkg, index) => {
               const isLast = index === packages.length - 1;
               const isDaily = pkg.durationDays === 1;
@@ -187,7 +250,7 @@ export default function Home() {
               return (
                 <div
                   key={pkg.id}
-                  className={`relative bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-lg transition-shadow flex flex-col justify-between ${isLast
+                  className={`relative min-w-0 break-words bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-lg transition-shadow flex flex-col justify-between ${isLast
                     ? "ring-2 ring-blu-yellow"
                     : isDaily
                       ? "ring-1 ring-blu-ocean/40 border border-blu-sky/40"
@@ -236,7 +299,7 @@ export default function Home() {
                     {/* 3. Select CTA Button */}
                     <button
                       type="button"
-                      onClick={() => setSelectedPackage(pkg)}
+                      onClick={() => setSelectedPackage({ ...pkg, catalogVersion: pkg.version })}
                       className={`w-full py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer shadow-xs ${isLast
                         ? "btn-gold"
                         : isDaily
@@ -251,6 +314,7 @@ export default function Home() {
               );
             })}
           </div>
+          )}
         </div>
       </section>
 

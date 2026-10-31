@@ -4,23 +4,24 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
-import { X, Loader2, CheckCircle2 } from "lucide-react";
+import { X, Loader2, CheckCircle2, Upload } from "lucide-react";
 import type { MockPackage } from "@/lib/mock-data";
 import { RECEIVER_BLOCKER } from "@/lib/payment-policy";
 
+type PaymentPackage = MockPackage & { catalogVersion?: number; version?: number };
 type Order = {
-  id: string; package: MockPackage; receiver: { promptpay: string; bankCode: string; bankAccount: string; name: string };
+  id: string; package: PaymentPackage; receiver: { promptpay: string; bankCode: string; bankAccount: string; name: string };
   amountSatang: number; subtotalSatang: number; discountSatang: number; expiresAt: string; uploadDeadline: string;
   readiness: { transfersEnabled: boolean; blocker: string | null }; rejectionReason: string | null;
   status: "PENDING" | "PAID" | "REJECTED"; qrPayload: string | null; membershipExpiresAt: string | null; pointsEarned: number;
 };
 const money = (amount: number) => (amount / 100).toLocaleString("th-TH", { minimumFractionDigits: 2 });
 const date = (value: string) => new Date(value).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" });
-export default function PaymentModal({ pkg, isOpen, onClose }: { pkg: MockPackage | null; isOpen: boolean; onClose: () => void }) {
+export default function PaymentModal({ pkg, isOpen, onClose }: { pkg: PaymentPackage | null; isOpen: boolean; onClose: () => void }) {
   if (!isOpen || !pkg) return null;
   return <PaymentForm key={pkg.id} pkg={pkg} onClose={onClose} />;
 }
-function PaymentForm({ pkg, onClose }: { pkg: MockPackage; onClose: () => void }) {
+function PaymentForm({ pkg, onClose }: { pkg: PaymentPackage; onClose: () => void }) {
   const router = useRouter();
   const [order, setOrder] = useState<Order | null>(null);
   const [promoCode, setPromoCode] = useState("");
@@ -113,7 +114,7 @@ function PaymentForm({ pkg, onClose }: { pkg: MockPackage; onClose: () => void }
   }
   async function create() {
     requestKey.current ??= crypto.randomUUID();
-    const response = await fetch("/api/payments/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ packageId: pkg.id, promoCode, requestKey: requestKey.current }) });
+    const response = await fetch("/api/payments/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ packageId: pkg.id, catalogVersion: pkg.catalogVersion ?? pkg.version, promoCode, requestKey: requestKey.current }) });
     const body = await response.json();
     if (body.readiness) setReadiness(body.readiness);
     if (!response.ok) throw Error(body.error ?? "สร้างคำสั่งซื้อไม่ได้");
@@ -172,8 +173,19 @@ function PaymentForm({ pkg, onClose }: { pkg: MockPackage; onClose: () => void }
           {transfersEnabled && <p className="text-sm">{order.receiver.name}<br />PromptPay {order.receiver.promptpay}<br />บัญชี {order.receiver.bankAccount} • ธนาคาร {{ "002": "กรุงเทพ", "004": "กสิกรไทย" }[order.receiver.bankCode] ?? order.receiver.bankCode}</p>}
           <p className="text-xs">คำสั่งซื้อ {order.id}<br />โอนภายใน {date(order.expiresAt)} (15 นาที)<br />อัปโหลดสลิปได้ถึง {date(order.uploadDeadline)} (เพิ่ม 30 นาที เฉพาะโอนทันเวลา)</p>
           {transfersEnabled && !expired && order.qrPayload ? <div className="flex justify-center rounded-xl border bg-white p-4"><QRCodeSVG value={order.qrPayload} size={200} /></div> : <p className="font-bold text-rose-700">ห้ามโอนเพิ่ม {uploadExpired ? "พ้นเวลาอัปโหลดใหม่แล้ว กู้ได้เฉพาะผลตรวจที่บันทึกไว้ หรือติดต่อเจ้าของ" : "หากโอนทันกำหนด ส่งรูปสลิปได้ภายใน upload deadline"}</p>}
-          <label className="block text-sm">รูปสลิป (ไม่เกิน 4 MB)<input className="mt-2 block w-full" type="file" accept="image/jpeg,image/png,image/gif,image/webp" disabled={busy} onChange={e => setFile(e.target.files?.[0] ?? null)} /></label>
-          <button className={`${button} w-full`} disabled={busy || !file} onClick={() => void run(() => verify())}>{transfersEnabled ? "ตรวจสลิปจริง / บันทึกผลเดิม" : "กู้ผลตรวจที่บันทึกไว้เท่านั้น"}</button>
+          <section aria-label="แนบและส่งสลิป" className="space-y-3 rounded-2xl border border-blu-sky bg-blu-ice/50 p-4">
+            <h3 className="font-bold">แจ้งชำระเงินด้วยสลิป</h3>
+            <label className={`flex min-h-24 cursor-pointer items-center gap-3 rounded-xl border-2 border-dashed p-4 focus-within:ring-2 focus-within:ring-blu-slate focus-within:ring-offset-2 ${busy ? "cursor-not-allowed opacity-50" : "border-blu-slate bg-white hover:bg-blu-sky/20"}`}>
+              <input className="sr-only" type="file" aria-label="1. เลือกรูปสลิป" aria-describedby="payment-slip-help" accept="image/jpeg,image/png,image/gif,image/webp" disabled={busy} onChange={e => setFile(e.target.files?.[0] ?? null)} />
+              <Upload className="h-7 w-7 shrink-0 text-blu-slate" aria-hidden="true" />
+              <span className="min-w-0"><span className="block font-bold text-blu-dark">1. {file ? "เปลี่ยนรูปสลิป" : "เลือกรูปสลิป"}</span><span className="mt-1 block text-xs text-blu-steel">แตะเพื่อเลือกรูปจากเครื่อง · JPG, PNG, GIF, WebP ไม่เกิน 4 MB</span></span>
+            </label>
+            <p aria-live="polite" className={`break-all text-sm ${file ? "font-semibold text-emerald-700" : "text-blu-steel"}`}>{file ? `เลือกแล้ว: ${file.name}` : "ยังไม่ได้เลือกรูปสลิป"}</p>
+            <button className={`${button} flex min-h-14 w-full items-center justify-center gap-2 shadow-sm disabled:cursor-not-allowed`} disabled={busy || !file} onClick={() => void run(() => verify())}>
+              {busy ? <><Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden="true" />กำลังดำเนินการ กรุณารอ…</> : transfersEnabled ? "2. ส่งสลิปและตรวจสอบการชำระเงิน" : "2. กู้ผลตรวจที่บันทึกไว้เท่านั้น"}
+            </button>
+            <p id="payment-slip-help" className="text-xs text-blu-steel">เลือกรูปอย่างเดียวยังไม่ส่งตรวจ ต้องกดปุ่มขั้นที่ 2 แล้วรอผล ไม่ต้องโอนเงินซ้ำ</p>
+          </section>
           {ownerRecheckAvailable && <button className="block text-sm font-bold underline" disabled={busy || !file} onClick={() => void run(prepareRecheck)}>OWNER: ตรวจสลิปเดิมอีกครั้งหลังแก้สกุลเงิน (1 ครั้ง)</button>}
           <button className="text-xs underline disabled:opacity-40" disabled={busy || !file || (uploadExpired && !ownerRecheckPrepared) || !transfersEnabled} onClick={() => void run(() => verify(true))}>ยังไม่ทราบผล: ยืนยันตรวจรูปเดิมซ้ำ (อาจใช้โควตาเพิ่ม)</button>
           {uploadExpired && <button className="block text-xs underline" disabled={busy} onClick={() => { setOrder(null); setFile(null); requestKey.current = null; setNotice("รายการเดิมยังเก็บใน DB หากมีผลตรวจค้าง เซิร์ฟเวอร์จะไม่อนุญาตสร้างใหม่"); }}>เลือกสร้างรายการใหม่ (เฉพาะยังไม่ได้โอน)</button>}

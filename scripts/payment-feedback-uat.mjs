@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 // Browser-only fixtures: never import DB helpers or forward an API request.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const require = createRequire(path.join(root, '.local-db/role-browser/package.json'));
-const base = 'http://localhost:3000';
+const base = process.env.PAYMENT_UI_BASE || 'http://localhost:3000';
 const id = '00000000-0000-4000-8000-00000000face';
 const output = path.join(root, '.local-db', `payment-feedback-${Date.now()}`);
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
@@ -59,7 +59,8 @@ try {
             calls++;
             return json(scenario.status, { error: scenario.text, order, ...(scenario.pending ? { pending: true } : {}) });
           }
-          if (method === 'GET' && url.pathname === '/api/auth/me') return json(200, { member: null });
+          if (method === 'GET' && url.pathname === '/api/packages') return json(200, { packages: [{ ...order.package, version: 1, catalogVersion: 1 }] });
+                    if (method === 'GET' && url.pathname === '/api/auth/me') return json(200, { member: null });
           return json(403, { error: 'UAT blocked API — no upstream request' });
         }
         if (!['GET', 'HEAD'].includes(method)) { audit.push({ deniedNonApiWrite: url.pathname, method }); return route.abort('blockedbyclient'); }
@@ -73,12 +74,16 @@ try {
       const dialog = page.getByRole('dialog');
       await expect(dialog).toBeVisible();
       await expect(dialog.getByText(order.package.name, { exact: true })).toBeVisible();
+      await expect(dialog.getByRole('button', { name: '2. ส่งสลิปและตรวจสอบการชำระเงิน', exact: true })).toBeDisabled();
+      await expect(dialog.getByText('ยังไม่ได้เลือกรูปสลิป', { exact: true })).toBeVisible();
       await dialog.locator('input[type=file]').setInputFiles({ name: 'uat-synthetic.png', mimeType: 'image/png', buffer: png });
+      await expect(dialog.getByText('เลือกแล้ว: uat-synthetic.png', { exact: true })).toBeVisible();
+      assert.equal(calls, 0, 'Selecting the file alone must never submit verification');
       const panel = dialog.locator(':scope > div');
       await panel.evaluate(el => { el.scrollTop = el.scrollHeight; });
       const before = await panel.evaluate(el => ({ top: el.scrollTop, height: el.clientHeight, total: el.scrollHeight }));
       assert.ok(before.top > 0, 'Must scroll inside modal before verifying');
-      const verify = dialog.getByRole('button', { name: 'ตรวจสลิปจริง / บันทึกผลเดิม', exact: true });
+      const verify = dialog.getByRole('button', { name: '2. ส่งสลิปและตรวจสอบการชำระเงิน', exact: true });
       await expect(verify).toBeEnabled();
       await verify.click();
       const feedback = dialog.getByRole(scenario.role).filter({ hasText: scenario.text });
