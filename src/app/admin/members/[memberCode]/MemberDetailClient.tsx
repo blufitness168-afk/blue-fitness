@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { currentStatus, type getAdminMember } from "@/lib/admin-members-server";
-import MemberRoleAction from "./MemberRoleAction";
+import MemberRoleAction from "../MemberRoleAction";
 
 function date(value: string | null) {
   return value ? new Date(value).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" }) : "—";
