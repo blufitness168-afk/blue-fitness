@@ -22,6 +22,7 @@ function priceValue(text: string): number | null {
 
 export default function PackageCatalogClient() {
   const [packages, setPackages] = useState<PackageCatalogItem[]>([]);
+  const [activeSlot, setActiveSlot] = useState<"07:00-14:00" | "07:00-22:00">("07:00-14:00");
   const [draft, setDraft] = useState<Draft | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState(false);
@@ -127,23 +128,55 @@ export default function PackageCatalogClient() {
 
   function handleAddOrActivateClick() {
     setMessage("");
-    const inactive = packages.find((p) => !p.isActive);
-    if (inactive) {
-      setDraft({ ...draftOf(inactive), isActive: true });
+    const slotPackages = packages.filter((p) => p.timeSlot === activeSlot);
+    const inactiveInSlot = slotPackages.find((p) => !p.isActive);
+    const inactiveAny = packages.find((p) => !p.isActive);
+    const target = inactiveInSlot ?? inactiveAny;
+    if (target) {
+      setDraft({ ...draftOf(target), isActive: true, timeSlot: activeSlot });
       return;
     }
-    setMessage("แพ็กเกจทั้ง 10 รูปแบบเปิดขายอยู่แล้ว สามารถคลิกเลือกการ์ดใดก็ได้เพื่อปรับเปลี่ยนข้อมูล");
+    setMessage("แพ็กเกจทุกรายการในระบบเปิดขายอยู่แล้ว สามารถคลิกการ์ดใดก็ได้เพื่อแก้ไขข้อมูล");
   }
 
   const disabled = busy || !!pending || loading || needsReload || !!loadError;
+  const slotPackages = packages.filter((p) => p.timeSlot === activeSlot);
 
   return (
-    <div className="mx-auto w-full min-w-0 max-w-6xl space-y-6 break-words">
+    <div className="mx-auto w-full min-w-0 max-w-7xl space-y-6 break-words">
       <header>
         <h1 className="text-2xl font-black text-blu-dark">จัดการแพ็กเกจ</h1>
         <p className="mt-2 text-sm text-slate-600">แก้ไขแพ็กเกจเดิมเท่านั้น เปิด/ปิดขายได้ ไม่มีการเพิ่มหรือลบ</p>
         <p className="mt-1 text-sm text-slate-600">ราคาใหม่ใช้กับคำสั่งซื้อใหม่ คำสั่งซื้อเก่าที่รอชำระยังคงราคาและสิทธิ์เดิม วันโบนัสเป็นคูปอง ไม่ได้เพิ่มวันสมาชิกอัตโนมัติ</p>
       </header>
+
+      {/* Time Slot Toggle (Clean style identical to Homepage) */}
+      <div className="flex justify-center pt-2">
+        <div className="inline-flex bg-white p-1 rounded-xl shadow-xs border border-blu-sky/30">
+          <button
+            type="button"
+            onClick={() => setActiveSlot("07:00-14:00")}
+            className={`px-5 py-2 rounded-lg text-sm font-bold transition-all cursor-pointer ${
+              activeSlot === "07:00-14:00"
+                ? "bg-blu-slate text-white shadow-xs"
+                : "text-blu-steel hover:text-blu-dark"
+            }`}
+          >
+            07:00 - 14:00 (Off-Peak)
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSlot("07:00-22:00")}
+            className={`px-5 py-2 rounded-lg text-sm font-bold transition-all cursor-pointer ${
+              activeSlot === "07:00-22:00"
+                ? "bg-blu-slate text-white shadow-xs"
+                : "text-blu-steel hover:text-blu-dark"
+            }`}
+          >
+            07:00 - 22:00 (All-Day)
+          </button>
+        </div>
+      </div>
 
       {message && <p role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm">{message}</p>}
       {loadError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{loadError} — กรุณาลองใหม่</p>}
@@ -157,126 +190,128 @@ export default function PackageCatalogClient() {
         </section>
       )}
 
-      {loading && <p role="status" className="text-sm text-slate-500">กำลังโหลดแพ็กเกจ…</p>}
-      {!loading && !loadError && packages.length === 0 && <p className="text-sm text-slate-500">ไม่พบแพ็กเกจ</p>}
+      {loading && <p role="status" className="text-center text-sm text-slate-500 py-6">กำลังโหลดแพ็กเกจ…</p>}
+      {!loading && !loadError && packages.length === 0 && <p className="text-center text-sm text-slate-500 py-6">ไม่พบแพ็กเกจ</p>}
 
-      {/* Cards Grid: Dashed + card first, followed by package cards */}
-      <div className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {/* Cards Grid: Dashed + card first, followed by clean homepage-style package cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 min-w-0">
         {/* First Card: Dashed border with + icon */}
         <button
           type="button"
           disabled={disabled}
           onClick={handleAddOrActivateClick}
-          className="group flex min-h-[180px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 p-6 text-center transition-all hover:border-blu-slate hover:bg-blue-50/40 cursor-pointer disabled:opacity-50"
+          className="relative min-w-0 break-words rounded-2xl border-2 border-dashed border-slate-300 hover:border-blu-slate hover:bg-blu-ice/40 p-5 flex flex-col items-center justify-center text-center cursor-pointer transition-all min-h-[280px] group disabled:opacity-50"
         >
-          <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition-colors group-hover:bg-blue-100 group-hover:text-blu-slate">
-            <svg className="h-6 w-6 stroke-[2.5]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="w-12 h-12 rounded-full bg-slate-100 group-hover:bg-blue-100 flex items-center justify-center text-slate-500 group-hover:text-blu-slate transition-colors mb-3">
+            <svg className="w-6 h-6 stroke-[2.5]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
           </div>
-          <span className="font-bold text-slate-700 group-hover:text-blu-slate">
+          <span className="text-base font-black text-slate-700 group-hover:text-blu-slate tracking-tight">
             เพิ่ม / เปิดใช้แพ็กเกจ
           </span>
-          <span className="mt-1 text-xs text-slate-500">
-            เลือกแพ็กเกจที่ยังปิดขายเพื่อเปิดใช้งาน
+          <span className="text-xs text-blu-steel mt-1">
+            คลิกเพื่อตั้งค่าและเปิดขาย
           </span>
         </button>
 
-        {/* Existing Package Cards */}
-        {packages.map((item) => {
-          const isOffPeak = item.timeSlot === "07:00-14:00";
+        {/* Package Cards styled identical to Homepage */}
+        {slotPackages.map((pkg, index) => {
+          const isLast = index === slotPackages.length - 1;
+          const isDaily = pkg.durationDays === 1;
+          const pricePerDay =
+            pkg.durationDays > 1
+              ? Math.round(pkg.price / pkg.durationDays)
+              : null;
+
           return (
-            <button
-              key={item.id}
-              type="button"
-              disabled={disabled}
+            <div
+              key={pkg.id}
               onClick={() => {
-                setDraft(draftOf(item));
+                setDraft(draftOf(pkg));
                 setMessage("");
               }}
-              className={`group relative flex min-h-[180px] flex-col justify-between rounded-2xl border bg-white p-5 text-left transition-all hover:shadow-md cursor-pointer disabled:opacity-60 ${
-                draft?.id === item.id
-                  ? "border-blu-slate ring-2 ring-blu-slate/30"
-                  : "border-slate-200 hover:border-slate-300"
+              className={`relative min-w-0 break-words bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-lg transition-shadow flex flex-col justify-between cursor-pointer ${
+                !pkg.isActive
+                  ? "opacity-60 border border-dashed border-slate-300"
+                  : isLast
+                    ? "ring-2 ring-blu-yellow"
+                    : isDaily
+                      ? "ring-1 ring-blu-ocean/40 border border-blu-sky/40"
+                      : "ring-2 ring-blu-slate"
               }`}
             >
-              <div>
-                {/* Meta & Badges */}
-                <div className="mb-2.5 flex flex-wrap items-center justify-between gap-1.5">
-                  <span className="text-xs font-semibold text-slate-400">
-                    #{item.id} · v{item.version}
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
-                        isOffPeak
-                          ? "bg-amber-100 text-amber-800"
-                          : "bg-blue-100 text-blue-800"
-                      }`}
-                    >
-                      {isOffPeak ? "Off-Peak (07:00-14:00)" : "All-Day (07:00-22:00)"}
-                    </span>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
-                        item.isActive
-                          ? "bg-emerald-100 text-emerald-800"
-                          : "bg-slate-100 text-slate-500"
-                      }`}
-                    >
-                      {item.isActive ? "เปิดขาย" : "ปิดขาย"}
-                    </span>
+              {/* Top Badge */}
+              <div
+                className={`text-center py-1.5 text-xs font-bold tracking-wider uppercase ${
+                  !pkg.isActive
+                    ? "bg-slate-400 text-white"
+                    : isLast
+                      ? "bg-blu-yellow text-blu-dark"
+                      : isDaily
+                        ? "bg-blu-steel text-white"
+                        : "bg-blu-slate text-white"
+                }`}
+              >
+                {!pkg.isActive
+                  ? "ปิดขาย"
+                  : isLast
+                    ? "คุ้มที่สุด"
+                    : isDaily
+                      ? "ทั่วไป"
+                      : "ยอดนิยม"}
+              </div>
+
+              <div className="p-5 flex flex-col flex-1 justify-between text-center space-y-4">
+                {/* 1. Duration & Time Slot */}
+                <div>
+                  <div className="text-xl font-black text-blu-dark tracking-tight">
+                    {pkg.label}
+                  </div>
+                  <div className="text-xs text-blu-steel font-medium mt-1">
+                    {pkg.timeSlot}
                   </div>
                 </div>
 
-                {/* Title & Label */}
-                <h3 className="text-base font-bold text-blu-dark group-hover:text-blu-slate transition-colors">
-                  {item.name}
-                </h3>
-                {item.label && item.label !== item.name && (
-                  <p className="mt-0.5 text-xs font-medium text-blu-steel">
-                    ป้าย: {item.label}
-                  </p>
-                )}
-
-                {/* Description */}
-                {item.description && (
-                  <p className="mt-2 text-xs text-slate-500 line-clamp-2">
-                    {item.description}
-                  </p>
-                )}
-              </div>
-
-              {/* Pricing & Duration footer */}
-              <div className="mt-4 border-t border-slate-100 pt-3">
-                <div className="flex items-baseline justify-between">
-                  <span className="text-lg font-black text-blu-dark">
-                    ฿{Number(item.price).toLocaleString("th-TH", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </span>
-                  <span className="text-xs font-semibold text-slate-600">
-                    {item.durationDays} วัน
-                  </span>
+                {/* 2. Price Section */}
+                <div className="py-3.5 px-3 bg-blu-ice/60 rounded-xl border border-blu-sky/40">
+                  <div className="text-3xl font-black text-blu-dark tracking-tight">
+                    ฿{Math.round(pkg.price).toLocaleString("th-TH")}
+                  </div>
+                  {pricePerDay ? (
+                    <div className="text-[11px] text-blu-steel font-medium mt-1">
+                      เฉลี่ยวันละ {pricePerDay} บาท
+                    </div>
+                  ) : (
+                    <div className="text-[11px] text-blu-steel font-medium mt-1">
+                      ต่อครั้ง
+                    </div>
+                  )}
                 </div>
 
-                {/* Bonus / coupons if any */}
-                {((item.bonusDays ?? 0) > 0 || (item.friendCoupons ?? 0) > 0) && (
-                  <div className="mt-1.5 flex flex-wrap gap-2 text-[11px]">
-                    {(item.bonusDays ?? 0) > 0 && (
-                      <span className="font-semibold text-emerald-600">
-                        + แถม {item.bonusDays} วัน
-                      </span>
-                    )}
-                    {(item.friendCoupons ?? 0) > 0 && (
-                      <span className="font-semibold text-blue-600">
-                        + พาเพื่อน {item.friendCoupons} ใบ
-                      </span>
-                    )}
-                  </div>
-                )}
+                {/* 3. Edit Action Button */}
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDraft(draftOf(pkg));
+                    setMessage("");
+                  }}
+                  className={`w-full py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer shadow-xs ${
+                    !pkg.isActive
+                      ? "bg-slate-500 hover:bg-slate-600 text-white"
+                      : isLast
+                        ? "btn-gold"
+                        : isDaily
+                          ? "bg-blu-steel hover:bg-blu-slate text-white"
+                          : "btn-blue"
+                  }`}
+                >
+                  แก้ไขแพ็กเกจ
+                </button>
               </div>
-            </button>
+            </div>
           );
         })}
       </div>
