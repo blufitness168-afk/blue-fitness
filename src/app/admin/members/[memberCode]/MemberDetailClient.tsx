@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { currentStatus, type getAdminMember } from "@/lib/admin-members-server";
+import MemberRoleAction from "./MemberRoleAction";
 
 function date(value: string | null) {
   return value ? new Date(value).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" }) : "—";
@@ -7,11 +8,13 @@ function date(value: string | null) {
 function Table({ title, headings, rows }: { title: string; headings: string[]; rows: React.ReactNode[][] }) {
   return <section className="min-w-0 rounded-2xl border bg-white p-5"><h2 className="mb-3 font-bold">{title} (ล่าสุดสูงสุด 100 รายการ)</h2><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr>{headings.map(h => <th key={h} className="whitespace-nowrap p-3">{h}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i} className="border-t">{row.map((cell, j) => <td key={j} className="whitespace-nowrap p-3">{cell}</td>)}</tr>)}{!rows.length && <tr><td colSpan={headings.length} className="p-6 text-center">ยังไม่มีประวัติ</td></tr>}</tbody></table></div></section>;
 }
-export default function MemberDetailClient({ data }: { data: NonNullable<Awaited<ReturnType<typeof getAdminMember>>> }) {
+export default function MemberDetailClient({ data, callerRole }: { data: NonNullable<Awaited<ReturnType<typeof getAdminMember>>>; callerRole?: string }) {
   const m = data.member;
-  const fields = [
+  const fields: [string, React.ReactNode][] = [
     ["รหัสสมาชิก", m.memberCode], ["ชื่อ", m.fullName], ["ชื่อเล่น", m.nickname], ["โทรศัพท์", m.phone],
-    ["เพศ", m.gender], ["บทบาท", m.role], ["สถานะปัจจุบัน", currentStatus(m, data.asOf)],
+    ["เพศ", m.gender],
+    ["บทบาท", <span key="role" className="inline-flex flex-wrap items-center gap-2"><span>{m.role}</span><MemberRoleAction phone={m.phone} currentRole={m.role} callerRole={callerRole} /></span>],
+    ["สถานะปัจจุบัน", currentStatus(m, data.asOf)],
     ["วันสมัคร", date(m.createdAt)], ["วันหมดอายุ", date(m.expireDate)], ["คะแนน", String(m.points)],
     ["วัน/เดือนเกิด", m.birthDay && m.birthMonth ? `${m.birthDay}/${m.birthMonth}` : null],
     ["ผู้ติดต่อฉุกเฉิน", m.emergencyName], ["เบอร์ฉุกเฉิน", m.emergencyPhone], ["ความสัมพันธ์", m.emergencyRelation],

@@ -1,5 +1,8 @@
 # 🏋️‍♂️ Blu Fitness (ชะอำ) — Digital Membership & Management Web Application
 
+# Production Link
+https://blue-fitness-plum.vercel.app/
+
 เว็บแอปพลิเคชันจัดการระบบสมาชิกฟิตเนสออนไลน์แบบครบวงจร ออกแบบและพัฒนาเพื่อ **BLU FITNESS (ชะอำ)** ครอบคลุมทั้งระบบบัตรสมาชิกดิจิทัล (Digital Member Card), การชำระเงินพร้อมตรวจสอบสลิปอัตโนมัติ (EasySlip), ระบบคูปอง & คะแนนสะสม, ระบบ Check-in หน้าร้าน (กล้องเว็บ + เครื่องสแกน 4600s 2D USB) และระบบหลังบ้านสำหรับผู้ดูแล (Admin Dashboard)
 
 > **สถานะปัจจุบัน:** เพิ่มระบบซื้อแพ็กเกจจริงผ่าน session → คำสั่งซื้อ DB → PromptPay → EasySlip v2 registered-account matching → ต่ออายุ/แต้มแบบ atomic แล้วในโค้ด แต่ **payment migration ยังไม่ได้ apply และยังไม่ทดสอบสลิปจริง** อ่าน [Payment deployment/security](src/db/migrations/PAYMENTS.md) ก่อนเปิดใช้งาน ยอมรับ raw masked เฉพาะเมื่อ matchedAccount เลขเต็ม/ชื่อตรง snapshot และ visible digits ไม่ขัดกัน (พึ่ง dashboard “เลขบัญชีและชื่อบัญชีธนาคาร” ของ provider ไม่ใช่ cryptographic proof); สิทธิ์ Admin/ร้านแลกแต้ม/ธุรกรรมเดิมอื่น ๆ ยังเป็น **mock/browser-only** ใน `localStorage` และไม่ใช้ยืนยันเงินจริง ระบบนี้ยังไม่ถือว่าผ่าน production acceptance
