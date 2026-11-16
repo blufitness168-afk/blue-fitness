@@ -296,27 +296,6 @@ export default function Home() {
                       )}
                     </div>
 
-                    {/* Benefits & Description from DB */}
-                    {((pkg.bonusDays ?? 0) > 0 || (pkg.friendCoupons ?? 0) > 0 || pkg.description) && (
-                      <div className="space-y-1 text-xs text-blu-steel">
-                        {(pkg.bonusDays ?? 0) > 0 && (
-                          <div className="font-semibold text-emerald-600">
-                            + แถมฟรี {pkg.bonusDays} วัน
-                          </div>
-                        )}
-                        {(pkg.friendCoupons ?? 0) > 0 && (
-                          <div className="font-semibold text-blue-600">
-                            + คูปองพาเพื่อน {pkg.friendCoupons} ใบ
-                          </div>
-                        )}
-                        {pkg.description && (
-                          <div className="line-clamp-2 text-[11px] text-slate-500">
-                            {pkg.description}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
                     {/* 3. Select CTA Button */}
                     <button
                       type="button"
