@@ -120,6 +120,18 @@ function PaymentForm({ pkg, onClose }: { pkg: PaymentPackage; onClose: () => voi
     if (!response.ok) throw Error(body.error ?? "สร้างคำสั่งซื้อไม่ได้");
     acceptOrder(body.order);
   }
+  function resetOrder() {
+    setOrder(null); setFile(null); setPromoCode(""); requestKey.current = null;
+    setOwnerRecheckAvailable(false); setOwnerRecheckPrepared(false);
+    setNotice("ยกเลิกรายการแล้ว สามารถสร้างคำสั่งซื้อใหม่หรือปิดเพื่อเลือกแพ็กเกจอื่นได้");
+  }
+  async function cancel() {
+    if (!order || !window.confirm("ยืนยันว่าคุณยังไม่ได้โอนเงิน และต้องการยกเลิกคำสั่งซื้อนี้เพื่อเริ่มใหม่? หากโอนแล้ว ห้ามยกเลิกหรือโอนซ้ำ ให้แนบสลิปหรือติดต่อเจ้าหน้าที่")) return;
+    const response = await fetch(`/api/payments/orders/${order.id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmedNotTransferred: true }) });
+    const body = await response.json();
+    if (!response.ok) throw Error(body.error ?? "ยกเลิกไม่ได้ กรุณาโหลดสถานะล่าสุดก่อนเริ่มใหม่");
+    resetOrder();
+  }
   async function refresh() {
     const response = await fetch(order ? `/api/payments/orders/${order.id}` : "/api/member/payment-account", { cache: "no-store" });
     const body = await response.json();
@@ -127,7 +139,8 @@ function PaymentForm({ pkg, onClose }: { pkg: PaymentPackage; onClose: () => voi
     const next = body.order ?? body.pendingOrder;
     setOwnerRecheckAvailable(body.ownerRecheckAvailable === true);
     setOwnerRecheckPrepared(body.ownerRecheckPrepared === true);
-    if (next) acceptOrder(next);
+    if (next?.status === "REJECTED" && next.rejectionReason === "CUSTOMER_CANCELLED") resetOrder();
+        else if (next) acceptOrder(next);
     else setNotice("ไม่มีคำสั่งซื้อค้าง สามารถสร้างรายการใหม่ได้");
     if (body.verification?.state === "VERIFIED" && next?.status !== "PAID") setNotice("ตรวจสลิปแล้วแต่ยังบันทึกไม่สำเร็จ ส่งรูปเดิมอีกครั้งเพื่อบันทึก โดยไม่เรียก EasySlip ซ้ำ");
     if (["PROCESSING", "UNKNOWN"].includes(body.verification?.state)) setNotice("กำลังตรวจหรือยังไม่ทราบผล ห้ามโอนซ้ำ ตรวจซ้ำได้ด้วยรูปเดิมหลัง 2 นาที สูงสุด 1 ครั้งเพิ่มเติม");
@@ -188,7 +201,8 @@ function PaymentForm({ pkg, onClose }: { pkg: PaymentPackage; onClose: () => voi
           </section>
           {ownerRecheckAvailable && <button className="block text-sm font-bold underline" disabled={busy || !file} onClick={() => void run(prepareRecheck)}>OWNER: ตรวจสลิปเดิมอีกครั้งหลังแก้สกุลเงิน (1 ครั้ง)</button>}
           <button className="text-xs underline disabled:opacity-40" disabled={busy || !file || (uploadExpired && !ownerRecheckPrepared) || !transfersEnabled} onClick={() => void run(() => verify(true))}>ยังไม่ทราบผล: ยืนยันตรวจรูปเดิมซ้ำ (อาจใช้โควตาเพิ่ม)</button>
-          {uploadExpired && <button className="block text-xs underline" disabled={busy} onClick={() => { setOrder(null); setFile(null); requestKey.current = null; setNotice("รายการเดิมยังเก็บใน DB หากมีผลตรวจค้าง เซิร์ฟเวอร์จะไม่อนุญาตสร้างใหม่"); }}>เลือกสร้างรายการใหม่ (เฉพาะยังไม่ได้โอน)</button>}
+          <button className="block w-full rounded-xl border border-rose-200 px-4 py-3 text-sm font-bold text-rose-700 disabled:opacity-40" disabled={busy} onClick={() => void run(cancel)}>ยกเลิกคำสั่งซื้อ / เริ่มใหม่ (ยังไม่ได้โอนเงิน)</button>
+                    <p className="text-xs text-blu-steel">ปุ่มปิดด้านบนเก็บรายการไว้ทำต่อ การยกเลิกใช้ได้เฉพาะยังไม่โอนและยังไม่เคยส่งสลิป</p>
         </>}
         <button className="block text-sm underline disabled:opacity-40" disabled={busy} onClick={() => void run(refresh)}>โหลดคำสั่งซื้อ / สถานะล่าสุด</button>
         <Link className="block text-sm underline" href="/member/login">เข้าสู่ระบบสมาชิก</Link>

@@ -85,6 +85,49 @@ export async function createOrder(request: Request) {
   }
 }
 
+export async function cancelOrder(request: Request, orderId: string) {
+  if (!sameOrigin(request)) return json({ error: "ไม่อนุญาตคำขอข้ามเว็บไซต์" }, 403);
+  if (!uuid.safeParse(orderId).success) return json({ error: "ไม่พบคำสั่งซื้อ" }, 404);
+  try {
+    const auth = await identity();
+    if (!auth) return json({ error: "กรุณาเข้าสู่ระบบ" }, 401);
+    if (request.headers.get("content-type")?.split(";")[0] !== "application/json") return json({ error: "ข้อมูลไม่ถูกต้อง" }, 400);
+    try {
+      const parsed = z.object({ confirmedNotTransferred: z.literal(true) }).strict().safeParse(JSON.parse((await boundedBody(request, 1024)).toString("utf8")));
+      if (!parsed.success) return json({ error: "ต้องยืนยันว่ายังไม่ได้โอนเงิน" }, 400);
+    } catch { return json({ error: "ข้อมูลยืนยันไม่ถูกต้อง" }, 400); }
+    const sql = sqlClient();
+    // Separate statements under READ COMMITTED see a claim that committed while the order lock waited.
+    // Lock member/session first, matching the finalizer's member-before-order lock ordering.
+    const [sessions, orders, cancelled, replay] = await sql.transaction([
+      sql`SELECT s.member_id FROM members m JOIN auth_sessions s ON s.member_id = m.id
+        WHERE m.id = ${auth.member.id} AND m.status <> 'SUSPENDED' AND s.token_hash = ${auth.digest}
+        AND s.mode = 'NORMAL' AND s.revoked_at IS NULL AND s.expires_at > clock_timestamp() FOR SHARE OF m, s`,
+      sql`SELECT o.* FROM package_payment_orders o WHERE o.id = ${orderId}::uuid AND o.member_id = ${auth.member.id}
+        AND EXISTS (SELECT 1 FROM auth_sessions s JOIN members m ON m.id = s.member_id
+          WHERE s.member_id = o.member_id AND s.token_hash = ${auth.digest} AND s.mode = 'NORMAL'
+          AND s.revoked_at IS NULL AND s.expires_at > clock_timestamp() AND m.status <> 'SUSPENDED') FOR UPDATE OF o`,
+      sql`UPDATE package_payment_orders o SET status = 'REJECTED', rejection_reason = 'CUSTOMER_CANCELLED'
+        WHERE o.id = ${orderId}::uuid AND o.member_id = ${auth.member.id} AND o.status = 'PENDING'
+        AND NOT EXISTS (SELECT 1 FROM package_payment_attempts a WHERE a.order_id = o.id)
+        AND EXISTS (SELECT 1 FROM auth_sessions s JOIN members m ON m.id = s.member_id
+          WHERE s.member_id = o.member_id AND s.token_hash = ${auth.digest} AND s.mode = 'NORMAL'
+          AND s.revoked_at IS NULL AND s.expires_at > clock_timestamp() AND m.status <> 'SUSPENDED') RETURNING o.*`,
+      sql`SELECT o.* FROM package_payment_orders o WHERE o.id = ${orderId}::uuid AND o.member_id = ${auth.member.id}
+        AND o.status = 'REJECTED' AND o.rejection_reason = 'CUSTOMER_CANCELLED'
+        AND NOT EXISTS (SELECT 1 FROM package_payment_attempts a WHERE a.order_id = o.id)
+        AND EXISTS (SELECT 1 FROM auth_sessions s JOIN members m ON m.id = s.member_id
+          WHERE s.member_id = o.member_id AND s.token_hash = ${auth.digest} AND s.mode = 'NORMAL'
+          AND s.revoked_at IS NULL AND s.expires_at > clock_timestamp() AND m.status <> 'SUSPENDED')`,
+    ], { isolationLevel: "ReadCommitted" });
+    if (!sessions[0]) return json({ error: "กรุณาเข้าสู่ระบบสมาชิกปกติ" }, 401);
+    if (!orders[0]) return json({ error: "ไม่พบคำสั่งซื้อ" }, 404);
+    const order = cancelled[0] ?? replay[0];
+    if (!order) return json({ error: "ยกเลิกไม่ได้ รายการมีการตรวจสอบหรือสิ้นสุดแล้ว" }, 409);
+    return json({ order: publicOrder(order as PaymentOrder) });
+  } catch { return json({ error: "ไม่สามารถยกเลิกคำสั่งซื้อได้ กรุณาลองใหม่" }, 503); }
+}
+
 export async function getOrder(orderId: string) {
   if (!uuid.safeParse(orderId).success) return json({ error: "ไม่พบคำสั่งซื้อ" }, 404);
   try {

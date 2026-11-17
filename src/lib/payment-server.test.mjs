@@ -12,8 +12,18 @@ const receiver = { promptpay: '0973355322', bankCode: '004', bankAccount: '05289
 function setup({ authenticated = true, masked = false, timeout = false, failFinalize = false, status = 200, transfersEnabled = true, role = 'MEMBER', terminalReason = null, currency = '' } = {}) {
   const modules = new Map(), calls = [], queries = [];
   const state = { order: { id: orderId, member_id: 1, package_snapshot: { id: 2, name: 'BLU 30 วัน', durationDays: 30 }, receiver_snapshot: receiver, amount_satang: 90000, subtotal_satang: 90000, discount_satang: 0, created_at: new Date(Date.now() - 300000).toISOString(), expires_at: new Date(Date.now() + 600000).toISOString(), upload_deadline: new Date(Date.now() + 2400000).toISOString(), status: 'PENDING', points_earned: 45 }, attempt: null, benefits: 0, failFinalize };
-  const sql = async (parts, ...values) => {
+  const execute = async (parts, ...values) => {
     const text = parts.join('?'); queries.push({ text, values });
+    if (text.includes('FOR SHARE OF m, s')) return state.invalidSession ? [] : [{ member_id: 1 }];
+    if (text.includes('FOR UPDATE OF o')) return state.invalidSession || state.order.member_id !== values[1] || state.order.id !== values[0] ? [] : [{ ...state.order }];
+    if (text.includes("rejection_reason = 'CUSTOMER_CANCELLED'")) {
+      if (state.invalidSession || state.order.member_id !== values[1] || state.order.id !== values[0] || state.attempt) return [];
+      if (text.startsWith('UPDATE')) {
+        if (state.order.status !== 'PENDING') return [];
+        state.order.status = 'REJECTED'; state.order.rejection_reason = 'CUSTOMER_CANCELLED';
+      }
+      return state.order.status === 'REJECTED' && state.order.rejection_reason === 'CUSTOMER_CANCELLED' ? [{ ...state.order }] : [];
+    }
     if (text.includes('create_catalog_package_payment_order')) {
           if (state.staleCatalog) throw Error('Stale catalog version');
           return [state.order];
@@ -39,6 +49,19 @@ function setup({ authenticated = true, masked = false, timeout = false, failFina
     if (text.includes('FROM package_payment_orders')) return [state.order];
     if (text.includes('FROM package_payment_attempts')) return state.attempt ? [state.attempt] : [];
     throw Error('Unexpected SQL');
+  };
+  // Neon queries are lazy: transaction must execute them sequentially, not at construction.
+  const sql = (parts, ...values) => ({ parts, values, then: (resolve, reject) => execute(parts, ...values).then(resolve, reject) });
+  sql.transaction = async (statements, options) => {
+    state.transactions = (state.transactions ?? 0) + 1;
+    state.transactionOptions = options;
+    if (state.failTransaction) throw Error('Offline transaction failure');
+    const results = [];
+    for (const statement of statements) {
+      if (statement.parts.join('?').startsWith('UPDATE') && state.claimWhileWaiting) state.attempt = { state: 'PROCESSING' };
+      results.push(await statement);
+    }
+    return results;
   };
   const globals = { Buffer, Request, Response, File, FormData, URL, AbortSignal, Date, setTimeout, clearTimeout, Uint8Array, process: { env: { DATABASE_URL: 'offline', EASYSLIP_API_KEY: 'offline-secret', PAYMENT_PROMPTPAY_MOBILE: receiver.promptpay, PAYMENT_RECEIVER_BANK_CODE: '004', PAYMENT_RECEIVER_BANK_ACCOUNT: receiver.bankAccount, PAYMENT_RECEIVER_NAME: receiver.name, PAYMENT_TRANSFERS_ENABLED: transfersEnabled ? 'true' : 'false', PAYMENT_PROVIDER_STRATEGY: 'EASYSLIP_V2_REGISTERED_ACCOUNT', EASYSLIP_PAYMENT_V2_API_KEY: 'offline-payment-v2-secret' } } };
   function load(name) {
@@ -273,4 +296,88 @@ test('bounded body rejects actual chunked size without trusting Content-Length',
   const app = setup();
   const request = new Request('https://local', { method: 'POST', body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array(64)); c.enqueue(new Uint8Array(64)); c.close(); } }), duplex: 'half' });
   await assert.rejects(app.boundedBody(request, 100));
+});
+
+function cancelRequest(body = { confirmedNotTransferred: true }, headers = {}) {
+  return new Request('https://local/api/payments/orders/' + orderId, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) });
+}
+test('cancel rejects unauthenticated, cross-origin, invalid UUID and invalid confirmation before SQL', async () => {
+  const anonymous = setup({ authenticated: false });
+  assert.equal((await anonymous.cancelOrder(cancelRequest(), orderId)).status, 401);
+  const app = setup();
+  assert.equal((await app.cancelOrder(cancelRequest(undefined, { origin: 'https://evil' }), orderId)).status, 403);
+  assert.equal((await app.cancelOrder(cancelRequest(), 'bad-id')).status, 404);
+  for (const body of [{}, { confirmedNotTransferred: false }, { confirmedNotTransferred: 'true' }, { confirmedNotTransferred: true, status: 'PAID' }, '{', ' '.repeat(1025)]) {
+    assert.equal((await app.cancelOrder(cancelRequest(body), orderId)).status, 400);
+  }
+  assert.equal((await app.cancelOrder(cancelRequest(undefined, { 'Content-Type': 'text/plain' }), orderId)).status, 400);
+  const chunked = new Request('https://local', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array(1025)); c.close(); } }), duplex: 'half' });
+  assert.equal((await app.cancelOrder(chunked, orderId)).status, 400);
+  assert.equal(app.queries.length, 0); assert.equal(anonymous.queries.length, 0);
+});
+test('cancel is atomic, uses guarded NORMAL session digest SQL and is idempotent without benefits or provider calls', async () => {
+  const app = setup({ transfersEnabled: false });
+  const before = { ...app.state.order };
+  assert.equal((await app.cancelOrder(cancelRequest(), orderId)).status, 200);
+  const response = await app.cancelOrder(cancelRequest(), orderId);
+  assert.equal(response.status, 200);
+  const { order } = await response.json();
+  assert.equal(order.status, 'REJECTED'); assert.equal(order.rejectionReason, 'CUSTOMER_CANCELLED'); assert.equal(order.qrPayload, null);
+  assert.deepEqual(app.state.order, { ...before, status: 'REJECTED', rejection_reason: 'CUSTOMER_CANCELLED' });
+  assert.equal(app.state.transactions, 2); assert.equal(app.state.transactionOptions.isolationLevel, 'ReadCommitted');
+  const [session, lock, update, replay] = app.queries;
+  assert.match(session.text, /FOR SHARE OF m, s/); assert.match(lock.text, /FOR UPDATE OF o/);
+  for (const query of [session, lock, update, replay]) {
+    assert.match(query.text, /mode = 'NORMAL'/); assert.match(query.text, /revoked_at IS NULL/);
+    assert.match(query.text, /expires_at > clock_timestamp\(\)/); assert.match(query.text, /status <> 'SUSPENDED'/);
+    assert.ok(query.values.includes(1));
+    assert.ok(query.values.some(v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v) && v !== 'a'.repeat(64)));
+  }
+  assert.match(update.text, /o.status = 'PENDING'/);
+  for (const query of [update, replay]) {
+    assert.match(query.text, /NOT EXISTS \(SELECT 1 FROM package_payment_attempts a WHERE a.order_id = o.id\)/);
+    assert.doesNotMatch(query.text, /a.state/);
+  }
+  assert.equal(app.calls.length, 0); assert.equal(app.state.benefits, 0); assert.equal(app.state.attempt, null);
+});
+test('cancel preserves paid, other rejected, and all attempt states including a claim committed while waiting', async () => {
+  for (const status of ['PAID', 'REJECTED']) {
+    const app = setup(); Object.assign(app.state.order, { status, rejection_reason: status === 'REJECTED' ? 'OTHER' : null, paid_at: 'preserved' });
+    const before = { ...app.state.order };
+    assert.equal((await app.cancelOrder(cancelRequest(), orderId)).status, 409);
+    assert.deepEqual(app.state.order, before);
+  }
+  for (const state of ['PROCESSING', 'UNKNOWN', 'VERIFIED', 'REJECTED']) {
+    for (const cancelled of [false, true]) {
+      const app = setup(); app.state.attempt = { state, evidence: { preserved: true } };
+      if (cancelled) Object.assign(app.state.order, { status: 'REJECTED', rejection_reason: 'CUSTOMER_CANCELLED' });
+      const before = JSON.stringify(app.state);
+      assert.equal((await app.cancelOrder(cancelRequest(), orderId)).status, 409);
+      assert.equal(app.state.attempt.evidence.preserved, true);
+      assert.equal(JSON.stringify({ ...app.state, transactions: undefined, transactionOptions: undefined }), before);
+    }
+  }
+  const racing = setup(); racing.state.claimWhileWaiting = true;
+  assert.equal((await racing.cancelOrder(cancelRequest(), orderId)).status, 409);
+  assert.equal(racing.state.order.status, 'PENDING');
+});
+test('cancel denies invalid SQL session and other members; transaction failure is unavailable', async () => {
+  const invalid = setup(); invalid.state.invalidSession = true;
+  assert.equal((await invalid.cancelOrder(cancelRequest(), orderId)).status, 401);
+  assert.equal(invalid.state.order.status, 'PENDING');
+  const other = setup(); other.state.order.member_id = 2;
+  assert.equal((await other.cancelOrder(cancelRequest(), orderId)).status, 404);
+  assert.equal(other.state.order.status, 'PENDING');
+  const failed = setup(); failed.state.failTransaction = true;
+  assert.equal((await failed.cancelOrder(cancelRequest(), orderId)).status, 503);
+  assert.equal(failed.state.order.status, 'PENDING'); assert.equal(failed.queries.length, 0);
+});
+test('POST route delegates cancellation with awaited params; installed claim locks the order before inserting attempts', () => {
+  const route = fs.readFileSync(new URL('../app/api/payments/orders/[orderId]/route.ts', import.meta.url), 'utf8');
+  assert.match(route, /export async function POST/); assert.match(route, /cancelOrder\(request, \(await context.params\).orderId\)/);
+  const migration = fs.readFileSync(new URL('../db/migrations/20261010_payment_promptpay.sql', import.meta.url), 'utf8');
+  const claim = migration.slice(migration.indexOf('CREATE OR REPLACE FUNCTION claim_package_payment_attempt'), migration.indexOf('CREATE OR REPLACE FUNCTION finalize_package_payment'));
+  assert.match(claim, /SELECT \* INTO o FROM package_payment_orders WHERE id=p_order AND member_id=p_member FOR UPDATE/);
+  assert.ok(claim.indexOf('FOR UPDATE') < claim.indexOf('INSERT INTO package_payment_attempts'));
+  assert.match(claim, /IF o.status<>'PENDING' THEN RAISE EXCEPTION/);
 });
