@@ -5,10 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
 import { X, Loader2, CheckCircle2, Upload } from "lucide-react";
-import type { MockPackage } from "@/lib/mock-data";
+import type { PackageCatalogItem } from "@/lib/package-catalog";
 import { RECEIVER_BLOCKER } from "@/lib/payment-policy";
 
-type PaymentPackage = MockPackage & { catalogVersion?: number; version?: number };
+type PaymentPackage = Omit<PackageCatalogItem, "version"> & { version?: number };
 type Order = {
   id: string; package: PaymentPackage; receiver: { promptpay: string; bankCode: string; bankAccount: string; name: string };
   amountSatang: number; subtotalSatang: number; discountSatang: number; expiresAt: string; uploadDeadline: string;
@@ -172,6 +172,7 @@ function PaymentForm({ pkg, onClose }: { pkg: PaymentPackage; onClose: () => voi
     <div className="max-h-[92vh] w-full max-w-md space-y-4 overflow-y-auto rounded-3xl bg-white p-6 text-blu-dark">
       <header className="flex items-center justify-between"><h2 id="payment-title" className="text-lg font-black">ชำระแพ็กเกจ</h2><button aria-label="ปิด" onClick={onClose} disabled={busy}><X /></button></header>
       <p className="text-sm">{order?.package.name ?? pkg.name}</p>
+      <p className="text-xs text-blu-steel">{(order?.package ?? pkg).timeSlot} • {(order?.package ?? pkg).durationDays} วัน</p>
       <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900">บัญชีผู้รับทดสอบชั่วคราวที่ได้รับอนุญาต กรุณาตรวจชื่อผู้รับก่อนโอน • รูปสลิปจะส่งให้ EasySlip และอาจใช้โควตาบริการ • ตรวจผู้รับด้วย EasySlip v2 และบัญชีที่ลงทะเบียน เลขปิดบังหรือชื่ออย่างเดียวไม่ใช้อนุมัติ</p>
       {!transfersEnabled && <p role="alert" className="rounded-xl bg-rose-100 p-3 text-sm font-bold">{(order?.readiness ?? readiness).blocker ?? RECEIVER_BLOCKER} ห้ามโอนเงินจริง หากเคยโอนแล้วให้ติดต่อเจ้าของ</p>}
       <div ref={feedback} className="scroll-mt-4">

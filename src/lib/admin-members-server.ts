@@ -1,5 +1,8 @@
 import "server-only";
 import { neon } from "@neondatabase/serverless";
+import { createHash } from "node:crypto";
+import { cookies } from "next/headers";
+import { SESSION_COOKIE } from "./auth/server";
 import { requireAdminPage } from "./admin-permissions-server";
 
 export interface MemberRow {
@@ -8,8 +11,9 @@ export interface MemberRow {
   createdAt: string; points: number;
 }
 export interface OrderRow {
-  id: string; packageName: string; amountSatang: number; status: string;
-  createdAt: string; paidAt: string | null; membershipExpiresAt: string | null;
+  id: string; packageName: string; amountSatang?: number | null; status: string;
+  timeSlot: string | null; membershipStartsAt: string | null;
+  createdAt: string; paidAt?: string | null; membershipExpiresAt: string | null;
 }
 export interface CheckinRow { id: number; checkinTime: string; scannerType: string; }
 export interface CouponRow {
@@ -19,6 +23,30 @@ export interface CouponRow {
 export interface MemberDetail extends MemberRow {
   birthDay: number | null; birthMonth: number | null;
   emergencyName: string | null; emergencyPhone: string | null; emergencyRelation: string | null;
+}
+// Bind each read to the same persisted role and normal session as the page guard.
+async function memberReader() {
+  const caller = await requireAdminPage("/admin/members");
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (!token || !/^[a-f0-9]{64}$/.test(token) || !["ADMIN", "OWNER"].includes(caller.role)) throw new Error("Forbidden");
+  const digest = createHash("sha256").update(token).digest("hex");
+  const database = client();
+  const sql = (parts: TemplateStringsArray, ...values: unknown[]) => {
+    const prefix = `WITH authorized AS (SELECT 1 FROM auth_sessions s JOIN members actor ON actor.id = s.member_id
+      WHERE s.token_hash = `;
+    const strings = [prefix, ` AND actor.id = `, ` AND actor.role::text = `,
+      ` AND actor.role IN ('ADMIN', 'OWNER') AND actor.status <> 'SUSPENDED'
+      AND s.revoked_at IS NULL AND s.expires_at > now() AND s.mode = 'NORMAL')
+      SELECT result.* FROM authorized CROSS JOIN LATERAL (${parts[0]}`, ...parts.slice(1)];
+    strings[strings.length - 1] += ") AS result";
+    return database(Object.assign(strings, { raw: strings.slice() }) as unknown as TemplateStringsArray, digest, caller.id, caller.role, ...values);
+  };
+  return { sql, callerRole: caller.role };
+}
+function memberProfile(row: Record<string, unknown>): MemberRow {
+  return { memberCode: row.memberCode, fullName: row.fullName, nickname: row.nickname, phone: row.phone,
+    gender: row.gender, role: row.role, status: row.status, expireDate: row.expireDate,
+    createdAt: row.createdAt, points: row.points } as MemberRow;
 }
 function client() {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is missing");
@@ -36,12 +64,12 @@ export function monthRange(input?: string, now = new Date()) {
   return { month, start: `${month}-01T00:00:00+07:00`, end: `${number === 12 ? year + 1 : year}-${String(number === 12 ? 1 : number + 1).padStart(2, "0")}-01T00:00:00+07:00` };
 }
 export async function getAdminMembers(query = "", pageInput = "1") {
-  await requireAdminPage("/admin/members");
-  const sql = client();
+  const { sql, callerRole } = await memberReader();
   const q = query.trim().slice(0, 100);
   // Escape LIKE metacharacters so search terms are literal, not wildcard expressions.
   const pattern = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
   const [count] = await sql`SELECT count(*)::int AS total FROM members WHERE full_name ILIKE ${pattern} OR member_code ILIKE ${pattern} OR phone ILIKE ${pattern}`;
+  if (!count) throw new Error("Forbidden");
   const total = Number(count.total);
   const pages = Math.max(1, Math.ceil(total / 50));
   const page = Math.min(pages, Math.max(1, Number.isSafeInteger(Number(pageInput)) ? Number(pageInput) : 1));
@@ -49,29 +77,50 @@ export async function getAdminMembers(query = "", pageInput = "1") {
     expire_date AS "expireDate", created_at AS "createdAt", points FROM members
     WHERE full_name ILIKE ${pattern} OR member_code ILIKE ${pattern} OR phone ILIKE ${pattern}
     ORDER BY created_at DESC, id DESC LIMIT 50 OFFSET ${(page - 1) * 50}`;
-  return { members: rows as MemberRow[], total, page, pages, query: q, asOf: Date.now() };
+  return { members: rows.map(memberProfile), callerRole, total, page, pages, query: q, asOf: Date.now() };
 }
-export async function getAdminMember(memberCode: string) {
-  await requireAdminPage("/admin/members");
-  const sql = client();
+export type MemberHistoryInput = { ordersPage?: string | string[]; checkinsPage?: string | string[]; couponsPage?: string | string[] };
+export function historyPage(input?: string | string[]) {
+  const page = typeof input === "string" && /^[1-9]\d{0,13}$/.test(input) ? Number(input) : 1;
+  return Number.isSafeInteger(page * 100) ? page : 1;
+}
+function historyResult<T>(rows: T[], page: number) {
+  return { rows: rows.slice(0, 100), page, hasNext: rows.length > 100 };
+}
+export async function getAdminMember(memberCode: string, input: MemberHistoryInput = {}) {
+  const { sql, callerRole } = await memberReader();
   const [member] = await sql`SELECT id, member_code AS "memberCode", full_name AS "fullName", nickname, phone, gender, role, status,
     expire_date AS "expireDate", created_at AS "createdAt", points, birth_day AS "birthDay", birth_month AS "birthMonth",
     emergency_name AS "emergencyName", emergency_phone AS "emergencyPhone", emergency_relation AS "emergencyRelation"
     FROM members WHERE member_code = ${memberCode} LIMIT 1`;
   if (!member) return null;
+  const pages = { orders: historyPage(input.ordersPage), checkins: historyPage(input.checkinsPage), coupons: historyPage(input.couponsPage) };
   const [orders, checkins, coupons] = await Promise.all([
-    sql`SELECT id, package_snapshot->>'name' AS "packageName", amount_satang AS "amountSatang", status,
-      created_at AS "createdAt", paid_at AS "paidAt", membership_expires_at AS "membershipExpiresAt"
-      FROM package_payment_orders WHERE member_id = ${member.id} ORDER BY created_at DESC, id DESC LIMIT 100`,
+    callerRole === "OWNER"
+      ? sql`SELECT id, package_snapshot->>'name' AS "packageName", package_snapshot->>'timeSlot' AS "timeSlot",
+        amount_satang AS "amountSatang", status, created_at AS "createdAt", paid_at AS "paidAt", membership_expires_at AS "membershipExpiresAt"
+        FROM package_payment_orders WHERE member_id = ${member.id} ORDER BY created_at DESC, id DESC LIMIT 101 OFFSET ${(pages.orders - 1) * 100}`
+      : sql`SELECT id, package_snapshot->>'name' AS "packageName", package_snapshot->>'timeSlot' AS "timeSlot",
+        status, created_at AS "createdAt", membership_expires_at AS "membershipExpiresAt"
+        FROM package_payment_orders WHERE member_id = ${member.id} ORDER BY created_at DESC, id DESC LIMIT 101 OFFSET ${(pages.orders - 1) * 100}`,
     sql`SELECT id, checkin_time AS "checkinTime", scanner_type AS "scannerType" FROM checkins
-      WHERE member_id = ${member.id} ORDER BY checkin_time DESC, id DESC LIMIT 100`,
+      WHERE member_id = ${member.id} ORDER BY checkin_time DESC, id DESC LIMIT 101 OFFSET ${(pages.checkins - 1) * 100}`,
     sql`SELECT id, title, type, status, total_quota AS "totalQuota", used_count AS "usedCount", expire_date AS "expireDate"
-      FROM coupons WHERE member_id = ${member.id} ORDER BY created_at DESC, id DESC LIMIT 100`,
+      FROM coupons WHERE member_id = ${member.id} ORDER BY created_at DESC, id DESC LIMIT 101 OFFSET ${(pages.coupons - 1) * 100}`,
   ]);
-  // Never serialize the internal ID, authentication fields or payment verification payloads.
-  const { id: internalId, ...profile } = member;
-  void internalId;
-  return { member: profile as unknown as MemberDetail, orders: orders as OrderRow[], checkins: checkins as CheckinRow[], coupons: coupons as CouponRow[], asOf: Date.now() };
+  // All payloads are allowlisted, independently of SQL projection and caller input.
+  const profile: MemberDetail = { ...memberProfile(member), birthDay: member.birthDay, birthMonth: member.birthMonth,
+    emergencyName: member.emergencyName, emergencyPhone: member.emergencyPhone, emergencyRelation: member.emergencyRelation };
+  return { member: profile, callerRole,
+    orders: historyResult(orders.map(row => ({ id: row.id, packageName: row.packageName, status: row.status,
+      createdAt: row.createdAt, timeSlot: row.timeSlot ?? null,
+      // Legacy orders do not record the actual entitlement start; do not infer it from payment time.
+      membershipStartsAt: null, membershipExpiresAt: row.membershipExpiresAt,
+      ...(callerRole === "OWNER" ? { amountSatang: row.amountSatang, paidAt: row.paidAt } : {})
+    })) as OrderRow[], pages.orders),
+    checkins: historyResult(checkins.map(row => ({ id: row.id, checkinTime: row.checkinTime, scannerType: row.scannerType })) as CheckinRow[], pages.checkins),
+    coupons: historyResult(coupons.map(row => ({ id: row.id, title: row.title, type: row.type, status: row.status,
+      totalQuota: row.totalQuota, usedCount: row.usedCount, expireDate: row.expireDate })) as CouponRow[], pages.coupons), asOf: Date.now() };
 }
 export async function getAdminDashboard(monthInput?: string) {
   await requireAdminPage("/admin");

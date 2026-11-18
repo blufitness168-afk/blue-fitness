@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
-function load(member = { id: 1, role: 'ADMIN', status: 'ACTIVE' }, failures = []) {
+function load(member = { id: 1, role: 'ADMIN', status: 'ACTIVE' }, failures = [], result = {}) {
  const calls = [];
  const filename = new URL('./real-benefits-admin-server.ts', import.meta.url).pathname;
  const source = ts.transpileModule(read('./real-benefits-admin-server.ts'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -17,7 +17,7 @@ function load(member = { id: 1, role: 'ADMIN', status: 'ACTIVE' }, failures = []
   if (name === './auth/server') return { SESSION_COOKIE: 'blu_session', getCurrentMember: async () => member };
   if (name === 'next/headers') return { cookies: async () => ({ get: () => ({ value: 'a'.repeat(64) }) }) };
   if (name === './auth/http') return { json: (body, status = 200) => ({ body, status }), readBody: async request => request.json() };
-  if (name === '@neondatabase/serverless') return { neon: () => async (parts, ...values) => { calls.push({ text: parts.join('?'), values }); const code = failures.shift(); if (code) throw Object.assign(Error('test'), { code }); return [{ result: {} }]; } };
+  if (name === '@neondatabase/serverless') return { neon: () => async (parts, ...values) => { calls.push({ text: parts.join('?'), values }); const code = failures.shift(); if (code) throw Object.assign(Error('test'), { code }); return [{ result }]; } };
   return require(name);
  };
  mod._compile(source, filename);
@@ -60,6 +60,49 @@ test('hashed session, stable idempotency on transient retry, no fake success', a
   assert.equal((await load(undefined, ['42501']).benefitsAdminAction(request({}, 'GET'), 'list')).status, 403);
  } finally { if (previous === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previous; }
 });
+test('role response boundary: OWNER retains histories; ADMIN allowlists list and every mutation, including replay', async () => {
+ const previous = process.env.DATABASE_URL; process.env.DATABASE_URL = 'isolated-mock-only';
+ try {
+  const secret = { amount_satang: 912345, discount_satang: 12345, totalRevenue: 999999, order_id: 'other-member-order', nested: { amount_satang: 1 } };
+  const result = {
+   definitions: [{ id: 1, kind: 'PROMO', title: 'Promo', discount_value: 100, min_satang: 1000, ...secret }],
+   assignments: [{ id: 2, member_code: 'BLU-2', ...secret }],
+   coupons: [{ id: 3, title: 'Pass', ...secret }],
+   promoOrders: [{ actor_id: 1, ...secret }, { actor_id: 2, ...secret }],
+   audit: [{ actor_id: 1, payload: secret, result: secret }, { actor_id: 2, result: secret }],
+   totalRevenue: 999999,
+  };
+  const owner = load({ id: 3, role: 'OWNER', status: 'ACTIVE' }, [], result);
+  assert.deepEqual((await owner.benefitsAdminAction(request({}, 'GET'), 'list')).body.data, result);
+  const admin = load(undefined, [], result);
+  const listed = await admin.benefitsAdminAction(request({}, 'GET'), 'list');
+  assert.equal(listed.status, 200);
+  assert.deepEqual(listed.body.data, {
+   definitions: [{ id: 1, kind: 'PROMO', title: 'Promo', discount_value: 100, min_satang: 1000 }],
+   assignments: [{ id: 2, member_code: 'BLU-2' }], coupons: [{ id: 3, title: 'Pass' }], promoOrders: [], audit: [],
+  });
+  const mutations = {
+   create: { kind: 'PROMO', title: 'Promo', code: 'SAVE', discountType: 'FIXED', discountValue: 100, minSatang: 0, maxDiscountSatang: null, usageLimit: 2, expiresAt: '2099-01-01T00:00:00Z' },
+   deactivate: { definitionId: 1 }, grant: { definitionId: 1, memberCode: 'BLU-2' }, cancel: { assignmentId: 2 }, consume: { couponId: 3, guestReference: 'guest' },
+  };
+  const safe = { create: { id: 1 }, deactivate: { definitionId: 1 }, grant: { id: 1 }, cancel: { assignmentId: 2 }, consume: { couponId: 3 } };
+  for (const [action, payload] of Object.entries(mutations)) {
+   const raw = { id: 1, definitionId: 1, assignmentId: 2, couponId: 3, ...secret, audit: result.audit, promoOrders: result.promoOrders };
+   const api = load(undefined, [], raw);
+   const body = { ...payload, requestKey: randomUUID() };
+   for (let replay = 0; replay < 2; replay++) {
+    const response = await api.benefitsAdminAction(request(body), action);
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.data, safe[action], action);
+   }
+   assert.deepEqual(api.calls[0], api.calls[1]);
+   assert.deepEqual((await load({ id: 3, role: 'OWNER', status: 'ACTIVE' }, [], raw).benefitsAdminAction(request(body), action)).body.data, raw);
+  }
+  const malformed = load(undefined, [], { definitions: [{ id: { amount_satang: 1 }, title: ['hidden-order'] }], assignments: null, coupons: {} });
+  assert.deepEqual((await malformed.benefitsAdminAction(request({}, 'GET'), 'list')).body.data, { definitions: [{}], assignments: [], coupons: [], promoOrders: [], audit: [] });
+ } finally { if (previous === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previous; }
+});
+
 test('production pages detached from browser mocks; quote never uses marketing promos', () => {
  for (const path of ['../app/admin/coupons/page.tsx','../app/admin/coupons/BenefitsAdminClient.tsx','../app/admin/promo-codes/page.tsx']) assert.doesNotMatch(read(path), /localStorage|mock-data|CouponsAdmin|PromoCodesAdmin|admin-mock/);
  const policy = read('./payment-policy.ts'); assert.doesNotMatch(policy, /mockPromoCodes/);
@@ -200,7 +243,24 @@ test('SQL integration: actual payment migrations + enum coupons, auth, atomic re
   await assert.rejects(db.exec('DELETE FROM benefit_action_audit'),/append-only/);
   await assert.rejects(db.exec('DELETE FROM benefit_consumptions'),/append-only/);
   await assert.rejects(db.exec('DELETE FROM benefit_promo_reservations'),/append-only/);
-  const audit = (await call('list')).audit; assert.ok(audit.some(a=>a.actor_id===1 && a.action==='consume'));
+  const sqlList = await call('list');
+  const audit = sqlList.audit; assert.ok(audit.some(a=>a.actor_id===1 && a.action==='consume'));
+  assert.ok(sqlList.promoOrders.length > 0);
+  assert.ok(sqlList.promoOrders.every(order => Object.hasOwn(order, 'amount_satang') && Object.hasOwn(order, 'discount_satang')));
+  const previous = process.env.DATABASE_URL; process.env.DATABASE_URL = 'isolated-mock-only';
+  try {
+   const adminResponse = await load(undefined, [], sqlList).benefitsAdminAction(request({}, 'GET'), 'list');
+   assert.equal(adminResponse.status, 200);
+   assert.deepEqual(adminResponse.body.data.promoOrders, []);
+   assert.deepEqual(adminResponse.body.data.audit, []);
+   assert.doesNotMatch(JSON.stringify(adminResponse.body.data), /"(?:amount_satang|discount_satang|order_id|request_key)":/);
+   assert.equal(adminResponse.body.data.definitions.length, sqlList.definitions.length);
+   assert.equal(adminResponse.body.data.assignments.length, sqlList.assignments.length);
+   assert.equal(adminResponse.body.data.coupons.length, sqlList.coupons.length);
+   const ownerResponse = await load({ id: 3, role: 'OWNER', status: 'ACTIVE' }, [], await call('list', {}, randomUUID(), 3)).benefitsAdminAction(request({}, 'GET'), 'list');
+   assert.equal(ownerResponse.status, 200);
+   assert.deepEqual(ownerResponse.body.data, sqlList);
+  } finally { if (previous === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previous; }
   await db.exec("UPDATE auth_sessions SET expires_at=now()-interval '1 day' WHERE member_id=1");
   await assert.rejects(call('list'), /Forbidden/);
   await db.exec("UPDATE members SET status='SUSPENDED' WHERE id=3");

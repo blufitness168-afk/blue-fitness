@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import type { TimeSlot } from "@/lib/mock-data";
+
 import type { PackageCatalogItem } from "@/lib/package-catalog";
 import PaymentModal from "@/components/PaymentModal";
 import Navbar from "@/components/Navbar";
@@ -17,7 +17,7 @@ function formatPrice(price: number) {
 export default function Home() {
   const { t, lang } = useLanguage();
   const router = useRouter();
-  const [activeSlot, setActiveSlot] = useState<TimeSlot>("07:00-22:00");
+  const [activeSlot, setActiveSlot] = useState<string>("07:00-22:00");
   const [selectedPackage, setSelectedPackage] = useState<PackageCatalogItem | null>(null);
     const [catalog, setCatalog] = useState<PackageCatalogItem[]>([]);
     const [catalogStatus, setCatalogStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -86,7 +86,9 @@ export default function Home() {
     router.refresh();
   };
 
-  const packages = catalog.filter((pkg) => pkg.isActive && pkg.timeSlot === activeSlot);
+  const slots = [...new Set(catalog.filter(pkg => pkg.isActive).map(pkg => pkg.timeSlot))].sort();
+  const selectedSlot = slots.includes(activeSlot) ? activeSlot : slots[0];
+  const packages = catalog.filter((pkg) => pkg.isActive && pkg.timeSlot === selectedSlot);
 
   return (
     <main className="min-h-screen bg-white text-blu-dark">
@@ -182,25 +184,13 @@ export default function Home() {
             </p>
 
             {/* Time Slot Toggle */}
-            <div className="mt-6 inline-flex max-w-full items-center bg-white rounded-xl p-1.5 shadow-sm border border-blu-sky/60">
-              <button
-                onClick={() => setActiveSlot("07:00-14:00")}
-                className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all cursor-pointer ${activeSlot === "07:00-14:00"
-                  ? "bg-blu-slate text-white shadow-md"
-                  : "text-blu-steel hover:text-blu-dark"
-                  }`}
-              >
-                {t("pkg.offpeak")}
-              </button>
-              <button
-                onClick={() => setActiveSlot("07:00-22:00")}
-                className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all cursor-pointer ${activeSlot === "07:00-22:00"
-                  ? "bg-blu-slate text-white shadow-md"
-                  : "text-blu-steel hover:text-blu-dark"
-                  }`}
-              >
-                {t("pkg.allday")}
-              </button>
+            <div className="mt-6 inline-flex flex-wrap justify-center max-w-full items-center bg-white rounded-xl p-1.5 shadow-sm border border-blu-sky/60" aria-label="Package time slots">
+              {slots.map(slot => <button key={slot} type="button" onClick={() => setActiveSlot(slot)}
+                aria-pressed={selectedSlot === slot}
+                className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all cursor-pointer ${selectedSlot === slot
+                  ? "bg-blu-slate text-white shadow-md" : "text-blu-steel hover:text-blu-dark"}`}>
+                {slot === "07:00-14:00" ? t("pkg.offpeak") : slot === "07:00-22:00" ? t("pkg.allday") : slot}
+              </button>)}
             </div>
           </div>
 

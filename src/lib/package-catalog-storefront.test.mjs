@@ -6,7 +6,7 @@ import ts from "typescript";
 
 const source = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
 const code = ts.transpileModule(source, {
-  compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
+  compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 
 function mount(fetchCatalog) {
@@ -83,6 +83,27 @@ test("database catalog: loading, local slot filtering, selection version and foc
   app.cleanup();
   assert.equal(app.requests[1].signal.aborted, true);
   assert.equal(app.listeners.has("focus"), false);
+});
+
+test("arbitrary slots and IDs are visible, fallback follows catalog after refresh, snapshot selection retains price/version", async () => {
+  let current = [{...item,id:101,timeSlot:'23:59-24:00',price:123.45,version:12},
+    {...item,id:102,timeSlot:'00:00-24:00',version:3}, {...item,id:103,timeSlot:'12:34-18:56',isActive:false}];
+  const app=mount(async()=>response(current)); await settle();
+  let tree=app.render();
+  const buttons=()=>nodes(tree).filter(n=>n.type==='button');
+  assert.ok(buttons().find(n=>n.props.children==='00:00-24:00'));
+  assert.ok(buttons().find(n=>n.props.children==='23:59-24:00'));
+  assert.equal(buttons().some(n=>n.props.children==='12:34-18:56'),false);
+  buttons().find(n=>n.props.children==='23:59-24:00').props.onClick(); tree=app.render();
+  buttons().find(n=>n.props.children==='pkg.btn_select').props.onClick(); tree=app.render();
+  const modal=nodes(tree).find(n=>n.type==='@/components/PaymentModal');
+  assert.equal(modal.props.pkg.id,101); assert.equal(modal.props.pkg.timeSlot,'23:59-24:00');
+  assert.equal(modal.props.pkg.price,123.45); assert.equal(modal.props.pkg.catalogVersion,12);
+  current=[{...item,id:104,timeSlot:'08:15-09:30'}];
+  app.listeners.get('focus')(); await settle(); tree=app.render();
+  assert.equal(buttons().filter(n=>n.props.children==='pkg.btn_select').length,1);
+  assert.ok(buttons().find(n=>n.props.children==='08:15-09:30'));
+  app.cleanup();
 });
 
 test("empty public catalog is not a fetch error", async () => {

@@ -26,10 +26,26 @@ test('only normal ADMIN/OWNER can access frontdesk',async()=>{
 test('scan delegates entitlement and ignores client station',async()=>{
  const a=load({normal:{role:'ADMIN'},rows:[{result:{ok:true}}]});const key=crypto.randomUUID();
  assert.equal((await a.run(request({code:' blu-2 ',requestKey:key,station:'evil',points:999}),'scan')).body.ok,true);
- assert.match(a.calls[0].text,/real_frontdesk_checkin/);assert.equal(a.calls[0].values[1],process.env.KIOSK_STATION_ID||'LOCAL_FRONT_DESK');assert.equal(a.calls[0].values[2],key);assert.equal(a.calls[0].values[3],'BLU-2');
+ assert.match(a.calls[0].text,/r7_visit_action/);assert.equal(a.calls[0].values[1],process.env.KIOSK_STATION_ID||'LOCAL_FRONT_DESK');assert.equal(a.calls[0].values[2],key);assert.equal(a.calls[0].values[3],'BLU-2');
 });
 test('invalid scans never reach SQL',async()=>{const a=load({normal:{role:'OWNER'}});assert.equal((await a.run(request({code:'BLU-2',requestKey:'bad'}),'scan')).status,400);assert.equal(a.calls.length,0);});
 test('read queries recheck normal role and escape literal search',async()=>{for(const action of ['members','history']){const a=load({normal:{role:'OWNER'}});assert.equal((await a.run(request({query:'%_'}),action)).status,200);assert.match(a.calls[0].text,/s.mode='NORMAL'/);assert.match(a.calls[0].text,/staff.role IN/);assert.ok(a.calls[0].values.includes('%' + String.fromCharCode(92) + '%' + String.fromCharCode(92) + '_%'));}});
+test('R7 direction is explicit and unsupported manual/backdate fails closed',async()=>{
+ for(const extra of [{direction:'SIDE'},{at:'2026-01-01'},{override:true}]) {
+  const a=load({normal:{role:'OWNER'}});
+  assert.equal((await a.run(request({code:'BLU-2',requestKey:crypto.randomUUID(),...extra}),'scan')).status,400);
+  assert.equal(a.calls.length,0);
+ }
+ const a=load({normal:{role:'ADMIN'},rows:[{result:{ok:true,reason:'EXIT'}}]});
+ assert.equal((await a.run(request({code:'BLU-2',requestKey:crypto.randomUUID(),direction:'OUT'}),'scan')).body.reason,'EXIT');
+ assert.equal(a.calls[0].values[4],'OUT');
+});
+test('R7 datetime requires timezone, increasing bounds and valid pagination',async()=>{
+ for(const extra of [{from:'2026-11-18T10:00'},{from:'invalid'},{from:'2026-11-18T10:00+07:00',to:'2026-11-18T09:00+07:00'},{page:0},{page:1.5}]) {
+  const a=load({normal:{role:'OWNER'}});
+  assert.equal((await a.run(request({query:'',...extra}),'history')).status,400);assert.equal(a.calls.length,0);
+ }
+});
 test('migration preserves entitlement body and changes only frontdesk authorization and label',()=>{
  const original=readFileSync(new URL('../db/migrations/20261024_kiosk.sql',import.meta.url),'utf8');
  const prepared=readFileSync(new URL('../db/migrations/20261024_real_frontdesk.sql',import.meta.url),'utf8');

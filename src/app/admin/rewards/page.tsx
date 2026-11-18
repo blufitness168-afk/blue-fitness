@@ -62,6 +62,22 @@ export default function AdminRewardsPage() {
       setError(cause instanceof Error ? cause.message : "ยังไม่ทราบผล กรุณาลองคำขอเดิม");
     } finally { lock.current = false; setBusy(false); }
   }
+  async function uploadImage(file: File) {
+    if (lock.current || pending.current) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 5 * 1024 * 1024) {
+      setError("เลือกรูป JPG, PNG หรือ WebP ขนาดไม่เกิน 5MB"); return;
+    }
+    lock.current = true; setBusy(true); setError(""); setMessage("");
+    try {
+      const form = new FormData(); form.append("file", file);
+      const response = await fetch("/api/rewards/upload", { method: "POST", body: form });
+      const result = await response.json();
+      if (!response.ok || typeof result.url !== "string") throw new Error(result.error || "อัปโหลดไม่ได้");
+      setDraft(current => current ? { ...current, imageUrl: result.url } : null);
+      setMessage("อัปโหลดรูปแล้ว กรุณากดบันทึกรางวัล");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "อัปโหลดไม่ได้ กรุณาลองใหม่"); }
+    finally { lock.current = false; setBusy(false); }
+  }
   const disabled = busy || needsRetry || !data;
   const records = data?.redemptions.filter(record => (status === "ALL" || record.status === status) &&
     `${record.memberCode} ${record.memberName} ${record.rewardTitle} ${record.rewardCode ?? ""}`.toLowerCase().includes(query.toLowerCase())) ?? [];
@@ -87,7 +103,9 @@ export default function AdminRewardsPage() {
         <fieldset disabled={disabled} className="grid gap-3 sm:grid-cols-2">
           <label>ชื่อ<input className={input} required maxLength={120} value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} /></label>
           <label>รายละเอียด<textarea className={input} maxLength={2000} value={draft.description} onChange={event => setDraft({ ...draft, description: event.target.value })} /></label>
+          <label>เลือกรูปรางวัล (JPG, PNG, WebP ไม่เกิน 5MB)<input className={input} type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void uploadImage(file); }} /></label>
           <label>รูป HTTPS (ไม่บังคับ)<input className={input} type="url" maxLength={2000} value={draft.imageUrl} onChange={event => setDraft({ ...draft, imageUrl: event.target.value })} /></label>
+          {draft.imageUrl && <p className="text-sm">มีรูปรางวัลแล้ว · รูปจะผูกกับรางวัลเมื่อกดบันทึก</p>}
           <label>แต้ม<input className={input} required type="number" min={1} max={1000000} step={1} value={draft.pointCost} onChange={event => setDraft({ ...draft, pointCost: Number(event.target.value) })} /></label>
           <label>สต็อกคงเหลือ<input className={input} required type="number" min={0} max={1000000} step={1} value={draft.stock} onChange={event => setDraft({ ...draft, stock: Number(event.target.value) })} /></label>
           <label><input type="checkbox" checked={draft.isActive} onChange={event => setDraft({ ...draft, isActive: event.target.checked })} /> เปิดให้แลก</label>

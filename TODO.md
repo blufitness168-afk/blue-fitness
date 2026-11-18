@@ -1,4 +1,175 @@
-# 📋 MASTER TODO: Blu Fitness (อัปเดตสถานะ 31/10/2026)
+# 📋 MASTER TODO: Blu Fitness (แผนบรีฟยืนยันล่าสุด 17/11/2026)
+
+## แผนดำเนินงานบรีฟลูกค้าล่าสุด — 17 พ.ย. 2026
+
+> เริ่มอ่าน `CLIENT_BRIEF_HANDOFF.md` ก่อน: รวมรายละเอียดบรีฟ คำตอบลูกค้า สมมติฐานข้อ 5 ขอบเขตที่ไม่รวม และข้อควรระวังข้อมูลเดิม สำหรับทำต่อข้ามแชต
+
+> ส่วนนี้เป็นแผนหลักสำหรับรอบถัดไป ส่วนด้านล่างเป็นประวัติ ไม่ถือว่า checkbox เก่าเป็นหลักฐานว่าบรีฟใหม่เสร็จแล้ว ทำตามลำดับพร้อมผ่าน checkpoint แต่ละรอบ ไม่รวบแก้ทุกระบบแล้วค่อยตรวจท้ายงาน
+> มี implementation บางส่วนแล้ว ดูบันทึกสถานะและหลักฐานด้านล่าง ไม่ใช่ production acceptance; migration ใหม่ทั้งหมดเป็น prepare-only ยังไม่ apply/deploy
+
+### ขอบเขตที่ยืนยัน
+
+- รวมภาพรวม/กราฟ, การเงิน, สมาชิก, เข้า–ออก, รางวัล, โค้ดส่วนลด, คูปอง, แพ็กเกจ และ Excel ตามรายการลูกค้า
+- ไม่รวมระบบขายสินค้า/บริการอื่น ระบบจองห้อง สต็อก จัดส่ง หรือโอนคืนเงินอัตโนมัติ
+- ADMIN/OWNER เพิ่ม แก้ไข ปิดใช้งานแพ็กเกจและสิทธิประโยชน์ตามรูปแบบที่ตกลง; ไม่ลบประวัติที่เคยขาย
+- แพ็กเกจมีช่วงเวลาเดียวภายในวันเดียว ไม่ข้ามเที่ยงคืน; ระยะเวลานับจำนวนวัน
+- การแก้ catalog ไม่เปลี่ยนราคา/สิทธิประโยชน์ของผู้ซื้อเดิม แต่ ADMIN/OWNER เปลี่ยนช่วงเวลาให้สิทธิ์ของสมาชิกเป็นรายกรณีได้ โดยคงสิทธิประโยชน์เดิมและเก็บ audit
+- ลูกค้ายืนยันข้อ 5 ล่าสุดว่าเป็น “สิทธิ์เสริมใช้ช่วงเวลาอื่น” ต้องมีแพ็กเกจหลักก่อน สมาชิกกดใช้งานเองได้ ไม่ใช่การต่ออายุทบวันหรือการทิ้งวันแพ็กเกจเดิม
+- หมดอายุเข้าใช้ไม่ได้ รหัสสมาชิกและประวัติยังอยู่ กลับมาซื้อภายใน 3 เดือนเป็นลูกค้าเก่า; ต่อใน 30 วันไม่ถือว่าพ้นสภาพ
+- สมาชิกทั้งหมดอ้างอิงผู้เคยซื้อแพ็กเกจ ไม่ใช่ทุกบัญชีสมัคร; เลือก/กรองประเภทบุคคลได้
+- ADMIN เห็นยอดเฉพาะรายการที่ทำ แต่ห้ามเห็นยอดรวม/รายงานการเงิน ต้องกรองข้อมูลที่ server/API ไม่ใช่ซ่อน UI อย่างเดียว
+- ข้อมูลย้อนหลัง OWNER เท่านั้น; ต่ออายุผ่านเจ้าหน้าที่ต้องบันทึกรายรับ รองรับราคา 0 บาทโดยไม่ปลอมธุรกรรมโอน/สลิป
+- รายได้ซื้อออนไลน์อิงเวลายืนยันสำเร็จ; เงินเดือน/คอมมิชชัน/ค่าเสื่อมกรอกเอง; ยกเลิกรายการบัญชีแบบเก็บประวัติ
+- OWNER คืนเงินเองนอกระบบและยกเลิกแพ็กเกจ ระบบต้องถอนสิทธิ์และคะแนนที่มาจากแพ็กเกจนั้น ไม่ใช่หักยอดหรือวันรวมแบบเดาสุ่ม
+- สถิติใช้บริการนับครั้งเข้าแต่ละชั่วโมงตลอดวัน เก็บออกคู่เข้าเพื่อดูระยะเวลา ไม่ใช่ระบบคนอยู่ในยิมเรียลไทม์
+- ผู้รับโปร/คูปองตามแพ็กเกจปัจจุบันที่ยังไม่หมดอายุ; ของขวัญ/แถมฟรีระบุชื่อเอง ไม่ใช่ระบบขายสินค้า/สต็อก
+- ส่งออก .xlsx ทุกรายการตาม filter ไม่ใช่เฉพาะหน้าปัจจุบัน; นำเข้ารายรับ–รายจ่ายเก่าผ่านแม่แบบที่กำหนด
+- เก็บรหัสผ่านแบบ hash เท่านั้น แอดมินตั้งใหม่ได้แต่ดูรหัสเดิมไม่ได้; ไม่เพิ่มปีเกิดเอง (ข้อตกลงเดิมเก็บวัน/เดือน)
+
+### บันทึกสถานะล่าสุด — 18 พ.ย. 2026 (ตรวจซ้ำในรอบทำต่อ)
+
+> รักษางานเดิม `TODO.md`/`CLIENT_BRIEF_HANDOFF.md`; ไม่มี commit/push/deploy, เชื่อมฐานจริง, apply migration จริง หรือเรียก provider เสียเงิน ทุกข้อที่ยังไม่ครบคง `[ ]` ไว้ ไม่ใช้ checkbox ประวัติเก่าแทนบรีฟใหม่
+
+| รอบ | ทำแล้ว / หลักฐานจาก source และ isolated tests | ค้าง / Checkpoint |
+|---|---|---|
+| R1 | ตรวจ real route → server → SQL, แยก mock; อ่าน AGENTS และ Next guides จาก pnpm resolved path; มี `R1_IMPLEMENTATION_MATRIX.md` และแผน additive/rollback | matrix เดิมเป็น baseline ก่อน implementation ต้องอ่านร่วมกับตารางนี้; entitlement authority/ACL และ combined rollout ยังไม่ตรวจครบ จึงยังไม่ปิด checkpoint |
+| R2 | benefits API ใช้ ADMIN response allowlist ตัด monetary order history/audit; ADMIN เข้า packages และสมาชิก list/detail read-only ได้; member SQL ทุก read ตรวจ session hash/NORMAL/live/revoked/status/role ซ้ำ; ADMIN ไม่ SELECT หรือ serialize ยอดเงิน/paid_at/slip/provider; OWNER คงยอดเดิมและ role mutation OWNER-only; เพิ่มฟอร์ม/API แก้ชื่อ/ชื่อเล่น/เพศ/วันเดือนเกิด/ผู้ติดต่อฉุกเฉินพร้อมเหตุผล, append-only audit, expected snapshot กันเขียนทับและ UUID replay | dashboard ยัง OWNER-only; ประเภทบุคคล/email/avatar/card/reset password และ PostgreSQL/browser role UAT เต็มชุดยังค้าง; SQL benefits ภายในยังคืนข้อมูลเดิม; profile edit เป็น prepared feature ต้อง apply migration ใหม่ก่อนใช้ |
+| R3 | catalog create/update/deactivate OWNER/ADMIN, version/audit/replay; ปลด 10 IDs/2 slots ครบ UI/API/SQL/quote/storefront/checkin; ใช้ PAID snapshot ไม่เปลี่ยนผู้ซื้อเก่า | override ช่วงเวลารายสมาชิกยังค้าง; โบนัสคะแนนรอ R0; time supplement ยังจำกัดตาม R6; browser/concurrency ยังไม่ผ่าน checkpoint |
+| R4 | additive online provenance เฉพาะ PAID ใหม่ ผูก point ledger ใน transaction เดิม ไม่ backfill/rewrite PAID เก่า; payment cancel regression ผ่าน | staff renewal/0บาท/backdate และถอนสิทธิ์รายแพ็กเกจยังไม่ทำ; provenance เป็น observation ไม่ใช่ authoritative entitlement interval; reversal ใช้แล้ว/แต้มไม่พอ/แพ็กเกจถัดไปรอ R0 |
+| R5 | ออนไลน์ใช้ confirmed_at เวลาไทย; PAID ไม่มี confirmed_at แสดงจำนวนแทนเดาวัน; เพิ่มคอมมิชชัน/ค่าเสื่อม; กราฟเติมวัน/เดือนยอด0 ตาม filter เป็นยอดต่อช่วง | import template/preview/batch/audit ยังไม่ทำ; หมวดสมัครใหม่/ต่อสมาชิก/ยกเลิกยังไม่จัดประเภทปลอดภัย; server filters/pagination และ reconciliation 0บาท/refund ค้าง |
+| R6 | คูปองเสริม CUSTOM one-shot, staff grant/member activate, server Bangkok window/expiry, atomic replay, checkin integration | รองรับเฉพาะผู้มี lifetime PAID รายการเดียวและ expiry พิสูจน์ตรง snapshot/สมาชิก; ผู้ต่ออายุ/ข้อมูลกำกวมถูกปฏิเสธ ไม่ใช่ R0 ครบทุกสมาชิก; campaign/gift/targeting/activation ทั่วไปยังค้าง; ห้ามถือข้อจำกัดนี้เป็นกติกาลูกค้า |
+| R7 | admin IN/OUT จับคู่, ห้าม OUT ลอย/IN เปิดซ้อน, visit snapshot รวมสิทธิ์เสริม; datetime filter/pagination/24 hourly bins ทุกแถว; ข้อมูลเก่า exit=NULL | kiosk ยัง ENTRY_ONLY และ mixed-channel ยังอาจเกิด legacy IN ระหว่าง visit เปิด; camera/CARD/manual OWNER/backdate/override ค้าง; pie รอ R0; ยังไม่ปิด checkpoint |
+| R8 | reward upload endpoint แยก ตรวจ auth/origin/MIME signature/5MB และ UI save จริง; owner member detail ประวัติซื้อ/เข้า/คูปองมี pagination แยกชุดละ100พร้อม lookahead ไม่ตัดทิ้งเงียบ | filters/scanner รางวัล/ประวัติสมาชิกตามบรีฟยังไม่ครบ; ยังใช้ OFFSET ซึ่งตำแหน่งเลื่อนได้เมื่อมีรายการใหม่; browser/mobile/provider จริงยังไม่ได้ทดสอบ |
+| R9 | finance OWNER export เป็น OOXML .xlsx จริงจาก server ทุกแถวตาม filters/sort ไม่เฉพาะหน้า; inlineStr กันสูตร, whitelist PII, cap10000แถว/16MiB เกินแล้วปฏิเสธไม่ตัดเงียบ | export หน้าอื่นยังไม่ทำ; dashboard นิยามสมาชิก/กราฟบางส่วนรอ R0 และ ADMIN payload partition ยังไม่ทำ; ยังไม่เปิดไฟล์ใน Excel UI |
+| R10 | rerun รวม 17 test files: **111 passed / 0 failed / 0 skipped**; TypeScript ผ่าน; `git diff --check` ผ่าน | full lint ไม่ผ่าน error เดิม `src/app/member/AccountClient.tsx:78` (`react-hooks/set-state-in-effect`); ยังไม่มี PostgreSQL หลายconnection/browser/hardware UAT/backup restore/full bootstrap migration rehearsal; combined R3–R7 isolated core ผ่านแล้วแต่ยังไม่ใช่ production acceptance; ห้ามปล่อยใช้งานจริง |
+
+**คำสั่งที่รันจริงรอบตรวจรวม**
+
+```sh
+node --test src/lib/admin-members-server.test.mjs src/lib/admin-permissions.test.mjs src/lib/package-catalog-r3.test.mjs src/lib/package-catalog-ui.test.mjs src/lib/package-catalog-server.test.mjs src/lib/package-catalog-storefront.test.mjs src/lib/real-benefits-admin-server.test.mjs src/lib/entitlement-online-provenance.test.mjs src/lib/real-finance-r5.test.mjs src/lib/real-finance-server.test.mjs src/lib/time-supplement.test.mjs src/lib/time-supplement-server.test.mjs src/lib/real-checkin-r7.test.mjs src/lib/real-checkin-server.test.mjs src/lib/reward-image-policy.test.mjs src/lib/xlsx.test.mjs src/lib/payment-server.test.mjs
+pnpm exec tsc --noEmit --incremental false
+pnpm lint
+```
+
+111 เป็นจำนวนที่ runner รายงาน บาง suite import tests ชุดเดิมซ้ำ จึงไม่อ้างว่าเป็น 111 independent requirements; SQL ที่รันเป็น isolated PGlite ไม่ใช่หลักฐาน multi-connection race บน PostgreSQL จริง ส่วน auth/API tests บางชุดใช้ stub transport ไม่ใช่ระบบ mock แทน production
+
+**ไฟล์ migration ที่เตรียม (ยังไม่ apply):** R3 `20261118_r3_package_catalog.sql` → `20261118_r3_package_catalog_checkin.sql`; R4 `20261118_R4_online_provenance.sql`; R5 `20261118_R5_finance.sql`; R6 `20261118_R6_time_supplement.sql` → R7 `20261118_R7_visits.sql` โดย R6 ต้องมี R3 และ R7 ต้องมี R6 ก่อน เอกสารแต่ละชุดอยู่ข้าง migration และ `R4_PROVENANCE_HANDOFF.md` combined core ทดสอบแล้วใน `src/lib/brief-combined-migrations.test.mjs` และมีข้อจำกัดใน `R10_COMBINED_CHECKPOINT.md` แต่ยังไม่ใช่ full bootstrap/ACL/concurrency หรือ live rollout ที่ตรวจรับแล้ว; ห้ามรัน runner เก่าทับหรือ drop audit เพื่อ rollback
+
+**ผลตรวจเพิ่มหลัง R2 read-only + combined migration:** `node --test src/lib/admin-members-server.test.mjs src/lib/admin-permissions.test.mjs src/lib/brief-combined-migrations.test.mjs` ผ่าน **21/21, 0 skip**; `pnpm exec tsc --noEmit --incremental false` ผ่าน ไม่มี live DB/provider. R2 20 tests รวม real session/guard implementation บน stub DB, SQL recheck, ADMIN monetary select/payload denial และ rendered headings/role controls; combined test อีก1 เคสเรียก actual migrations/finalizer/finance/activation/visits ใน PGlite แบบ serial ไม่ใช้เป็นหลักฐาน race. วันเริ่มสิทธิ์เก่าไม่ทราบให้เป็น null ไม่อนุมานจากวันชำระ
+
+**R2 ช่วงแก้โปรไฟล์ (ตรวจผ่านในรอบล่าสุด):** เพิ่ม `src/lib/admin-member-profile-server.ts`, API PATCH `/api/admin/members/[memberCode]/profile`, `AdminMemberProfileForm.tsx` และ migration prepare-only `20261118_R2_admin_member_profile.sql` ไม่แตะ migration เดิมหรือฐานจริง. ADMIN แก้ MEMBER; OWNER แก้ MEMBER/ADMIN; บัญชี OWNER ยังไม่เปิดให้แก้ผ่านฟอร์มนี้ (จำกัดสิทธิ์แบบ conservative ไม่ใช่ยืนยันกติกาลูกค้าเพิ่ม). SQL ตรวจ live NORMAL session/status/role ซ้ำ, lock actor/target, ตรวจ expected profile, strict fields ทั้ง API/SQL, audit before/after+reason+actor+payload hash+UUID พร้อม rollback ใน transaction เดียว. ไม่แก้ role/status/phone/expiry/points/payment. ยังไม่รวม email/person_type/password/avatar/card. วันเกิดใช้เฉพาะวัน/เดือน ตรวจ leap day ด้วยปี2000เพื่อ validation ไม่เก็บปีเกิด. stale comparison เป็นค่าฟิลด์ ไม่ใช่ monotonic revision; A→B→A ยังเท่ากับ snapshot A เดิม. รายละเอียด rollout/rollback/ACL อยู่ `R2_ADMIN_MEMBER_PROFILE.md`
+
+```sh
+node --test src/lib/admin-member-profile.test.mjs src/lib/admin-member-profile-server.test.mjs src/lib/admin-members-server.test.mjs src/lib/admin-permissions.test.mjs src/lib/auth/registration.test.mjs src/lib/member-profile-server.test.mjs src/lib/brief-combined-migrations.test.mjs
+pnpm exec tsc --noEmit --incremental false
+pnpm exec eslint --max-warnings 0 src/lib/admin-member-profile-server.ts src/lib/admin-member-profile.test.mjs src/lib/admin-member-profile-server.test.mjs 'src/app/api/admin/members/[memberCode]/profile/route.ts' 'src/app/admin/members/[memberCode]/AdminMemberProfileForm.tsx' 'src/app/admin/members/[memberCode]/page.tsx' 'src/app/admin/members/[memberCode]/MemberDetailClient.tsx'
+```
+
+ผลรอบล่าสุด **48 passed / 0 failed / 0 skipped**, TypeScript/scoped ESLint ผ่าน. Actual new SQL integration บน PGlite ตรวจ auth/stale/replay/rollback/audit immutable และ coexistence กับ payment/finance/R3–R7 โดยไม่เปลี่ยน orders/ledger/coupons/เงิน. API ใช้ stub transport; UI ยังเป็น source contract ไม่ใช่ browser UAT; ยังไม่มี PostgreSQL หลายconnection. ไม่ปิด CHECKPOINT R2 ทั้งรอบ; full lint ยังมี error เดิมตามบันทึกก่อนหน้า
+
+**จุดทำต่อ:** ปิด R2 dashboard payload partition/ประเภทบุคคล/email/avatar/card/reset password → R3 entitlement authority/override และสิทธิ์เสริมสำหรับสมาชิกต่ออายุ → R4 staff renewal/0บาท (ไม่เดา refund) → R5 import → R6 campaign → R7 kiosk/manual → R8 histories/filters → R9 exports ที่เหลือ แล้ว R10 combined SQL/PostgreSQL concurrency/browser. งาน R0 block เฉพาะส่วนที่ไม่ชัด ไม่ถือว่าอนุญาตแก้เงิน/ถอนสิทธิ์เอง
+
+### R0 — ปิดคำถามที่ยังมีผลต่อข้อมูล (block เฉพาะงานที่เกี่ยวข้อง)
+
+- [x] ข้อ 5 ใช้สมมติฐานแบบขั้นต่ำตามผู้ใช้สั่ง: สิทธิ์เสริมเป็นคูปองเปลี่ยนช่วงเวลาแบบใช้ครั้งเดียว แจกโดย ADMIN/OWNER หรือเป็นของแถมแพ็กเกจ ไม่ขายแยก ไม่คิดราคา/ส่วนต่าง สมาชิกต้องมีแพ็กเกจหลักที่ยังไม่หมดอายุจึงกดใช้ได้ เมื่อกดใช้จะหัก 1 สิทธิ์และให้เข้าในช่วงเวลาที่ระบุของวันนั้นตาม Asia/Bangkok เท่านั้น ต้องกดภายในช่วงเวลาที่ให้สิทธิ์ สิ้นสุดเมื่อถึงเวลาปิดช่วงหรือแพ็กเกจหลักหมดอายุ แล้วแต่ว่าอะไรถึงก่อน กดซ้ำขณะสิทธิ์เดิมยังทำงานให้คืนผลเดิมโดยไม่หักเพิ่ม ไม่เพิ่มวัน/เปลี่ยนแพ็กเกจหลัก ไม่จับเวลารายชั่วโมง ไม่สะสมช่วงเวลา ไม่เปิดให้สมาชิกเลือกเวลาเอง และไม่ย้อนหลัง ค่าเหล่านี้เป็นสมมติฐานของผู้พัฒนาที่ผู้ใช้อนุญาตให้เลือก ไม่ใช่คำยืนยันจากลูกค้า
+- [ ] สถิติ: เกิน 3 เดือนกลับมาซื้อจัดเป็นใหม่หรือกลุ่มอื่น, นับคนหรือครั้ง, 3 เดือนปฏิทินหรือ 90 วัน, วันนับพ้นสภาพใช้วันหมดอายุหรือครบ 30 วัน; ใกล้หมดอายุอิงวันนี้หรือวันที่เลือก ห้ามตีความเองเป็นสิทธิ์ใช้ฟรี 30 วัน
+- [x] ประเภทบุคคลแยกจาก role: คำถามรอบ26ข้อตอบเพียง MEMBER แต่รอบยืนยัน7ข้อลูกค้าตอบใช่ต่อหัวข้อสิทธิ์รวมการแยกประเภทแล้ว ใช้ข้อยืนยันล่าสุด ไม่ต้องถามซ้ำ
+- [ ] ถอนแพ็กเกจที่ใช้คะแนน/คูปอง/วันไปแล้ว: OWNER ตัดสินอย่างไรเมื่อคะแนนไม่พอหรือมีแพ็กเกจถัดไป? ห้ามทำคะแนนติดลบ/หักสิทธิ์แพ็กเกจอื่นโดยไม่มีข้อตกลง
+- [ ] คูปอง: ช่องว่าง/0=10นาทีและวันหมดอายุชนเวลาหลังเปิดใช้ ใช้เงื่อนไขถึงก่อนหรือไม่; คะแนนในแพ็กเกจเป็นโบนัสเพิ่มจากสูตรเงินหรือแทนสูตรเดิม
+- [ ] กราฟวงกลมเดิมยังต้องการหรือใช้กราฟรายชั่วโมงแทน และนิยามนับช่วง 14:00; ข้อมูลเข้าเก่าไม่มีออกให้แสดงว่าไม่ทราบระยะเวลา ห้ามแต่งข้อมูล
+- [ ] CHECKPOINT R0: บันทึกคำตอบในหัวข้อนี้ก่อนลงงานที่ถูก block; งานอื่นเดินต่อได้ ไม่วนถามทุกข้อที่ยืนยันแล้ว
+
+### R1 — ตรวจฐานระบบและออกแบบการเปลี่ยนแปลง
+
+- [ ] ตรวจ route → server → SQL ที่ใช้งานจริง แยก mock ออกจากของจริง และตรวจ AGENTS.md ย่อยก่อนแก้
+- [ ] อ่าน Next guides จาก package ที่ติดตั้งจริง; ตรวจ git status เก็บงานผู้ใช้ ไม่ commit/branch/push/deploy เอง
+- [ ] ทำ requirement matrix ฟิลด์/สิทธิ์/รายงาน/API/migration/test ให้ครบบรีฟล่าสุด
+- [ ] วาง model ประวัติสิทธิ์แบบมีที่มา: แพ็กเกจที่ซื้อ วันเริ่ม/จบ ช่วงเวลา override สิทธิ์เสริม การยกเลิก; ใช้ข้อมูลเดิมได้ ไม่สร้างระบบซ้ำโดยไม่จำเป็น
+- [ ] ออกแบบ migration เพิ่มแบบรักษาประวัติ/มี rollback และ version/audit; ไม่แก้ migration ที่ apply แล้วหรือ rewrite PAID snapshots
+- [ ] CHECKPOINT R1: ทวนแบบกับ payment/promo/coupon/checkin เดิม; วาง cases เงิน/สิทธิ์/กรณี retry ก่อนเริ่ม migration
+
+### R2 — สิทธิ์และข้อมูลสมาชิก
+
+- [ ] เปิด ADMIN เข้าหน้าตาม scope ยกเว้นการเงิน; OWNER ทุกหน้า; บังคับ server/API/SQL เท่าที่เกี่ยวข้อง
+- [ ] ตัดยอดรวม/รายงานเงินออกจาก payload สำหรับ ADMIN รวม dashboard/export; ยังให้ทำยอดเฉพาะรายการที่มีสิทธิ์ได้
+- [ ] ประเภทบุคคลแยก role ตามข้อสรุป R0; เพิ่ม/แก้ข้อมูลชื่อ รูป เพศ วันเดือนเกิด อีเมล ข้อมูลฉุกเฉิน และผูกบัตรตาม scope โดยตรวจ unique/validation
+- [ ] ตั้งรหัสผ่านใหม่ผ่านช่องทาง admin ที่ปลอดภัย เก็บ audit ไม่เผย password/hash/session; คงกติกา OTP เปลี่ยนเบอร์เดิม
+- [ ] CHECKPOINT R2: tests MEMBER/ADMIN/OWNER รวมเรียก URL/API/export ตรง, แก้ไข role ข้ามสิทธิ์, session ถูกระงับ/revoked และข้อมูลส่วนตัว
+
+### R3 — แพ็กเกจหลักและช่วงเวลา
+
+- [ ] เพิ่ม/แก้ไข/ปิดแพ็กเกจ ราคา จำนวนวัน ช่วงเวลา และออฟชั่นเดิม (คูปองพาเพื่อน/เพิ่มวัน/โบนัสตามข้อสรุป) พร้อม version/audit
+- [ ] เอาข้อจำกัด 2 ช่วงเวลา/10 รายการออกให้สอดคล้องทั้ง UI/API/SQL/PromptPay quote/checkin โดยไม่เปิดรับราคาจาก client
+- [ ] การซื้อใหม่ snapshot ข้อมูลครบ; order เดิม/ผู้ซื้อเดิมไม่เปลี่ยนย้อนหลัง; แสดงราคา/ช่วงเวลาจริงทุกหน้าที่เกี่ยวข้อง
+- [ ] ADMIN/OWNER override เฉพาะช่วงเวลาสมาชิกโดยไม่เปลี่ยนราคา วัน หรือของแถมเดิม พร้อมเหตุผลและ audit
+- [ ] สิทธิ์เสริมช่วงเวลาแยกจากแพ็กเกจหลักตาม R0: ต้องมีหลักใช้งานอยู่ การกดใช้ atomic/idempotent ตรวจช่วงเวลา/โควตา/หมดอายุ ไม่มีต่อวันหรือยกเลิกหลักโดยปริยาย
+- [ ] CHECKPOINT R3: stale version, pending order เก่า, PAID เดิม, ปิดแพ็กเกจ, 00:00/24:00 และขอบช่วงเวลา, กดใช้สิทธิ์เสริมซ้ำ/พร้อมกัน/ไม่มีหลัก
+
+### R4 — ต่ออายุผ่านเจ้าหน้าที่และยกเลิกแพ็กเกจ
+
+- [ ] ต่ออายุ ADMIN/OWNER ผ่าน flow มีราคาที่อนุญาต เหตุผล หลักฐาน/วิธีรับเงินตามข้อตกลง และบันทึกบัญชี/สิทธิ์/คะแนนสัมพันธ์กัน
+- [ ] รองรับ 0 บาทเป็นรายการเจ้าหน้าที่จริง แยกจาก online bank payment; OWNER เท่านั้นระบุย้อนหลัง พร้อมเวลาเหตุการณ์และเวลาบันทึก
+- [ ] OWNER ยกเลิกแพ็กเกจรายรายการ เก็บประวัติซื้อ บันทึกคืนเงินนอกระบบ และถอนเฉพาะสิทธิ์/คะแนน/คูปองที่ผูกกับรายการนั้นตาม R0
+- [ ] จัดการแพ็กเกจต่อเนื่องและสิทธิ์ใช้แล้วอย่างมีเงื่อนไข ไม่ UPDATE expire_date หรือ points รวมลอย ๆ; ledger และ audit ต้องอธิบายยอดได้
+- [ ] รักษา cancellation ก่อนส่งสลิปให้เริ่มใหม่ได้ แยกจาก refund ของรายการจ่ายแล้ว; ห้ามยกเลิกผลตรวจ PROCESSING/UNKNOWN/VERIFIED หรือ PAID ผ่าน customer cancel
+- [ ] CHECKPOINT R4: ซ้ำ/retry/พร้อมกัน/คะแนนไม่พอ/สิทธิ์ใช้แล้ว/0บาท/ย้อนหลัง/ยกเลิกบางแพ็กเกจ ไม่กระทบสิทธิ์อื่น และไม่มีเรียก provider คืนเงิน
+
+### R5 — การเงินและนำเข้าข้อมูล
+
+- [ ] หมวดรายจ่ายประจำเดือน เงินเดือน คอมมิชชัน อุปกรณ์ ค่าเสื่อม ต่อสมาชิก สมัครใหม่ ยกเลิก อื่น ๆ ให้ครบทั้ง UI/server/SQL
+- [ ] วันยืนยันจริงใช้กับรายได้ออนไลน์; รายการ manual/backdate/import มีที่มา ไม่เอายอดซื้อซ้ำเข้าบัญชีสองรอบ
+- [ ] ยอดรายรับ/รายจ่าย/สุทธิ สะสมและตาม filter จาก–ถึง/ประเภท/ลำดับ/หมวด ตารางสมาชิกที่เกี่ยวข้อง และ CRUD manual พร้อม audit/เหตุผล
+- [ ] กราฟรายเดือนและกราฟตาม filter แสดงเดือน/วันที่ยอด 0; กำหนดชัดว่าเป็นยอดต่อช่วงหรือยอดสะสม ไม่รวมสลับนิยาม
+- [ ] แม่แบบนำเข้ารายรับ–รายจ่าย preview/validation วันที่เงินหมวด/รายงานแถวผิด/กัน import ซ้ำ; จำกัดสิทธิ์ OWNER เก็บ batch/audit
+- [ ] CHECKPOINT R5: reconcile ledger กับ order/คืนเงิน/0บาท/import, timezone Asia/Bangkok ขอบเดือนปี, soft cancel ไม่ทำประวัติหาย และยอดตรง export
+
+### R6 — คูปองและโค้ดส่วนลด
+
+- [ ] โค้ดส่วนลด: ชื่อ/code/%หรือบาท/มูลค่า/ครั้งสูงสุด/ยอดซื้อขั้นต่ำ–สูงสุด/เพดานส่วนลด/แพ็กเกจที่ใช้ได้/โควต้าผู้รับ/expiry/รายละเอียด
+- [ ] คูปอง: ชื่อ/code/ประเภทส่วนลด ของขวัญ แถมฟรี แต้มเพิ่ม อื่น ๆ/จำนวน/หน่วยบาท-%-แต้ม/เงื่อนไขสูงสุด/ต่อคน/โควต้ารวม
+- [ ] แยกวันหมดอายุ campaign อายุใช้งาน และ activation ตาม R0; server clock และ atomic activation/consume กันเริ่มนับใหม่
+- [ ] แจกตามแพ็กเกจปัจจุบันรายวัน/เดือน/3/6/12เดือน/ทุกคนที่ยังไม่หมดอายุ สแกน BLU/CARD เลือกผู้รับ ยืนยันก่อนแจก ไม่ auto แจกผู้สมัครภายหลังโดยพลการ
+- [ ] คุมจำนวนใบต่อคน โควต้ารวม และครั้งต่อใบแยกกัน; ส่วนลดตรวจ/จองจาก SQL เมื่อสร้าง order คืน quota เฉพาะสถานะที่ปลอดภัย
+- [ ] กระเป๋า/ประวัติแจก/ใช้ ครบ member/name/code/type/ออก/หมดอายุ/ใช้/สถานะ filters ตามบรีฟ และ gift เป็นบรรยาย/ส่งมอบ ไม่ทำ inventory ใหม่
+- [ ] CHECKPOINT R6: ใช้ซ้ำ/พร้อมกัน/โควต้าสุดท้าย/คูปองหมดเวลา/ขอบยอดส่วนลด/โบนัสไม่ซ้ำ/ยกเลิก order คืน quota โดยไม่ปล่อยเงินที่ยังไม่ทราบผล
+
+### R7 — เข้า–ออกและประวัติบริการ
+
+- [ ] เก็บ IN/OUT จับคู่การออกกับการเข้าก่อน ไม่มี OUT ลอย; รองรับ USB/camera/ค้นสมาชิก code/phone ตามของเดิม
+- [ ] เก็บแพ็กเกจและช่วงเวลาที่ใช้จริง ณ visit ไม่ join catalog ปัจจุบันแล้วทำประวัติเก่าเปลี่ยน
+- [ ] manual วันที่ เวลา สมาชิก แพ็กเกจ ช่วงเวลา ประเภทบริการ หมายเหตุ; OWNER เท่านั้นย้อนหลัง/override หมดอายุพร้อม audit
+- [ ] filter รหัสสมาชิก จาก datetime–ถึง datetime, pagination, รายชั่วโมงครบ24ชั่วโมง และวงกลมตาม R0; ข้อมูลเก่าไม่แต่ง OUT ขึ้นมา
+- [ ] CHECKPOINT R7: เข้าออกหลายรอบ/ซ้ำ/ออกก่อนเข้า/ย้อนหลัง/นอกช่วง/หมดอายุ/สิทธิ์เสริม/ข้ามวันตามเวลาไทย และระยะเวลาไม่ติดลบ ไม่เพิ่มคะแนนจาก checkin
+
+### R8 — รางวัลและหน้าประวัติสมาชิก
+
+- [ ] รูปรางวัลเลือกไฟล์จากคอม/มือถือผ่าน upload ปลอดภัย ตรวจชนิด/ขนาด/สิทธิ์ ไม่ reuse endpoint โปรไฟล์จนละเมิดกติกา
+- [ ] รางวัล filters codeสมาชิก/ประเภทแพ็กเกจ/ชื่อ/สถานะ/รหัสรางวัล สแกน BLU-RW หรือ BLU/CARD ค้นรายการ; รักษารหัสเก่าใช้ได้
+- [ ] ตารางรอรับ/รับแล้ว: วันเวลา รหัสและชื่อสมาชิก ชื่อและรหัสรางวัล แต้ม สถานะ; ส่งมอบซ้ำไม่ได้
+- [ ] รายชื่อสมาชิก filters วันเดือนปี/ช่วงเวลา/ประเภทแพ็กเกจ/ชื่อ/นามสกุล/เพศ/code/phone พร้อมสรุปรายเดือน
+- [ ] โปรไฟล์และประวัติซื้อเริ่ม–จบ/ประเภท/ช่วงเวลา/ราคา, เข้าใช้วันเวลา/แพ็กเกจ/ช่วงเวลา, คูปองประเภทชื่อหมดอายุใช้เมื่อไรสถานะ; pagination ครบ ไม่ตัดเหลือ100โดยไม่มีทางดูต่อ
+- [ ] เชื่อมปุ่มต่ออายุ/เพิ่มคูปองไป flow จริงที่ทำแล้ว ไม่สร้าง logic เงิน/สิทธิ์อีกชุด
+- [ ] CHECKPOINT R8: รหัสเก่า/ใหม่และรางวัลไม่ซ้ำ, upload spoof/เกินขนาด, ข้อมูลสมาชิกไม่รั่ว, histories และ filters ตรง DB
+
+### R9 — Dashboard และ .xlsx
+
+- [ ] สมาชิกทั้งหมด/ปัจจุบัน/พ้นสภาพ/เก่าต่ออายุ/ต่ออายุเดือนนี้/ใหม่เดือนนี้/พ้นสภาพเดือนนี้/ใกล้หมดอายุ30วัน ตามนิยาม R0 และ filter วันเดือนปี
+- [ ] กราฟสมาชิกปัจจุบัน–พ้นสภาพ–ต่ออายุ และกราฟต่ออายุ–ใหม่–พ้นสภาพในเดือน; ระบุเมื่อกลุ่มทับซ้อน ห้ามใช้ pie ที่ทำให้เข้าใจว่าแยกกันถ้าไม่จริง
+- [ ] OWNER เห็นรายรับรายจ่ายสุทธิสะสม/เดือนที่เลือก กราฟรายเดือนและรายวันของเดือน ส่วน ADMIN ไม่มี payload ยอดเหล่านี้
+- [ ] export .xlsx ตาม filter ทุกแถวของแต่ละหน้ารายงานที่ตกลง รวมสิทธิ์/PII/formula-injection/เพดานข้อมูลที่ปลอดภัย ไม่เอา CSV เปลี่ยนนามสกุล
+- [ ] CHECKPOINT R9: fixture ที่รู้ผลล่วงหน้า ไม่มีข้อมูล/ข้ามเดือนปี/หมดอายุแล้วต่อใหม่/หลายรายการคนเดียว ยอดการ์ด=กราฟ=ตาราง=export และ ADMIN ดึงข้อมูลเงินไม่ได้
+
+### R10 — ตรวจรับรวมและปล่อยใช้งาน
+
+- [ ] แต่ละรอบรัน tests เฉพาะส่วน → TypeScript/lint → SQL isolated ตามเหมาะสม บันทึกคำสั่ง/ผล/ข้อจำกัด ไม่ติ๊กผ่านจากคาดเดา
+- [ ] ทดสอบ PostgreSQL หลาย connection สำหรับเงิน/สิทธิ์/activation/quota/คืนเงินที่เสี่ยง race ไม่ใช้ WASM อย่างเดียวอ้างว่าพร้อม production
+- [ ] Browser UAT desktop/mobile MEMBER/ADMIN/OWNER ครบซื้อ–ยกเลิกก่อนส่งสลิป–ส่งสลิป–ต่ออายุ–สิทธิ์เสริม–คูปอง–เข้าออก–รางวัล–คืนเงิน–รายงาน–Excel
+- [ ] ทดสอบ network timeout/retry/กดซ้ำ/refresh/กลับหน้าเดิม ไม่เพิ่มคะแนน/รายรับ/สิทธิ์ซ้ำ และไม่ให้โอนซ้ำเมื่อผลไม่ชัด
+- [ ] regression ระบบเดิม รวม payment receiver/amount/currency/duplicate/auth/scanner/profile ไม่แก้บั๊กนอก scope โดยพลการ
+- [ ] ก่อน live migration ต้องมี backup ตรวจ restore/rollback และขออนุมัติชัดเจนก่อนแตะฐานจริง/นำเข้าจริง/โอนเงินจริง/commit/push/deploy
+- [ ] CHECKPOINT สุดท้าย: สรุป requirement matrix ว่าเสร็จ/ค้าง/blocked พร้อมหลักฐานและคู่มือเจ้าหน้าที่ ไม่มี mock fallback หรือ TODO สำคัญซ่อนอยู่
+
+---
 
 ## OWNER แก้แพ็กเกจเอง — 31 ต.ค. 2026
 

@@ -24,7 +24,7 @@ function setup({ member = { role: 'OWNER', status: 'ACTIVE' }, session = token, 
     if (error) throw Object.assign(new Error('offline failure'), { code: error });
     if (text.includes('package_catalog_public')) return [{ packages }];
     if (text.includes("'list'")) return [{ result: packages }];
-    if (text.includes("'update'")) return [{ result: { ...packages[0], catalogVersion: 8 } }];
+    if (values[1] === 'update' || values[1] === 'create') return [{ result: { ...packages[0], catalogVersion: 8 } }];
     throw Error(`Unexpected SQL: ${text}`);
   };
   function load(name) {
@@ -74,11 +74,11 @@ test('public catalog fails closed with 503 and no static fallback', async () => 
   }
 });
 
-test('private catalog denies guest, member, admin, suspended owner and invalid sessions before SQL', async () => {
+test('private catalog denies guest, member, suspended staff and invalid sessions before SQL', async () => {
   for (const [options, status] of [
     [{ member: null }, 401],
     [{ member: { role: 'MEMBER', status: 'ACTIVE' } }, 403],
-    [{ member: { role: 'ADMIN', status: 'ACTIVE' } }, 403],
+    [{ member: { role: 'ADMIN', status: 'SUSPENDED' } }, 401],
     [{ member: { role: 'OWNER', status: 'SUSPENDED' } }, 401],
     [{ session: null }, 401], [{ session: 'forged' }, 401],
   ]) {
@@ -91,9 +91,9 @@ test('private catalog denies guest, member, admin, suspended owner and invalid s
   }
 });
 
-test('OWNER active, pending and expired can list and edit; only hashed token and normalized payload reach SQL', async () => {
-  for (const status of ['ACTIVE', 'PENDING', 'EXPIRED']) {
-    const app = setup({ member: { role: 'OWNER', status } });
+test('OWNER/ADMIN active, pending and expired can list and edit; only hashed token and normalized payload reach SQL', async () => {
+  for (const role of ['OWNER','ADMIN']) for (const status of ['ACTIVE', 'PENDING', 'EXPIRED']) {
+    const app = setup({ member: { role, status } });
     const listed = await app.adminPackages(get());
     noStore(listed);
     assert.deepEqual(await listed.json(), { data: { packages } });
@@ -103,13 +103,14 @@ test('OWNER active, pending and expired can list and edit; only hashed token and
     const digest = createHash('sha256').update(token).digest('hex');
     assert.deepEqual(app.queries[0].values, [digest]);
     const query = app.queries[1];
-    assert.match(query.text, /package_catalog_action.*'update'/);
+    assert.match(query.text, /package_catalog_action/);
+        assert.equal(query.values[1], 'update');
     assert.equal(query.values[0], digest);
     assert.notEqual(query.values[0], token);
-    assert.equal(query.values[1], requestKey.toLowerCase());
+    assert.equal(query.values[2], requestKey.toLowerCase());
     const { requestKey: ignoredKey, price: ignoredPrice, ...fields } = valid;
     assert.ok(ignoredKey && ignoredPrice);
-    assert.deepEqual(JSON.parse(query.values[2]), { ...fields, name: 'BLU 30', label: 'Monthly', priceSatang: 90125 });
+    assert.deepEqual(JSON.parse(query.values[3]), { ...fields, name: 'BLU 30', label: 'Monthly', priceSatang: 90125 });
     assert.equal(JSON.stringify(app.queries).includes(token), false);
   }
 });
@@ -130,12 +131,36 @@ test('strict schema rejects precision, forged fields, invalid UUID, id and expec
   for (const body of [missingVersion, missingId, ...[
     { price: 1.001 }, { price: 0 }, { price: -1 }, { price: 1000001 },
     { priceSatang: 1 }, { role: 'OWNER' }, { catalogVersion: 7 }, { requestKey: 'invalid' },
-    { id: 0 }, { id: 11 }, { id: 1.5 }, { id: '2' },
+    { id: 0 }, { id: 2147483648 }, { id: 1.5 }, { id: '2' },
     { expectedVersion: 0 }, { expectedVersion: 1.5 }, { expectedVersion: 2147483648 }, { expectedVersion: '7' },
   ].map(patch => ({ ...valid, ...patch }))]) {
     const app = setup();
     noStore(await app.adminPackages(request(body)), 400);
     assert.equal(app.queries.length, 0, JSON.stringify(body));
+  }
+});
+
+test('ADMIN creates arbitrary daily catalog without identity/version; update IDs are not capped at ten', async () => {
+  const { id, expectedVersion, ...fields } = valid;
+  assert.ok(id && expectedVersion);
+  for (const timeSlot of ['00:00-24:00','23:59-24:00','12:34-18:56']) {
+    const app=setup({member:{role:'ADMIN',status:'ACTIVE'}});
+    const body={...fields,action:'create',timeSlot};
+    noStore(await app.adminPackages(request(body)));
+    noStore(await app.adminPackages(request(body)));
+    assert.deepEqual(app.queries[1],app.queries[0]);
+    assert.equal(app.queries[0].values[1],'create');
+    const sent=JSON.parse(app.queries[0].values[3]);
+    assert.equal(sent.timeSlot,timeSlot); assert.equal(sent.priceSatang,90125);
+    assert.equal('id' in sent,false); assert.equal('expectedVersion' in sent,false);
+    assert.equal('action' in sent,false); assert.equal('price' in sent,false);
+  }
+  const app=setup(); noStore(await app.adminPackages(request({...valid,id:1234})));
+  for (const patch of [{id:11},{expectedVersion:1},{amountSatang:1},{action:'delete'},
+    ...['24:00-24:00','23:00-01:00','07:00-07:00','00:00-24:01','07:00-14:00\n'].map(timeSlot=>({timeSlot}))]) {
+    const denied=setup();
+    noStore(await denied.adminPackages(request({...fields,action:'create',...patch})),400);
+    assert.equal(denied.queries.length,0);
   }
 });
 
@@ -158,8 +183,8 @@ test('retry explicitly forwards the same UUID and identical payload, preserving 
   assert.deepEqual(await replay.json(), await first.json());
   assert.equal(app.queries.length, 2);
   assert.deepEqual(app.queries[1], app.queries[0]);
-  assert.equal(app.queries[1].values[1], requestKey.toLowerCase());
-  assert.equal(JSON.parse(app.queries[1].values[2]).expectedVersion, 7);
+  assert.equal(app.queries[1].values[2], requestKey.toLowerCase());
+  assert.equal(JSON.parse(app.queries[1].values[3]).expectedVersion, 7);
 });
 
 test('DB authorization, version/replay conflict, constraints and unavailable errors map without success fallback', async () => {

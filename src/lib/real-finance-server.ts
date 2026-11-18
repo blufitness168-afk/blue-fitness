@@ -56,7 +56,7 @@ export async function financeAction(request: Request, action: string) {
     const body = await readBody(request);
     if (!body || typeof body.requestKey !== "string" || !uuid.test(body.requestKey)) return json({ error: "ต้องระบุ requestKey UUID และ JSON จากเว็บไซต์เดียวกัน" }, 400);
     const payload = financePayload(action, body);
-    if (!payload) return json({ error: "ข้อมูลไม่ถูกต้อง: รายรับกรอกเองต้องไม่ใช่การขายแพ็กเกจ และต้องมีหมายเหตุ" }, 400);
+    if (!payload) return json({ error: "ข้อมูลไม่ถูกต้อง: ใช้หมวดรายรับอื่นที่ไม่ใช่แพ็กเกจ หรือหมวดรายจ่ายที่กำหนด (รวมคอมมิชชัน/ค่าเสื่อม) และต้องมีหมายเหตุ" }, 400);
     return json({ data: await execute(action, body.requestKey.toLowerCase(), payload) });
   } catch (error) {
     const code = (error as { code?: string }).code;

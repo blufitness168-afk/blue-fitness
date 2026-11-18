@@ -28,6 +28,34 @@ export function benefitPayload(action: string, body: Record<string, unknown>) {
   return parsed.success ? parsed.data : null;
 }
 
+const definitionFields = ["id", "kind", "title", "coupon_type", "quota", "bonus_days", "code", "discount_type", "discount_value", "min_satang", "max_discount_satang", "usage_limit", "expires_at", "active", "created_by", "created_at"];
+const assignmentFields = ["id", "definition_id", "member_id", "coupon_id", "cancelled_at", "granted_by", "created_at", "member_code", "full_name", "type", "title", "status", "used_count", "total_quota", "expire_date"];
+const couponFields = ["id", "member_id", "type", "source", "title", "status", "total_quota", "used_count", "bonus_days_value", "created_at", "expire_date", "member_code", "full_name"];
+
+function pickScalars(value: unknown, fields: string[]) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const row = value as Record<string, unknown>;
+  return Object.fromEntries(fields.filter(field => Object.hasOwn(row, field) && (row[field] === null || ["string", "number", "boolean"].includes(typeof row[field]))).map(field => [field, row[field]]));
+}
+
+function responseForRole(value: unknown, role: string, action: string) {
+  if (role === "OWNER") return value;
+  if (action === "list") {
+    const data = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+    const rows = (field: string, fields: string[]) => Array.isArray(data[field]) ? data[field].map(row => pickScalars(row, fields)) : [];
+    // Keep the caller's array contract without exposing payment history or opaque audit JSON.
+    return { definitions: rows("definitions", definitionFields), assignments: rows("assignments", assignmentFields), coupons: rows("coupons", couponFields), promoOrders: [], audit: [] };
+  }
+  const fields: Record<string, string[]> = {
+    create: definitionFields,
+    deactivate: ["definitionId", "active"],
+    grant: assignmentFields,
+    cancel: ["assignmentId", "cancelled"],
+    consume: ["couponId", "usedCount", "status", "membershipExpiresAt"],
+  };
+  return pickScalars(value, fields[action] ?? []);
+}
+
 async function execute(action: string, key: string | null, payload: object) {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token || !/^[a-f0-9]{64}$/.test(token) || !process.env.DATABASE_URL) throw Error("Session/database unavailable");
@@ -50,12 +78,12 @@ export async function benefitsAdminAction(request: Request, action: string) {
     const member = await getCurrentMember();
     if (!member || member.status === "SUSPENDED") return json({ error: "กรุณาเข้าสู่ระบบ" }, 401);
     if (!["ADMIN", "OWNER"].includes(member.role)) return json({ error: "ไม่มีสิทธิ์" }, 403);
-    if (action === "list") return json({ data: await execute(action, null, {}) });
+    if (action === "list") return json({ data: responseForRole(await execute(action, null, {}), member.role, action) });
     const body = await readBody(request);
     if (!body || !z.uuid().safeParse(body.requestKey).success) return json({ error: "ต้องระบุ JSON และ requestKey UUID" }, 400);
     const payload = benefitPayload(action, body);
     if (!payload) return json({ error: "ข้อมูลไม่ถูกต้อง" }, 400);
-    return json({ data: await execute(action, String(body.requestKey).toLowerCase(), payload) });
+    return json({ data: responseForRole(await execute(action, String(body.requestKey).toLowerCase(), payload), member.role, action) });
   } catch (error) {
     const code = (error as { code?: string }).code;
     if (code === "42501") return json({ error: "ต้องใช้เซสชันปกติ ADMIN/OWNER" }, 403);

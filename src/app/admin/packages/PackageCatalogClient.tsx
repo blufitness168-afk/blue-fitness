@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { PackageCatalogItem } from "@/lib/package-catalog";
+import { packageCatalogDailySlot, type PackageCatalogItem } from "@/lib/package-catalog";
 
 type Draft = Omit<PackageCatalogItem, "price"> & { price: string };
 type Pending = { requestKey: string; body: string; id: number };
@@ -22,7 +22,7 @@ function priceValue(text: string): number | null {
 
 export default function PackageCatalogClient() {
   const [packages, setPackages] = useState<PackageCatalogItem[]>([]);
-  const [activeSlot, setActiveSlot] = useState<"07:00-14:00" | "07:00-22:00">("07:00-14:00");
+  const [activeSlot, setActiveSlot] = useState<string>("");
   const [draft, setDraft] = useState<Draft | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState(false);
@@ -112,13 +112,13 @@ export default function PackageCatalogClient() {
     const ranges = [[draft.durationDays, 1, 3660], [draft.friendCoupons, 0, 100], [draft.bonusDays, 0, 365]];
     if (ranges.some(([value, min, max]) => !Number.isInteger(value) || value < min || value > max)
       || !draft.name.trim() || !draft.label.trim()
-      || !["07:00-14:00", "07:00-22:00"].includes(draft.timeSlot)) {
+      || !packageCatalogDailySlot(draft.timeSlot)) {
       setMessage("กรุณาตรวจสอบชื่อ ช่วงเวลา และจำนวนวัน/คูปอง");
       return;
     }
     const requestKey = crypto.randomUUID();
     const body = JSON.stringify({
-      requestKey, id: draft.id, expectedVersion: draft.version,
+      requestKey, ...(draft.id === 0 ? { action: "create" } : { action: "update", id: draft.id, expectedVersion: draft.version }),
       name: draft.name.trim(), label: draft.label.trim(), durationDays: draft.durationDays,
       timeSlot: draft.timeSlot, price, friendCoupons: draft.friendCoupons,
       bonusDays: draft.bonusDays, description: draft.description, isActive: draft.isActive,
@@ -128,62 +128,36 @@ export default function PackageCatalogClient() {
 
   function handleAddOrActivateClick() {
     setMessage("");
-    const slotPackages = packages.filter((p) => p.timeSlot === activeSlot);
-    const inactiveInSlot = slotPackages.find((p) => !p.isActive);
-    const inactiveAny = packages.find((p) => !p.isActive);
-    const target = inactiveInSlot ?? inactiveAny;
-    if (target) {
-      setDraft({ ...draftOf(target), isActive: true, timeSlot: activeSlot });
-      return;
-    }
-    setMessage("แพ็กเกจทุกรายการในระบบเปิดขายอยู่แล้ว สามารถคลิกการ์ดใดก็ได้เพื่อแก้ไขข้อมูล");
+    setDraft({ id: 0, version: 0, name: "", label: "", description: "", price: "",
+      durationDays: 30, timeSlot: selectedSlot || "00:00-24:00", friendCoupons: 0, bonusDays: 0, isActive: true });
   }
 
   const disabled = busy || !!pending || loading || needsReload || !!loadError;
-  const slotPackages = packages.filter((p) => p.timeSlot === activeSlot);
+  const slots = [...new Set(packages.map(p => p.timeSlot))].sort();
+  const selectedSlot = slots.includes(activeSlot) ? activeSlot : "";
+  const slotPackages = packages.filter((p) => !selectedSlot || p.timeSlot === selectedSlot);
 
   return (
     <div className="mx-auto w-full min-w-0 max-w-7xl space-y-6 break-words">
       <header>
         <h1 className="text-2xl font-black text-blu-dark">จัดการแพ็กเกจ</h1>
-        <p className="mt-2 text-sm text-slate-600">แก้ไขแพ็กเกจเดิมเท่านั้น เปิด/ปิดขายได้ ไม่มีการเพิ่มหรือลบ</p>
+        <p className="mt-2 text-sm text-slate-600">เพิ่ม แก้ไข และเปิด/ปิดขายแพ็กเกจ ไม่ลบประวัติซื้อ</p>
         <p className="mt-1 text-sm text-slate-600">ราคาใหม่ใช้กับคำสั่งซื้อใหม่ คำสั่งซื้อเก่าที่รอชำระยังคงราคาและสิทธิ์เดิม วันโบนัสเป็นคูปอง ไม่ได้เพิ่มวันสมาชิกอัตโนมัติ</p>
       </header>
 
-      {/* Time Slot Toggle (Clean style identical to Homepage) */}
-      <div className="flex justify-center pt-2">
-        <div className="inline-flex bg-white p-1 rounded-xl shadow-xs border border-blu-sky/30">
-          <button
-            type="button"
-            onClick={() => setActiveSlot("07:00-14:00")}
-            className={`px-5 py-2 rounded-lg text-sm font-bold transition-all cursor-pointer ${
-              activeSlot === "07:00-14:00"
-                ? "bg-blu-slate text-white shadow-xs"
-                : "text-blu-steel hover:text-blu-dark"
-            }`}
-          >
-            07:00 - 14:00 (Off-Peak)
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveSlot("07:00-22:00")}
-            className={`px-5 py-2 rounded-lg text-sm font-bold transition-all cursor-pointer ${
-              activeSlot === "07:00-22:00"
-                ? "bg-blu-slate text-white shadow-xs"
-                : "text-blu-steel hover:text-blu-dark"
-            }`}
-          >
-            07:00 - 22:00 (All-Day)
-          </button>
-        </div>
-      </div>
+      <label className="block text-sm">กรองช่วงเวลา
+        <select aria-label="กรองช่วงเวลา" className={inputClass} value={selectedSlot} onChange={e => setActiveSlot(e.target.value)}>
+          <option value="">ทุกช่วงเวลา</option>
+          {slots.map(slot => <option key={slot} value={slot}>{slot}</option>)}
+        </select>
+      </label>
 
       {message && <p role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm">{message}</p>}
       {loadError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{loadError} — กรุณาลองใหม่</p>}
 
       {pending && (
         <section className="min-w-0 space-y-2 rounded-xl border border-amber-400 bg-amber-50 p-4" aria-label="คำขอที่ยังไม่ทราบผล">
-          <p className="text-sm font-semibold">คำขอเดิม: แพ็กเกจ #{pending.id}</p>
+          <p className="text-sm font-semibold">คำขอเดิม: {pending.id === 0 ? "เพิ่มแพ็กเกจใหม่" : `แพ็กเกจ #${pending.id}`}</p>
           <p className="break-all text-xs">UUID: {pending.requestKey}</p>
           <p className="text-sm">เก็บคำขอนี้ในหน้านี้เท่านั้น อย่าปิดหรือรีเฟรชหน้าจนทราบผล</p>
           <button type="button" className={buttonClass} disabled={busy} onClick={() => void send(pending)}>{busy ? "กำลังยืนยันผล…" : "ลองคำขอเดิมซ้ำ"}</button>
@@ -208,7 +182,7 @@ export default function PackageCatalogClient() {
             </svg>
           </div>
           <span className="text-base font-black text-slate-700 group-hover:text-blu-slate tracking-tight">
-            เพิ่ม / เปิดใช้แพ็กเกจ
+            เพิ่มแพ็กเกจใหม่
           </span>
           <span className="text-xs text-blu-steel mt-1">
             คลิกเพื่อตั้งค่าและเปิดขาย
@@ -228,6 +202,7 @@ export default function PackageCatalogClient() {
             <div
               key={pkg.id}
               onClick={() => {
+                if (disabled) return;
                 setDraft(draftOf(pkg));
                 setMessage("");
               }}
@@ -333,9 +308,9 @@ export default function PackageCatalogClient() {
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <div>
                 <h2 id="modal-package-title" className="text-lg font-bold text-blu-dark">
-                  แก้ไขแพ็กเกจ #{draft.id}
+                  {draft.id === 0 ? "เพิ่มแพ็กเกจใหม่" : `แก้ไขแพ็กเกจ #${draft.id}`}
                 </h2>
-                <p className="text-xs text-slate-500">เวอร์ชัน {draft.version}</p>
+                <p className="text-xs text-slate-500">{draft.id === 0 ? "รหัสและเวอร์ชันกำหนดโดยเซิร์ฟเวอร์" : `เวอร์ชัน ${draft.version}`}</p>
               </div>
               <button
                 type="button"
@@ -354,11 +329,11 @@ export default function PackageCatalogClient() {
               <fieldset disabled={disabled} className="grid min-w-0 gap-4 sm:grid-cols-2">
                 <label className="min-w-0 text-sm">
                   รหัส (แก้ไขไม่ได้)
-                  <input className={inputClass} value={draft.id} readOnly />
+                  <input className={inputClass} value={draft.id || "ระบบกำหนดเมื่อบันทึก"} readOnly />
                 </label>
                 <label className="min-w-0 text-sm">
                   เวอร์ชัน (แก้ไขไม่ได้)
-                  <input className={inputClass} value={draft.version} readOnly />
+                  <input className={inputClass} value={draft.version || "รายการใหม่"} readOnly />
                 </label>
                 <label className="min-w-0 text-sm">
                   ชื่อ
@@ -392,15 +367,10 @@ export default function PackageCatalogClient() {
                 </label>
                 <label className="min-w-0 text-sm">
                   ช่วงเวลา
-                  <select
-                    aria-label="ช่วงเวลา"
-                    className={inputClass}
-                    value={draft.timeSlot}
-                    onChange={(e) => setDraft({ ...draft, timeSlot: e.target.value as PackageCatalogItem["timeSlot"] })}
-                  >
-                    <option value="07:00-14:00">07:00–14:00 (Off-Peak)</option>
-                    <option value="07:00-22:00">07:00–22:00 (All-Day)</option>
-                  </select>
+                  <input required aria-label="ช่วงเวลา" className={inputClass} value={draft.timeSlot}
+                    placeholder="00:00-24:00" maxLength={11}
+                    onChange={e => setDraft({ ...draft, timeSlot: e.target.value })} />
+                  <span className="text-xs text-slate-500">HH:mm-HH:mm ช่วงเดียว ไม่ข้ามคืน (ปิดได้ถึง 24:00)</span>
                 </label>
                 {([
                   ["durationDays", "จำนวนวัน (1–3660)", 1, 3660],

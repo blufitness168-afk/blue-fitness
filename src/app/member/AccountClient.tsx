@@ -135,6 +135,7 @@ export default function MemberAccountPage({ identity, welcomeCoupons }: { identi
     <Navbar member={member} onLogout={logout} />
     <div className="mx-auto max-w-lg space-y-5 px-4 pt-24">
       <h1 className="text-2xl font-black">{isEn ? "Member Account" : "บัญชีสมาชิก"}</h1>
+      <Link href="/member/time-supplement" className="block text-sm underline">{isEn ? "Time-supplement coupons" : "คูปองเสริมช่วงเวลา"}</Link>
       <button disabled={loading} className={buttonClass} onClick={() => void refresh()}>{isEn ? "Refresh Data" : "โหลดข้อมูลใหม่"}</button>
       {loading && <p role="status">{isEn ? "Loading data..." : "กำลังโหลดข้อมูล..."}</p>}
       {error && <p role="alert" className="text-rose-700">{error}</p>}

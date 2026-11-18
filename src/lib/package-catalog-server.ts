@@ -7,14 +7,20 @@ import { getCurrentMember, SESSION_COOKIE } from "./auth/server";
 import { json, sameOrigin } from "./auth/http";
 import { boundedBody } from "./payment-server";
 import { satang } from "./payment-policy";
+import { packageCatalogDailySlot } from "./package-catalog";
 
-const updateSchema = z.object({
-  requestKey: z.uuid(), id: z.number().int().min(1).max(10), expectedVersion: z.number().int().min(1).max(2147483647),
+const catalogFields = {
+  requestKey: z.uuid(),
   name: z.string().trim().min(1).max(200), label: z.string().trim().min(1).max(100), description: z.string().max(2000),
   price: z.number().positive().max(1000000).refine(value => { try { return satang(value) > 0; } catch { return false; } }),
-  durationDays: z.number().int().min(1).max(3660), timeSlot: z.enum(["07:00-14:00", "07:00-22:00"]),
+  durationDays: z.number().int().min(1).max(3660), timeSlot: z.string().refine(value => packageCatalogDailySlot(value) !== null),
   friendCoupons: z.number().int().min(0).max(100), bonusDays: z.number().int().min(0).max(365), isActive: z.boolean(),
+};
+const updateSchema = z.object({ ...catalogFields, action: z.literal("update").default("update"),
+  id: z.number().int().min(1).max(2147483647), expectedVersion: z.number().int().min(1).max(2147483647),
 }).strict();
+const createSchema = z.object({ ...catalogFields, action: z.literal("create") }).strict();
+const mutationSchema = z.union([createSchema, updateSchema]);
 const client = () => { if (!process.env.DATABASE_URL) throw Error("Database unavailable"); return neon(process.env.DATABASE_URL); };
 
 export async function publicPackages() {
@@ -31,7 +37,7 @@ export async function adminPackages(request: Request) {
   try {
     const member = await getCurrentMember();
     if (!member || member.status === "SUSPENDED") return json({ error: "กรุณาเข้าสู่ระบบ" }, 401);
-    if (member.role !== "OWNER") return json({ error: "เฉพาะเจ้าของเท่านั้น" }, 403);
+    if (member.role !== "OWNER" && member.role !== "ADMIN") return json({ error: "เฉพาะเจ้าหน้าที่หรือเจ้าของเท่านั้น" }, 403);
     const token = (await cookies()).get(SESSION_COOKIE)?.value;
     if (!token || !/^[a-f0-9]{64}$/.test(token)) return json({ error: "กรุณาเข้าสู่ระบบ" }, 401);
     const digest = createHash("sha256").update(token).digest("hex"), sql = client();
@@ -44,11 +50,11 @@ export async function adminPackages(request: Request) {
       if (request.headers.get("content-type")?.split(";")[0].trim() !== "application/json") throw Error("JSON required");
       body = JSON.parse((await boundedBody(request, 16384)).toString("utf8"));
     } catch { return json({ error: "ต้องส่ง JSON ขนาดไม่เกิน 16 KB" }, 400); }
-    const parsed = updateSchema.safeParse(body);
+    const parsed = mutationSchema.safeParse(body);
     if (!parsed.success) return json({ error: "ข้อมูลแพ็กเกจไม่ถูกต้อง ราคาต้องมีทศนิยมไม่เกิน 2 ตำแหน่ง" }, 400);
-    const { requestKey, price, ...fields } = parsed.data;
+    const { requestKey, price, action, ...fields } = parsed.data;
     const payload = { ...fields, priceSatang: satang(price) };
-    const rows = await sql`SELECT package_catalog_action(${digest},'update',${requestKey.toLowerCase()}::uuid,${JSON.stringify(payload)}::jsonb) AS result`;
+    const rows = await sql`SELECT package_catalog_action(${digest},${action},${requestKey.toLowerCase()}::uuid,${JSON.stringify(payload)}::jsonb) AS result`;
     return json({ data: { package: rows[0].result } });
   } catch (error) {
     const code = (error as { code?: string }).code;

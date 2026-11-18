@@ -2,9 +2,11 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Download, Pencil, Plus, RotateCcw, Save, X } from "lucide-react";
-import AdminDashboardChart, { type ChartDatum, type ChartSeries } from "@/components/AdminDashboardCharts";
+import AdminDashboardChart, { type ChartSeries } from "@/components/AdminDashboardCharts";
 import {
   financeCategories,
+  financeChart,
+  validFinanceRange,
   manualCategories,
   type FinanceData,
   type EditableFinanceInput,
@@ -21,9 +23,10 @@ interface Filters {
   sort: "NEWEST" | "OLDEST" | "AMOUNT_DESC" | "AMOUNT_ASC";
 }
 
+const reportingYear = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok", year: "numeric" }).format(new Date());
 const initialFilters: Filters = {
-  from: "2000-01-01",
-  to: "2100-12-31",
+  from: `${reportingYear}-01-01`,
+  to: `${reportingYear}-12-31`,
   type: "ALL",
   category: "ALL",
   sort: "NEWEST",
@@ -61,30 +64,14 @@ function thaiDate(date: string) {
   });
 }
 
-function groupChart(records: FinanceRecord[], mode: "month" | "day"): ChartDatum[] {
-  const groups = new Map<string, FinanceRecord[]>();
-  for (const record of records) {
-    const key = mode === "month" ? record.date.slice(0, 7) : record.date;
-    groups.set(key, [...(groups.get(key) ?? []), record]);
-  }
-  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, rows]) => {
-    const summary = totals(rows);
-    return {
-      label: mode === "month" ? `${key.slice(5)}/${key.slice(2, 4)}` : `${key.slice(8)}/${key.slice(5, 7)}`,
-      values: summary,
-    };
-  });
-}
 
-function csvCell(value: string | number) {
-  const raw = String(value);
-    const text = (/^[\s]*[=+@-]/.test(raw) ? `'${raw}` : raw).replaceAll('"', '""');
-  return `"${text}"`;
-}
+
+
 
 export default function FinancePage({ initialData }: { initialData: FinanceData }) {
   const [records, setRecords] = useState<FinanceRecord[]>(initialData.records);
   const [audit, setAudit] = useState(initialData.audit);
+  const [unconfirmedPaidCount, setUnconfirmedPaidCount] = useState(initialData.unconfirmedPaidCount ?? 0);
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   const pending = useRef<{ action: string; body: string } | null>(null);
@@ -105,6 +92,7 @@ export default function FinancePage({ initialData }: { initialData: FinanceData 
     if (!response.ok) throw new Error(result.error ?? "โหลดข้อมูลไม่สำเร็จ");
     setRecords(result.data.records);
     setAudit(result.data.audit);
+    setUnconfirmedPaidCount(result.data.unconfirmedPaidCount ?? 0);
   }, []);
 
   const mutate = async (action?: string, payload?: object) => {
@@ -153,10 +141,10 @@ export default function FinancePage({ initialData }: { initialData: FinanceData 
 
   const cumulative = useMemo(() => totals(records), [records]);
   const current = useMemo(() => totals(filtered), [filtered]);
-  const monthlyChart = useMemo(() => groupChart(records, "month").slice(-12), [records]);
+  const monthlyChart = useMemo(() => financeChart(filtered, "month", filters.from, filters.to), [filtered, filters]);
   const filterChart = useMemo(() => {
     const rangeDays = Math.ceil((Date.parse(filters.to) - Date.parse(filters.from)) / 86_400_000);
-    return groupChart(filtered, rangeDays <= 45 ? "day" : "month");
+    return financeChart(filtered, rangeDays <= 45 ? "day" : "month", filters.from, filters.to);
   }, [filtered, filters]);
 
   const updateForm = <K extends keyof EditableFinanceInput>(key: K, value: EditableFinanceInput[K]) => {
@@ -189,25 +177,28 @@ export default function FinancePage({ initialData }: { initialData: FinanceData 
     void mutate("delete", { id: reversalTarget.id, version: reversalTarget.version, reason: reversalReason });
   };
 
-  const exportCsv = () => {
-    const header = ["ลำดับ", "วันที่", "ประเภท", "หมวดหมู่", "รหัสสมาชิก", "สมาชิกที่เกี่ยวข้อง", "จำนวนเงิน", "หมายเหตุ"];
-    const rows = filtered.map((record, index) => [
-      index + 1,
-      record.date,
-      record.type === "INCOME" ? "รายรับ" : "รายจ่าย",
-      record.category,
-      record.memberCode ?? "",
-      record.memberName ?? "",
-      record.amount,
-      record.note,
-    ]);
-    const csv = `\ufeff${[header, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n")}`;
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `finance-${filters.from}-${filters.to}.csv`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+  const [exporting, setExporting] = useState(false);
+  const exportXlsx = async () => {
+    if (exporting) return;
+    setExporting(true); setError("");
+    try {
+      const response = await fetch(`/api/admin/finance/export?${new URLSearchParams({ ...filters })}`, { cache: "no-store" });
+      if (!response.ok) {
+        const result = await response.json();
+        throw new Error(result.error ?? "ส่งออกไม่สำเร็จ");
+      }
+      const url = URL.createObjectURL(await response.blob());
+      try {
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `finance-${filters.from}-${filters.to}.xlsx`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+      } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "ส่งออกไม่สำเร็จ");
+    } finally { setExporting(false); }
   };
 
   const cards = [
@@ -225,7 +216,7 @@ export default function FinancePage({ initialData }: { initialData: FinanceData 
     <div className="mx-auto max-w-375 space-y-6">
       <header className="flex items-end justify-between gap-4">
         <div><h1 className="text-2xl font-black text-blu-dark">รายรับ - รายจ่าย</h1><p className="mt-1 text-xs text-blu-steel">บัญชีจริงสำหรับเจ้าของ · รายได้แพ็กเกจ PAID อ่านอย่างเดียว · ไม่กระทบแต้มและวันหมดอายุ</p></div>
-        <button type="button" onClick={exportCsv} disabled={!filtered.length} className="btn-blue inline-flex h-10 items-center gap-2 rounded-xl px-4 text-xs disabled:opacity-50"><Download className="h-4 w-4" /> Export CSV</button>
+        <button type="button" onClick={() => void exportXlsx()} disabled={exporting} className="btn-blue inline-flex h-10 items-center gap-2 rounded-xl px-4 text-xs disabled:opacity-50"><Download className="h-4 w-4" /> {exporting ? "กำลังส่งออก…" : "Export .xlsx"}</button>
       </header>
 
       <button type="button" disabled={busy} onClick={() => void load().catch(() => setError("โหลดข้อมูลไม่สำเร็จ"))} className="text-xs underline">โหลดข้อมูลล่าสุด</button>
@@ -240,15 +231,17 @@ export default function FinancePage({ initialData }: { initialData: FinanceData 
           <FilterField label="ประเภท"><select value={draftFilters.type} onChange={(event) => setDraftFilters({ ...draftFilters, type: event.target.value as Filters["type"] })} className="finance-input"><option value="ALL">ทั้งหมด</option><option value="INCOME">รายรับ</option><option value="EXPENSE">รายจ่าย</option></select></FilterField>
           <FilterField label="หมวดหมู่"><select value={draftFilters.category} onChange={(event) => setDraftFilters({ ...draftFilters, category: event.target.value as Filters["category"] })} className="finance-input"><option value="ALL">ทั้งหมด</option>{financeCategories.map((category) => <option key={category}>{category}</option>)}</select></FilterField>
           <FilterField label="เรียงลำดับ"><select value={draftFilters.sort} onChange={(event) => setDraftFilters({ ...draftFilters, sort: event.target.value as Filters["sort"] })} className="finance-input"><option value="NEWEST">วันที่ล่าสุดก่อน</option><option value="OLDEST">วันที่เก่าสุดก่อน</option><option value="AMOUNT_DESC">จำนวนเงินมากก่อน</option><option value="AMOUNT_ASC">จำนวนเงินน้อยก่อน</option></select></FilterField>
-          <div className="flex items-end"><button type="button" onClick={() => draftFilters.from <= draftFilters.to ? setFilters(draftFilters) : setError("วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด")} className="btn-blue h-10 w-full rounded-xl px-4 text-xs">กรองข้อมูล</button></div>
+          <div className="flex items-end"><button type="button" onClick={() => validFinanceRange(draftFilters.from, draftFilters.to) ? (setFilters(draftFilters), setError("")) : setError("กรุณาระบุวันที่จริงระหว่างปี 2000–2100 และเรียงจาก–ถึงให้ถูกต้อง")} className="btn-blue h-10 w-full rounded-xl px-4 text-xs">กรองข้อมูล</button></div>
         </div>
       </section>
 
+      <p className="text-xs text-blu-steel">รายได้ออนไลน์อิง confirmed_at ตามเวลาไทย · กราฟเป็นยอดต่อช่วง ไม่ใช่ยอดสะสม · สมัครใหม่/ต่อสมาชิก/ยกเลิกยังไม่จัดหมวดอัตโนมัติเมื่อไม่มี provenance และไม่อนุญาตกรอกซ้ำยอดแพ็กเกจ</p>
+      {unconfirmedPaidCount > 0 && <p role="alert" className="text-xs text-amber-700">มี PAID {unconfirmedPaidCount} รายการไม่มี confirmed_at จึงยังไม่รวมรายงาน ห้ามใช้ paid_at ทดแทนโดยเดา</p>}
       <SummarySection title="ยอดสะสมทั้งหมด" cards={cards} />
       <SummarySection title="ตามตัวกรองปัจจุบัน" cards={filteredCards} />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <AdminDashboardChart title="กราฟ 1 — รายได้ / รายจ่าย / คงเหลือสุทธิ รายเดือน" data={monthlyChart} series={financeSeries} type="bar" valueFormatter={money} />
+        <AdminDashboardChart title="กราฟ 1 — รายได้ / รายจ่าย / คงเหลือสุทธิ รายเดือนตามตัวกรอง (ยอดต่อเดือน)" data={monthlyChart} series={financeSeries} type="bar" valueFormatter={money} />
         <AdminDashboardChart title="กราฟ 2 — รายได้ / รายจ่าย / คงเหลือสุทธิ ตามตัวกรอง" data={filterChart} series={financeSeries} type="line" valueFormatter={money} />
       </div>
 
