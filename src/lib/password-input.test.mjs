@@ -66,13 +66,13 @@ test('member password forms use the shared component and preserve mode reset', (
   assert.match(login, /PasswordInput key=\{`\$\{mode\}:\$\{Boolean\(ticket\)\}`\}/);
 });
 
-test('admin member detail remains read-only with no password editing controls', () => {
+test('admin member history display has no inline credential editor and preserves paged tables', () => {
   const source = fs.readFileSync(new URL('../app/admin/members/[memberCode]/MemberDetailClient.tsx', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /PasswordInput|<input\b|<form\b|<button\b|passwordHash|password_hash/);
-  assert.match(source, /ข้อมูลจริงแบบอ่านอย่างเดียว/);
-  assert.match(source, /การเปลี่ยนเบอร์\/รหัสผ่านต้องใช้ขั้นตอนยืนยันตัวตน/);
+  assert.match(source, /ตารางนี้แสดงข้อมูลจริง/);
+  assert.match(source, /เปลี่ยนเบอร์\/รหัสผ่านต้องใช้ขั้นตอนที่กำหนด/);
   assert.match(source, /href="\/admin\/members"/);
-  assert.match(source, /data\.orders\.map/);
-  assert.match(source, /data\.checkins\.map/);
-  assert.match(source, /data\.coupons\.map/);
+  assert.match(source, /data\.orders\.rows\.map/);
+  assert.match(source, /data\.checkins\.rows\.map/);
+  assert.match(source, /data\.coupons\.rows\.map/);
 });

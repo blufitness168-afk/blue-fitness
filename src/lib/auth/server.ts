@@ -132,9 +132,14 @@ export async function loginPassword(phone: string, password: string) {
   if (!valid || !member || member.status === 'SUSPENDED') return null;
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + sessionMs);
-  const [inserted] = await sql.transaction([sql`INSERT INTO auth_sessions (member_id, token_hash, expires_at)
+  // Lock before the issuance statement reads credentials: an FK wait is not a credential lock.
+  // A reset either revokes this committed session or wins first and makes issuance fail closed.
+  const [, inserted] = await sql.transaction([
+    sql`SELECT id FROM members WHERE id = ${member.id as number} FOR UPDATE`,
+    sql`INSERT INTO auth_sessions (member_id, token_hash, expires_at)
     SELECT id, ${hashToken(token)}, ${expiresAt} FROM members
-    WHERE id = ${member.id as number} AND password_hash = ${member.password_hash as string} AND status <> 'SUSPENDED' RETURNING id`], { isolationLevel: "Serializable" });
+    WHERE id = ${member.id as number} AND password_hash = ${member.password_hash as string} AND status <> 'SUSPENDED' RETURNING id`,
+  ], { isolationLevel: "Serializable" });
   return inserted.length ? { token, expiresAt } : null;
 }
 
@@ -152,10 +157,22 @@ export async function completePassword(ticket: string, purpose: "PASSWORD_SETUP"
   `;
   if (claimed.length !== 1) return false;
   const digest = await hashPassword(password);
-  const [rows] = await sql.transaction([sql`
+  // Unlocked ticket lookup identifies the member; acquire member before any final ticket/session lock.
+  // Keep this separate statement in the same transaction so the lock precedes credential rechecks.
+  const [, rows] = await sql.transaction([
+    sql`SELECT id FROM members WHERE phone IN (
+      SELECT phone FROM auth_password_tickets WHERE id = ${claimed[0].id as number}
+        AND token_hash = ${hashToken(ticket)} AND purpose = ${purpose}
+    ) ORDER BY id FOR UPDATE`,
+    sql`
     WITH consumed AS (
-      UPDATE auth_password_tickets SET consumed_at = now()
-      WHERE id = ${claimed[0].id as number} AND token_hash = ${hashToken(ticket)} AND purpose = ${purpose} AND hash_started_at IS NOT NULL AND consumed_at IS NULL AND expires_at > now() RETURNING phone, password_hash_at_issue
+      UPDATE auth_password_tickets t SET consumed_at = now()
+      WHERE t.id = ${claimed[0].id as number} AND t.token_hash = ${hashToken(ticket)} AND t.purpose = ${purpose}
+        AND t.hash_started_at IS NOT NULL AND t.consumed_at IS NULL AND t.expires_at > now()
+        AND EXISTS (SELECT 1 FROM members m WHERE m.phone = t.phone AND m.status <> 'SUSPENDED'
+          AND m.password_hash IS NOT DISTINCT FROM t.password_hash_at_issue
+          AND ((${purpose} = 'PASSWORD_SETUP' AND m.password_hash IS NULL) OR (${purpose} = 'PASSWORD_RESET' AND m.password_hash IS NOT NULL)))
+      RETURNING t.phone, t.password_hash_at_issue
     ), changed AS (
       UPDATE members SET password_hash = ${digest}, updated_at = now()
       WHERE EXISTS (SELECT 1 FROM consumed c WHERE c.phone = members.phone AND members.password_hash IS NOT DISTINCT FROM c.password_hash_at_issue) AND status <> 'SUSPENDED'

@@ -13,7 +13,7 @@ const profile = { password: "strong-password", fullName: "สมาชิกใ�
 
 // Mock only DB/crypto adapters; assert emitted SQL guards as well as execution order.
 // These tests do not execute PostgreSQL and never contact a database or SMS provider.
-function loadServer(execute, hash = async () => "hashed-password") {
+function loadServer(execute, hash = async () => "hashed-password", verify = async () => true, commit = async () => {}) {
   const calls = [];
   const sql = (strings, ...values) => {
     const query = { text: strings.join("?"), values };
@@ -23,13 +23,18 @@ function loadServer(execute, hash = async () => "hashed-password") {
     calls.push({ ...query, options });
     return execute(query, options);
   }
-  sql.transaction = async (queries, options) => Promise.all(queries.map(item => run(item.query, options)));
+  sql.transaction = async (queries, options) => {
+    const results = [];
+    for (const item of queries) results.push(await run(item.query, options));
+    await commit();
+    return results;
+  };
   const loaded = new Module(filename);
   loaded.filename = filename;
   loaded.require = name => {
     if (name === "server-only" || name === "@/db" || name === "@/db/schema" || name === "next/headers" || name === "./policy") return {};
     if (name === "@neondatabase/serverless") return { neon: () => sql };
-    if (name === "./password") return { hashPassword: hash };
+    if (name === "./password") return { hashPassword: hash, verifyPassword: verify };
     return require(name);
   };
   loaded._compile(compiled, filename);
@@ -70,8 +75,9 @@ test("concurrent replay of one valid ticket claims at most one hash job", async 
         if (claimed) return [];
         claimed = true; return [{ id: 7 }];
       }
+      if (query.text.includes("FOR UPDATE")) return [{ id: 1 }];
       assert.match(query.text, /hash_started_at IS NOT NULL/);
-      assert.match(query.text, /consumed_at IS NULL AND expires_at > now\(\)/);
+      assert.match(query.text, /consumed_at IS NULL AND (?:t\.)?expires_at > now\(\)/);
       return operation === "password" ? [{ id: 1 }] : [{ member_id: 1 }];
     }, async () => { hashes++; await new Promise(resolve => setTimeout(resolve, 5)); return "hash"; });
     const complete = () => operation === "password" ? api.completePassword(ticket, "PASSWORD_RESET", "password") : api.completeRegistration(ticket, profile);
@@ -86,6 +92,12 @@ test("completion rechecks credential and expiry after hashing and atomically rev
   const { api } = loadServer((query, options) => {
     if (query.text.includes("SET hash_started_at")) return [{ id: 7 }];
     assert.equal(options.isolationLevel, "Serializable");
+    if (query.text.includes("FOR UPDATE")) {
+      assert.match(query.text, /SELECT id FROM members.*SELECT phone FROM auth_password_tickets/s);
+      assert.doesNotMatch(query.text, /UPDATE auth_password_tickets/);
+      return [{ id: 1 }];
+    }
+    assert.match(query.text, /m\.password_hash IS NOT DISTINCT FROM t\.password_hash_at_issue/);
     assert.match(query.text, /members\.password_hash IS NOT DISTINCT FROM c\.password_hash_at_issue/);
     assert.match(query.text, /expires_at > now\(\)/);
     assert.match(query.text, /UPDATE auth_sessions SET revoked_at/);
@@ -124,6 +136,70 @@ test("verification carries issuance snapshot, checks current credential and only
 test("concurrent verify/reset serialization conflict fails closed without issuing a ticket", async () => {
   const { api } = loadServer(() => { throw Object.assign(new Error("serialization conflict"), { code: "40001" }); });
   await assert.rejects(api.verifyOtp("b".repeat(32), "123456"), { code: "40001" });
+});
+
+test("login issuance locks member before hash/status recheck and waits for commit", async () => {
+  let release;
+  const committed = new Promise(resolve => { release = resolve; });
+  let locked = false;
+  const { api, calls } = loadServer((query, options) => {
+    if (query.text.includes("auth_login_limits")) return [{ phone: "synthetic" }];
+    if (!options) return [{ id: 3, password_hash: "old-hash", status: "ACTIVE" }];
+    assert.equal(options.isolationLevel, "Serializable");
+    if (query.text.includes("FOR UPDATE")) {
+      assert.match(query.text, /SELECT id FROM members WHERE id =/);
+      locked = true; return [{ id: 3 }];
+    }
+    assert.ok(locked);
+    assert.match(query.text, /INSERT INTO auth_sessions/);
+    assert.match(query.text, /password_hash =.*status <> 'SUSPENDED'/s);
+    assert.ok(query.values.includes("old-hash"));
+    return [{ id: 9 }];
+  }, undefined, async () => true, () => committed);
+  let settled = false;
+  const login = api.loginPassword("synthetic", "password").then(result => { settled = true; return result; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.length, 4); assert.equal(settled, false);
+  release();
+  assert.ok((await login).token);
+});
+
+test("login old credential/status mismatch and lock/commit serialization errors never issue success", async () => {
+  for (const failure of ["mismatch", "lock", "insert", "commit"]) {
+    let inserts = 0;
+    const conflict = Object.assign(new Error("synthetic serialization"), { code: "40001" });
+    const { api } = loadServer((query, options) => {
+      if (query.text.includes("auth_login_limits")) return [{ phone: "synthetic" }];
+      if (!options) return [{ id: 3, password_hash: "old-hash", status: "ACTIVE" }];
+      if (query.text.includes("FOR UPDATE")) { if (failure === "lock") throw conflict; return [{ id: 3 }]; }
+      inserts++; if (failure === "insert") throw conflict;
+      return failure === "mismatch" ? [] : [{ id: 9 }];
+    }, undefined, undefined, async () => { if (failure === "commit") throw conflict; });
+    if (failure === "mismatch") assert.equal(await api.loginPassword("synthetic", "password"), null);
+    else await assert.rejects(api.loginPassword("synthetic", "password"), { code: "40001" });
+    assert.equal(inserts, failure === "lock" ? 0 : 1);
+  }
+});
+
+test("password finalization locks member before ticket consume and fails closed at lock/commit", async () => {
+  for (const failure of ["lock", "commit"]) {
+    let hashes = 0; let consumes = 0; let locked = false;
+    const conflict = Object.assign(new Error("synthetic serialization"), { code: "40001" });
+    const { api } = loadServer((query, options) => {
+      if (!options) { assert.match(query.text, /SET hash_started_at/); return [{ id: 7 }]; }
+      if (query.text.includes("FOR UPDATE")) {
+        if (failure === "lock") throw conflict;
+        locked = true; return [{ id: 3 }];
+      }
+      assert.ok(locked); consumes++;
+      assert.match(query.text, /WITH consumed/);
+      assert.match(query.text, /m\.password_hash IS NOT DISTINCT FROM t\.password_hash_at_issue/);
+      return [{ id: 3 }];
+    }, async () => { hashes++; return "new-hash"; }, undefined,
+    async () => { if (failure === "commit") throw conflict; });
+    await assert.rejects(api.completePassword(ticket, "PASSWORD_RESET", "password"), { code: "40001" });
+    assert.equal(hashes, 1); assert.equal(consumes, failure === "lock" ? 0 : 1);
+  }
 });
 
 test("registration keeps final atomic consume when a prechecked ticket expires during hashing", async () => {

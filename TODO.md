@@ -7,6 +7,38 @@
 > ส่วนนี้เป็นแผนหลักสำหรับรอบถัดไป ส่วนด้านล่างเป็นประวัติ ไม่ถือว่า checkbox เก่าเป็นหลักฐานว่าบรีฟใหม่เสร็จแล้ว ทำตามลำดับพร้อมผ่าน checkpoint แต่ละรอบ ไม่รวบแก้ทุกระบบแล้วค่อยตรวจท้ายงาน
 > มี implementation บางส่วนแล้ว ดูบันทึกสถานะและหลักฐานด้านล่าง ไม่ใช่ production acceptance; migration ใหม่ทั้งหมดเป็น prepare-only ยังไม่ apply/deploy
 
+### Production rollout ล่าสุด — ผู้ใช้อนุมัติ commit/push และ UAT จริงแล้ว
+
+- ผู้ใช้อนุมัติแก้โค้ด→เทส/build→commit/push รอ deploy แล้ว UAT production ด้วย browser ใช้บัญชี UAT ในฐานจริง ไม่ใช้ mock แทน functional acceptance; ห้ามล้างฐาน/ทำเงินจริง/ส่งSMS/providerเสียเงินเอง
+- พบบัญชีทดสอบชื่อ UAT_ROLE: BLU-3 MEMBER / BLU-4 ADMIN ไม่มี orders/coupons/checkins ณ preflight ใช้สองบัญชีนี้เป็นหลัก ห้ามแตะบัญชีลูกค้า
+- **APPLIED จริง:** `20261118_R2_admin_member_profile.sql`, `20261118_R2_member_contact_email.sql` พร้อม metadata checksum. Backup protected ใน `.local-db` และ restore/rehearsal บน native PostgreSQL18 ผ่าน 32ตาราง/19catalog sections. Independent read-only audit ยืนยันข้อมูล32ตารางเดิมไม่เปลี่ยน ไม่มี privilege expansion; ตารางใหม่3ตารางยังว่างก่อน browser UAT. รายละเอียด `R2_PRODUCTION_ROLLOUT.md` ห้ามแก้ migrations2ไฟล์นี้ย้อนหลังอีก
+- **Password NOT APPLIED / DEFAULT OFF:** เพิ่ม server-only gate `ENABLE_ADMIN_PASSWORD_RESET === "true"`; ถ้าไม่ตั้ง true ไม่ render form และ API503ก่อน auth/SQL/scrypt. ยังไม่เปิด env นี้จน auth instance เก่าถูก drain และ password migration/concurrency/logging gates พร้อม. รักษา auth locking fix สำหรับ deployment นี้
+- TypeScript และ `pnpm run build` ผ่าน; pre-gate regression91ผ่าน (รวม rollout runner6tests). Gateชุดpassword/auth41ผ่าน. แก้ assertionเก่าของ `password-input.test.mjs` ให้ตรวจ history display/paginationปัจจุบัน ไม่คาดหน้า read-only legacy ที่ถูกแทนแล้ว; final rerun รวม contact/profile/password/auth/permissions/password-input/rollout runner **96/96 passed, 0skip**, TypeScript ผ่าน; ตรวจ staged diff พบ whitespace1จุดและแก้แล้ว. กำลัง commit/push รอ deploy แล้ว UAT production บันทึกผลเพิ่มด้านล่าง
+- ประวัติบันทึกคำว่า prepare-only/ห้ามcommitเก่าด้านล่างเป็นสถานะก่อนอนุมัติ ไม่ใช่สถานะล่าสุด; มีเพียง profile/contact APPLIED ไม่ใช่ทุก migration R3–R7 หรือ password
+
+### แนวทางล่าสุด — ใช้ฐานจริงและ Browser UAT
+
+ผู้ใช้อนุญาตให้ทำงานกับฐานข้อมูลจริงและควบคุม browser UAT เอง ไม่ใช้ mock แทนระบบจริง. ข้อห้ามเชื่อมฐานจริงในบันทึกเก่าถูกแทนที่เฉพาะส่วนนี้; ไม่ใช่คำสั่งแก้ธุรกรรมลูกค้า/ส่งSMS/เรียกบริการเสียเงิน/commit/push/deploy. ก่อน migration ยังต้อง backup+verify restore และตรวจ dependency/ACL/compatibility ตาม checkpoint ไม่ถือว่า table ใหม่พร้อมโดยคาดเดา
+
+**ผลตรวจจริงรอบเริ่ม UAT:** โหลด DATABASE_URL จาก `.env.local` โดยไม่แสดงค่าลับ ต่อสำเร็จ PostgreSQL18.7; metadata query ผ่าน transaction `readOnly:true` และ server ยืนยัน `transaction_read_only=on`. พบ members/auth_sessions แต่ยังไม่พบ member_contact_details/admin_member_profile_audit/admin_member_password_audit ในฐานที่ตรวจ. localhost3000/3001 ไม่ได้รัน; public app origin คือ `https://blue-fitness-plum.vercel.app`. Browser session ที่มีอยู่เข้าหน้า /admin ได้ และ GET สมาชิก/การเงิน/แพ็กเกจ/checkin/rewards/promo-codes/coupons ตอบ200 ไม่ redirect/ไม่พบข้อความ unavailable. เป็น OWNER read-only smoke ไม่ใช่ role matrix/functional write UAT และไม่ยืนยันว่าบิลด์ live ตรง working tree. ไม่บันทึกชื่อ/เบอร์/ยอดส่วนบุคคลลงหลักฐาน
+
+**รอสำหรับ write UAT:** ระบุ member code ของบัญชีทดสอบที่อนุญาตแก้ไข หรืออนุญาตสร้างบัญชี UAT แยกก่อน ห้ามใช้บัญชีลูกค้าจริงทดสอบ reset/coupon/checkin/payment. ติดตั้ง migration ที่จำเป็นหลัง backup/restore/compatibility checks แล้วจึงทดสอบเขียนจาก browser โดยไม่ปลอม payment evidence หรือยิง provider เสียเงิน. รอบนี้ยังไม่มี mutation/migration/deploy/SMS/provider call
+
+### คำยืนยันล่าสุดจากผู้ใช้ — ใช้แทนข้อขัดแย้งในบันทึกเก่า
+
+**ผลปรับตามคำตอบรอบนี้:** ยกเลิก unique email index ใน migration อีเมลที่ยัง untracked/prepare-only ไม่ใช่ migration ที่ apply แล้ว พร้อมปรับ API error และ regression ให้สองสมาชิกใช้อีเมล canonical เดียวกันได้โดย version/audit/replay แยกกัน. รัน `node --test --test-concurrency=1 src/lib/member-contact-email.test.mjs src/lib/member-contact-email-server.test.mjs` ผ่าน **16/16, 0 skip**; TypeScript/scoped ESLint/diff check ผ่าน. Regression contact+profile/password ที่เกี่ยวข้องผ่าน73ตาม `R2_MEMBER_CONTACT_EMAIL.md`. ยังไม่แตะฐานจริงหรือ apply migration. กติกาโบนัส/คูปอง/สถิติ/หยุดยกเลิก บันทึกแล้วแต่ยังไม่อ้าง implementation ครบ
+
+ผู้ใช้ตอบอนุมัติครบ6ข้อในแชต และย้ำให้ทำเฉพาะขอบเขตง่ายที่สุด:
+- สิทธิ์มีเพียงคนทั่วไป MEMBER / แอดมิน ADMIN / เจ้าของ OWNER ไม่เพิ่มประเภทบุคคลแยกหรือหมวด TRAINER/STAFF/OTHER จาก mock; ข้อเสนอแยกประเภทในแผนเก่าถูกยกเลิก ไม่ต้องถามซ้ำ
+- ยกเลิกแพ็กเกจ: ถ้าใช้คะแนน/คูปองไปแล้ว คะแนนไม่พอถอน หรือมีแพ็กเกจต่อเนื่อง ให้หยุดรายการไว้ให้ OWNER ตรวจ ไม่หักคะแนนติดลบ/ถอนสิทธิ์อื่น/ยกเลิกให้อัตโนมัติ การตรวจโดย OWNER ไม่ใช่อนุมัติ override แบบไร้ข้อจำกัด
+- คะแนนแพ็กเกจเป็นโบนัสบวกเพิ่มจากสูตรคะแนนตามยอดเงินเดิม ไม่แทนสูตร ไม่แก้คะแนนหรือ PAID snapshots ย้อนหลัง
+- คูปองทั่วไป: เว้นว่างไม่จำกัดเวลาหลังเปิดใช้, 0=10นาทีหลังเปิดใช้; ถ้าชนวันหมดอายุให้ยึดเงื่อนไขที่ถึงก่อน ไม่ใช่เว้นว่าง=10นาที
+- รายงานสมาชิกนับคนไม่ซ้ำในแต่ละกลุ่มของช่วงรายงาน; 3เดือนใช้90วัน; พ้นสภาพเมื่อเลย30วันจากหมดอายุ แต่หมดอายุเข้าไม่ได้ทันที; กลับมาซื้อเกิน90วันนับกลุ่มใหม่ในรายงานโดยคงรหัส/ประวัติเดิม; ใกล้หมดอายุ30วันอ้างอิงวันที่เลือกดูรายงาน กลุ่มอาจทับซ้อนห้ามสื่อว่าแยกเด็ดขาด
+- อีเมลเป็นข้อมูลติดต่อ ใช้ร่วมกันได้ ไม่ใช้ login/recovery ไม่ส่งหรือยืนยันอีเมล
+- ใช้กราฟจำนวนครั้งเข้ารายชั่วโมงเท่านั้น ไม่ทำกราฟวงกลม 07–14/14–22 และไม่ต้องถามขอบ14:00ของกราฟวงกลมอีก ข้อมูลเก่าไม่มี OUT ยังแสดงระยะเวลาไม่ทราบ
+
+นี่คือ **กติกาที่ได้รับอนุมัติแล้ว ไม่ใช่ implementation เสร็จ** คง checkpoint ด้านโค้ด/ทดสอบแยกจากการตอบคำถาม ไม่อนุญาต apply ฐานจริง/คืนเงินจริง/deploy/commit โดยอัตโนมัติ
+
 ### ขอบเขตที่ยืนยัน
 
 - รวมภาพรวม/กราฟ, การเงิน, สมาชิก, เข้า–ออก, รางวัล, โค้ดส่วนลด, คูปอง, แพ็กเกจ และ Excel ตามรายการลูกค้า
@@ -16,7 +48,7 @@
 - การแก้ catalog ไม่เปลี่ยนราคา/สิทธิประโยชน์ของผู้ซื้อเดิม แต่ ADMIN/OWNER เปลี่ยนช่วงเวลาให้สิทธิ์ของสมาชิกเป็นรายกรณีได้ โดยคงสิทธิประโยชน์เดิมและเก็บ audit
 - ลูกค้ายืนยันข้อ 5 ล่าสุดว่าเป็น “สิทธิ์เสริมใช้ช่วงเวลาอื่น” ต้องมีแพ็กเกจหลักก่อน สมาชิกกดใช้งานเองได้ ไม่ใช่การต่ออายุทบวันหรือการทิ้งวันแพ็กเกจเดิม
 - หมดอายุเข้าใช้ไม่ได้ รหัสสมาชิกและประวัติยังอยู่ กลับมาซื้อภายใน 3 เดือนเป็นลูกค้าเก่า; ต่อใน 30 วันไม่ถือว่าพ้นสภาพ
-- สมาชิกทั้งหมดอ้างอิงผู้เคยซื้อแพ็กเกจ ไม่ใช่ทุกบัญชีสมัคร; เลือก/กรองประเภทบุคคลได้
+- สมาชิกทั้งหมดอ้างอิงผู้เคยซื้อแพ็กเกจ ไม่ใช่ทุกบัญชีสมัคร; ใช้สิทธิ์ MEMBER/ADMIN/OWNER เดิม ไม่เพิ่มประเภทบุคคลแยก
 - ADMIN เห็นยอดเฉพาะรายการที่ทำ แต่ห้ามเห็นยอดรวม/รายงานการเงิน ต้องกรองข้อมูลที่ server/API ไม่ใช่ซ่อน UI อย่างเดียว
 - ข้อมูลย้อนหลัง OWNER เท่านั้น; ต่ออายุผ่านเจ้าหน้าที่ต้องบันทึกรายรับ รองรับราคา 0 บาทโดยไม่ปลอมธุรกรรมโอน/สลิป
 - รายได้ซื้อออนไลน์อิงเวลายืนยันสำเร็จ; เงินเดือน/คอมมิชชัน/ค่าเสื่อมกรอกเอง; ยกเลิกรายการบัญชีแบบเก็บประวัติ
@@ -33,7 +65,7 @@
 | รอบ | ทำแล้ว / หลักฐานจาก source และ isolated tests | ค้าง / Checkpoint |
 |---|---|---|
 | R1 | ตรวจ real route → server → SQL, แยก mock; อ่าน AGENTS และ Next guides จาก pnpm resolved path; มี `R1_IMPLEMENTATION_MATRIX.md` และแผน additive/rollback | matrix เดิมเป็น baseline ก่อน implementation ต้องอ่านร่วมกับตารางนี้; entitlement authority/ACL และ combined rollout ยังไม่ตรวจครบ จึงยังไม่ปิด checkpoint |
-| R2 | benefits API ใช้ ADMIN response allowlist ตัด monetary order history/audit; ADMIN เข้า packages และสมาชิก list/detail read-only ได้; member SQL ทุก read ตรวจ session hash/NORMAL/live/revoked/status/role ซ้ำ; ADMIN ไม่ SELECT หรือ serialize ยอดเงิน/paid_at/slip/provider; OWNER คงยอดเดิมและ role mutation OWNER-only; เพิ่มฟอร์ม/API แก้ชื่อ/ชื่อเล่น/เพศ/วันเดือนเกิด/ผู้ติดต่อฉุกเฉินพร้อมเหตุผล, append-only audit, expected snapshot กันเขียนทับและ UUID replay | dashboard ยัง OWNER-only; ประเภทบุคคล/email/avatar/card/reset password และ PostgreSQL/browser role UAT เต็มชุดยังค้าง; SQL benefits ภายในยังคืนข้อมูลเดิม; profile edit เป็น prepared feature ต้อง apply migration ใหม่ก่อนใช้ |
+| R2 | benefits API ใช้ ADMIN response allowlist ตัด monetary order history/audit; ADMIN เข้า packages และสมาชิก list/detail read-only ได้; member SQL ทุก read ตรวจ session hash/NORMAL/live/revoked/status/role ซ้ำ; ADMIN ไม่ SELECT หรือ serialize ยอดเงิน/paid_at/slip/provider; OWNER คงยอดเดิมและ role mutation OWNER-only; เพิ่มฟอร์ม/API แก้ชื่อ/ชื่อเล่น/เพศ/วันเดือนเกิด/ผู้ติดต่อฉุกเฉินพร้อมเหตุผล, append-only audit, expected snapshot กันเขียนทับและ UUID replay | เพิ่ม staff password reset แบบ claim-before-scrypt, SQL reauthorize, rate limit, metadata audit, revoke target sessions/OTP/tickets และไม่เผยรหัสเดิม (prepared); dashboard ยัง OWNER-only; อีเมลติดต่อแยกจาก auth พร้อมฟอร์ม/API/version/audit/replay ทำแล้ว (prepared); ประเภทบุคคล/avatar/card และ PostgreSQL/browser role UAT เต็มชุดยังค้าง; SQL benefits ภายในยังคืนข้อมูลเดิม; profile/reset ต้อง apply migration ใหม่ก่อนใช้ |
 | R3 | catalog create/update/deactivate OWNER/ADMIN, version/audit/replay; ปลด 10 IDs/2 slots ครบ UI/API/SQL/quote/storefront/checkin; ใช้ PAID snapshot ไม่เปลี่ยนผู้ซื้อเก่า | override ช่วงเวลารายสมาชิกยังค้าง; โบนัสคะแนนรอ R0; time supplement ยังจำกัดตาม R6; browser/concurrency ยังไม่ผ่าน checkpoint |
 | R4 | additive online provenance เฉพาะ PAID ใหม่ ผูก point ledger ใน transaction เดิม ไม่ backfill/rewrite PAID เก่า; payment cancel regression ผ่าน | staff renewal/0บาท/backdate และถอนสิทธิ์รายแพ็กเกจยังไม่ทำ; provenance เป็น observation ไม่ใช่ authoritative entitlement interval; reversal ใช้แล้ว/แต้มไม่พอ/แพ็กเกจถัดไปรอ R0 |
 | R5 | ออนไลน์ใช้ confirmed_at เวลาไทย; PAID ไม่มี confirmed_at แสดงจำนวนแทนเดาวัน; เพิ่มคอมมิชชัน/ค่าเสื่อม; กราฟเติมวัน/เดือนยอด0 ตาม filter เป็นยอดต่อช่วง | import template/preview/batch/audit ยังไม่ทำ; หมวดสมัครใหม่/ต่อสมาชิก/ยกเลิกยังไม่จัดประเภทปลอดภัย; server filters/pagination และ reconciliation 0บาท/refund ค้าง |
@@ -67,17 +99,39 @@ pnpm exec eslint --max-warnings 0 src/lib/admin-member-profile-server.ts src/lib
 
 ผลรอบล่าสุด **48 passed / 0 failed / 0 skipped**, TypeScript/scoped ESLint ผ่าน. Actual new SQL integration บน PGlite ตรวจ auth/stale/replay/rollback/audit immutable และ coexistence กับ payment/finance/R3–R7 โดยไม่เปลี่ยน orders/ledger/coupons/เงิน. API ใช้ stub transport; UI ยังเป็น source contract ไม่ใช่ browser UAT; ยังไม่มี PostgreSQL หลายconnection. ไม่ปิด CHECKPOINT R2 ทั้งรอบ; full lint ยังมี error เดิมตามบันทึกก่อนหน้า
 
-**จุดทำต่อ:** ปิด R2 dashboard payload partition/ประเภทบุคคล/email/avatar/card/reset password → R3 entitlement authority/override และสิทธิ์เสริมสำหรับสมาชิกต่ออายุ → R4 staff renewal/0บาท (ไม่เดา refund) → R5 import → R6 campaign → R7 kiosk/manual → R8 histories/filters → R9 exports ที่เหลือ แล้ว R10 combined SQL/PostgreSQL concurrency/browser. งาน R0 block เฉพาะส่วนที่ไม่ชัด ไม่ถือว่าอนุญาตแก้เงิน/ถอนสิทธิ์เอง
+**R2 ช่วงตั้งรหัสผ่านใหม่ (ตรวจผ่านในรอบล่าสุด):** เพิ่ม `src/lib/admin-member-password-server.ts`, POST `/api/admin/members/[memberCode]/password`, `AdminMemberPasswordForm.tsx` และ migration prepared `20261118_R2_admin_member_password.sql`. ADMIN → MEMBER; OWNER → MEMBER/ADMIN; ไม่เปิด self/OWNER/suspended target ตาม conservative least-privilege slice. ใช้ password policy 10–128 และ scrypt salted/work cap เดิม ไม่ส่ง SMS. Claim SQL ตรวจ live NORMAL session และจำกัด 5 claims/actor/15นาที, 3/target/15นาที, 50รวม/นาที; finalize ใน2นาทีพร้อมตรวจ target xmin ไม่เปลี่ยน. เปลี่ยนเฉพาะ password_hash/updated_at, revoke sessions ทุกโหมดของเป้าหมายและ invalidate password OTP/tickets atomically. Audit เก็บ metadata/reason ไม่เก็บ password/hash/session/HMAC. UUID/body ผูกด้วย domain-separated HMAC ใช้ `SMS_API_SECRET` เดิม (server-only) ใน restricted request table; ต้องมี secret ที่แข็งแรง ถ้าหมุน secret retry เดิม fail-closed และต้องตรวจการจัดการ secret/logging ก่อน rollout. ไม่มี browser storage ของรหัส/UUID body เก็บใน memory ชั่วคราวเพื่อ retry เท่านั้น
+
+ตรวจ security เพิ่มพบ login/session issuance race จึงแก้ `src/lib/auth/server.ts` ให้ login lock member ก่อน recheck hash/status+insert session ใน transaction และคืน token หลัง commit; password completion lock member ก่อน consume ticket โดยคง one-shot claim ก่อน hash. Reset SQL lock member ตาม ID ก่อน lock/recheck session ลด session/member inversion. ห้าม rollout คละ auth instance เก่าโดยไม่ drain งานเดิม. ยังมี profile SQL session→member ซึ่งอาจ deadlock เมื่อชน reset จึงยังไม่อ้าง global deadlock-free; error abort แบบ fail-closed และต้องทดสอบหลายconnectionก่อนเปิดจริง
+
+```sh
+node --test src/lib/admin-member-password.test.mjs src/lib/admin-member-password-server.test.mjs src/lib/auth/password.test.mjs src/lib/auth/server.test.mjs src/lib/auth/registration.test.mjs src/lib/admin-member-profile.test.mjs src/lib/admin-member-profile-server.test.mjs src/lib/admin-members-server.test.mjs src/lib/admin-permissions.test.mjs src/lib/brief-combined-migrations.test.mjs
+pnpm exec tsc --noEmit --incremental false
+pnpm exec eslint --max-warnings 0 src/lib/admin-member-password-server.ts src/lib/admin-member-password.test.mjs src/lib/admin-member-password-server.test.mjs src/lib/auth/server.ts src/lib/auth/server.test.mjs 'src/app/api/admin/members/[memberCode]/password/route.ts' 'src/app/admin/members/[memberCode]/AdminMemberPasswordForm.tsx' 'src/app/admin/members/[memberCode]/page.tsx'
+```
+
+ผล rerun จริง **73 passed / 0 failed / 0 skipped**, TypeScript/scoped ESLint/diff check ผ่าน. SQL isolated ตรวจ reset/replay/stale/rollback/quotas/metadata audit/old credentials invalidation รวม serial lock protocol assertions; ไม่ใช่ multi-connection reproduction. หาก claim แล้ว hash/finalize ล้มไม่เริ่ม hash ซ้ำด้วย UUID เดิม ต้องตรวจผลและรอ deadline2นาทีก่อนเริ่มใหม่ ไม่มี blind retry. เอกสาร `admin-member-password.md`; ยังไม่ apply migration/DBจริง/browser/provider/commit/deploy และยังไม่ปิด CHECKPOINT R2 ทั้งรอบ
+
+**R2 ช่วงอีเมลติดต่อ (ตรวจผ่านรอบล่าสุด):** เพิ่ม `member_contact_details` แยกจาก members/auth ไม่ backfill, migration prepared `20261118_R2_member_contact_email.sql`, helper `src/lib/member-contact-email-server.ts`, GET/PATCH `/api/admin/members/[memberCode]/contact-email` และฟอร์มใน detail. อีเมล optional ว่าง→null, trim/ASCII lowercase/max254/Zod email และ SQL validation; ไม่ใช้ login/recovery/ส่งอีเมล/ยืนยันตัวตน. ADMIN → MEMBER, OWNER → MEMBER/ADMIN ตาม conservative scope เดิม; SQL ตรวจ persisted live NORMAL session/current roles. Expected version monotonic กัน stale/A→B→A, UUID payload replay/conflict, audit before/after+reason และ mutation atomic. เดิมเคยตั้ง unique lower(email) ระหว่างพัฒนา แต่คำยืนยันล่าสุดอนุญาต shared contact จึงเอา unique email index ออกจาก migration ที่ยังไม่ apply แล้ว คงเฉพาะ PKสมาชิกและ unique audit replay key อีเมลไม่ใช่หลักฐานตัวตน. Missing migration แสดง unavailable ไม่ใช่ empty editable success. ไม่เพิ่มประเภทบุคคลจาก mock/ไม่เปลี่ยน role. รายละเอียด `R2_MEMBER_CONTACT_EMAIL.md`
+
+```sh
+node --test --test-concurrency=1 src/lib/member-contact-email.test.mjs src/lib/member-contact-email-server.test.mjs src/lib/admin-member-profile.test.mjs src/lib/admin-member-profile-server.test.mjs src/lib/admin-member-password.test.mjs src/lib/admin-member-password-server.test.mjs src/lib/admin-members-server.test.mjs src/lib/admin-permissions.test.mjs
+pnpm exec tsc --noEmit --incremental false
+pnpm exec eslint --max-warnings 0 src/lib/member-contact-email-server.ts src/lib/member-contact-email.test.mjs src/lib/member-contact-email-server.test.mjs 'src/app/api/admin/members/[memberCode]/contact-email/route.ts' 'src/app/admin/members/[memberCode]/AdminMemberContactEmailForm.tsx' 'src/app/admin/members/[memberCode]/page.tsx'
+```
+
+ผล rerun **73 passed / 0 failed / 0 skipped**, TypeScript/scoped ESLint/diff check ผ่าน. Tests ครอบคลุม actual contact SQL + coexistence payment/finance/R3–R7/profile/password ใน isolated PGlite, auth deny/strict payload/duplicate/null/stale/replay/audit rollback และไม่เปลี่ยนสมาชิก/auth/เงินเดิม. API ใช้ stub transport, UI source-contract; ยังไม่มี browser/หลายconnection/production acceptance. ไม่มี apply migration/DBจริง/provider/commit/deploy. ข้อความแยกประเภทบุคคลเดิมถูกแทนที่ด้วยคำยืนยันล่าสุดให้มีเพียง MEMBER/ADMIN/OWNER ไม่เพิ่ม taxonomy; ทำ avatar/card/dashboard ใน scope ต่อได้
+
+**จุดทำต่อ (อิงคำยืนยันล่าสุด):** ปิด R2 dashboard payload partition/avatar/card โดยไม่เพิ่มประเภทบุคคล → R3 entitlement authority/override และสิทธิ์เสริมสำหรับสมาชิกต่ออายุ → R4 staff renewal/0บาท (ไม่เดา refund) → R5 import → R6 campaign → R7 kiosk/manual → R8 histories/filters → R9 exports ที่เหลือ แล้ว R10 combined SQL/PostgreSQL concurrency/browser. งาน R0 block เฉพาะส่วนที่ไม่ชัด ไม่ถือว่าอนุญาตแก้เงิน/ถอนสิทธิ์เอง
 
 ### R0 — ปิดคำถามที่ยังมีผลต่อข้อมูล (block เฉพาะงานที่เกี่ยวข้อง)
 
 - [x] ข้อ 5 ใช้สมมติฐานแบบขั้นต่ำตามผู้ใช้สั่ง: สิทธิ์เสริมเป็นคูปองเปลี่ยนช่วงเวลาแบบใช้ครั้งเดียว แจกโดย ADMIN/OWNER หรือเป็นของแถมแพ็กเกจ ไม่ขายแยก ไม่คิดราคา/ส่วนต่าง สมาชิกต้องมีแพ็กเกจหลักที่ยังไม่หมดอายุจึงกดใช้ได้ เมื่อกดใช้จะหัก 1 สิทธิ์และให้เข้าในช่วงเวลาที่ระบุของวันนั้นตาม Asia/Bangkok เท่านั้น ต้องกดภายในช่วงเวลาที่ให้สิทธิ์ สิ้นสุดเมื่อถึงเวลาปิดช่วงหรือแพ็กเกจหลักหมดอายุ แล้วแต่ว่าอะไรถึงก่อน กดซ้ำขณะสิทธิ์เดิมยังทำงานให้คืนผลเดิมโดยไม่หักเพิ่ม ไม่เพิ่มวัน/เปลี่ยนแพ็กเกจหลัก ไม่จับเวลารายชั่วโมง ไม่สะสมช่วงเวลา ไม่เปิดให้สมาชิกเลือกเวลาเอง และไม่ย้อนหลัง ค่าเหล่านี้เป็นสมมติฐานของผู้พัฒนาที่ผู้ใช้อนุญาตให้เลือก ไม่ใช่คำยืนยันจากลูกค้า
-- [ ] สถิติ: เกิน 3 เดือนกลับมาซื้อจัดเป็นใหม่หรือกลุ่มอื่น, นับคนหรือครั้ง, 3 เดือนปฏิทินหรือ 90 วัน, วันนับพ้นสภาพใช้วันหมดอายุหรือครบ 30 วัน; ใกล้หมดอายุอิงวันนี้หรือวันที่เลือก ห้ามตีความเองเป็นสิทธิ์ใช้ฟรี 30 วัน
-- [x] ประเภทบุคคลแยกจาก role: คำถามรอบ26ข้อตอบเพียง MEMBER แต่รอบยืนยัน7ข้อลูกค้าตอบใช่ต่อหัวข้อสิทธิ์รวมการแยกประเภทแล้ว ใช้ข้อยืนยันล่าสุด ไม่ต้องถามซ้ำ
-- [ ] ถอนแพ็กเกจที่ใช้คะแนน/คูปอง/วันไปแล้ว: OWNER ตัดสินอย่างไรเมื่อคะแนนไม่พอหรือมีแพ็กเกจถัดไป? ห้ามทำคะแนนติดลบ/หักสิทธิ์แพ็กเกจอื่นโดยไม่มีข้อตกลง
-- [ ] คูปอง: ช่องว่าง/0=10นาทีและวันหมดอายุชนเวลาหลังเปิดใช้ ใช้เงื่อนไขถึงก่อนหรือไม่; คะแนนในแพ็กเกจเป็นโบนัสเพิ่มจากสูตรเงินหรือแทนสูตรเดิม
-- [ ] กราฟวงกลมเดิมยังต้องการหรือใช้กราฟรายชั่วโมงแทน และนิยามนับช่วง 14:00; ข้อมูลเข้าเก่าไม่มีออกให้แสดงว่าไม่ทราบระยะเวลา ห้ามแต่งข้อมูล
-- [ ] CHECKPOINT R0: บันทึกคำตอบในหัวข้อนี้ก่อนลงงานที่ถูก block; งานอื่นเดินต่อได้ ไม่วนถามทุกข้อที่ยืนยันแล้ว
+- [x] สถิติอนุมัติแล้ว: นับคนไม่ซ้ำต่อกลุ่ม/ช่วงรายงาน, 3เดือน=90วัน, กลับเกิน90วันเป็นกลุ่มใหม่แต่รหัส/ประวัติเดิม, พ้นสภาพเมื่อเลย30วันจากหมดอายุ (หมดอายุเข้าไม่ได้ทันที), ใกล้หมดอายุอิงวันที่เลือกดูรายงาน
+- [x] ผู้ใช้ยืนยันล่าสุดมีแค่ MEMBER/ADMIN/OWNER ไม่เพิ่มประเภทบุคคลแยก; ใช้แทนข้อสรุปแยกประเภทเก่า ไม่ทำ taxonomy หรือถามหมวดเพิ่ม
+- [x] ยกเลิกกรณีใช้คะแนน/คูปองแล้ว คะแนนไม่พอ หรือมีแพ็กเกจต่อเนื่อง: หยุดรายการให้ OWNER ตรวจ ไม่ถอนสิทธิ์อื่นหรือทำคะแนนติดลบอัตโนมัติ
+- [x] คูปองทั่วไป: ว่าง=ไม่จำกัดเวลาหลังเปิดใช้, 0=10นาที, หมดตามเงื่อนไขถึงก่อน; คะแนนแพ็กเกจเป็นโบนัสบวกสูตรเงินเดิม
+- [x] ใช้เฉพาะกราฟครั้งเข้ารายชั่วโมง ไม่ทำวงกลมเพิ่ม; ประวัติเก่าไม่มีออกแสดงระยะเวลาไม่ทราบ
+- [x] CHECKPOINT R0 ด้านคำตอบ: บันทึกคำยืนยันครบแล้ว งานที่เคยรอกติกาเดินต่อได้ แต่ R2–R10 ยังต้อง implement/test ไม่ติ๊กผ่านตาม R0
 
 ### R1 — ตรวจฐานระบบและออกแบบการเปลี่ยนแปลง
 
@@ -92,7 +146,7 @@ pnpm exec eslint --max-warnings 0 src/lib/admin-member-profile-server.ts src/lib
 
 - [ ] เปิด ADMIN เข้าหน้าตาม scope ยกเว้นการเงิน; OWNER ทุกหน้า; บังคับ server/API/SQL เท่าที่เกี่ยวข้อง
 - [ ] ตัดยอดรวม/รายงานเงินออกจาก payload สำหรับ ADMIN รวม dashboard/export; ยังให้ทำยอดเฉพาะรายการที่มีสิทธิ์ได้
-- [ ] ประเภทบุคคลแยก role ตามข้อสรุป R0; เพิ่ม/แก้ข้อมูลชื่อ รูป เพศ วันเดือนเกิด อีเมล ข้อมูลฉุกเฉิน และผูกบัตรตาม scope โดยตรวจ unique/validation
+- [ ] ใช้ role เดิม MEMBER/ADMIN/OWNER เท่านั้น ไม่เพิ่มประเภทบุคคล; เพิ่ม/แก้ข้อมูลชื่อ รูป เพศ วันเดือนเกิด อีเมล ข้อมูลฉุกเฉิน และผูกบัตรตาม scope ตรวจ unique เฉพาะ identifier ที่ต้องไม่ซ้ำ (อีเมลติดต่อใช้ร่วมกันได้)
 - [ ] ตั้งรหัสผ่านใหม่ผ่านช่องทาง admin ที่ปลอดภัย เก็บ audit ไม่เผย password/hash/session; คงกติกา OTP เปลี่ยนเบอร์เดิม
 - [ ] CHECKPOINT R2: tests MEMBER/ADMIN/OWNER รวมเรียก URL/API/export ตรง, แก้ไข role ข้ามสิทธิ์, session ถูกระงับ/revoked และข้อมูลส่วนตัว
 
