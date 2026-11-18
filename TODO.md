@@ -7,6 +7,15 @@
 > ส่วนนี้เป็นแผนหลักสำหรับรอบถัดไป ส่วนด้านล่างเป็นประวัติ ไม่ถือว่า checkbox เก่าเป็นหลักฐานว่าบรีฟใหม่เสร็จแล้ว ทำตามลำดับพร้อมผ่าน checkpoint แต่ละรอบ ไม่รวบแก้ทุกระบบแล้วค่อยตรวจท้ายงาน
 > มี implementation บางส่วนแล้ว ดูบันทึกสถานะและหลักฐานด้านล่าง ไม่ใช่ production acceptance; migration ใหม่ทั้งหมดเป็น prepare-only ยังไม่ apply/deploy
 
+### Production UAT ผลจริงหลัง push `5d7f18e`
+
+- commit/push `5d7f18e` บน main สำเร็จ; รอ endpointใหม่จาก404→401 ก่อน browser UAT จึงยืนยันมี deploymentใหม่จริง ไม่ใช้ working tree แทนเว็บ live
+- OWNER browser session จริง: BLU-3 บันทึกอีเมลทดสอบ `.invalid` ผ่านฟอร์ม, แก้ nickname+วัน/เดือนเกิด29/2ผ่านฟอร์มและ refreshแสดงค่าที่บันทึก; BLU-4 บันทึกอีเมลเดียวกันผ่านฟอร์มสำเร็จ ไม่ส่งอีเมล/provider
+- production API BLU-4: PATCH keyใหม่200, replay body/keyเดิม200, keyเดิมเปลี่ยนอีเมล409, versionเพิ่มเพียง1และอีเมลไม่เปลี่ยน. GET guarded200; anonymous probe401. Reset formไม่แสดง และ POST password503ตาม default-off
+- independent production read-only SQL: BLU-3 email version1/audit1, profile audit1; BLU-4 email version2/audit2. ทั้งคู่ roleเดิม MEMBER/ADMIN, points0, expiryNULL, orders/coupons/checkins0. คงข้อมูล UAT/append-only audit ไว้ ไม่ล้างหรือทำคืนย้อนหลังแบบลบประวัติ
+- Functional UATนี้เป็น OWNER acting on MEMBER/ADMIN test targets ไม่ใช่ ADMIN/MEMBER login role-matrix เต็มชุด; passwordยังไม่เปิด/ไม่apply. ไม่มีเงินจริง/SMS/provider call. R2ยังไม่ครบ avatar/card/dashboard/role/concurrency checks
+- Regression final96passed, TypeScript/buildผ่าน. รายงาน schema/backup/native restoreที่ `R2_PRODUCTION_ROLLOUT.md`; full lint errorเดิมตามประวัติไม่ได้แก้นอกscope
+
 ### Production rollout ล่าสุด — ผู้ใช้อนุมัติ commit/push และ UAT จริงแล้ว
 
 - ผู้ใช้อนุมัติแก้โค้ด→เทส/build→commit/push รอ deploy แล้ว UAT production ด้วย browser ใช้บัญชี UAT ในฐานจริง ไม่ใช้ mock แทน functional acceptance; ห้ามล้างฐาน/ทำเงินจริง/ส่งSMS/providerเสียเงินเอง
