@@ -7,13 +7,17 @@
 > ส่วนนี้เป็นแผนหลักสำหรับรอบถัดไป ส่วนด้านล่างเป็นประวัติ ไม่ถือว่า checkbox เก่าเป็นหลักฐานว่าบรีฟใหม่เสร็จแล้ว ทำตามลำดับพร้อมผ่าน checkpoint แต่ละรอบ ไม่รวบแก้ทุกระบบแล้วค่อยตรวจท้ายงาน
 > มี implementation บางส่วนแล้ว ดูบันทึกสถานะและหลักฐานด้านล่าง ไม่ใช่ production acceptance; migration ใหม่ทั้งหมดเป็น prepare-only ยังไม่ apply/deploy
 
-### R2 Dashboard / บัตร / รูป — checkpoint ก่อนขึ้น production
+### R2 Dashboard / บัตร / รูป — production checkpoint
+
+- Browser OWNER บน production: BLU-3 ผูกบัตรชั่วคราว 200, replay 200 เพิ่ม version ครั้งเดียว, ปลดคืนและ GET ยืนยัน `null` version 2 โดยเก็บ audit; Dashboard OWNER 200; ฟอร์มรูปแสดง แต่ยังไม่อัปโหลดหรือสแกน USB จริง
+- พบ GET รูป 403 เมื่อ browser ไม่ส่ง Origin; ปรับให้ GET ใช้ same-origin guard มาตรฐานและคงการตรวจ session/role ส่วน POST ยังต้องมี Origin. Tests เฉพาะส่วน 6/6 และ TypeScript ผ่าน
+- ยังไม่ปิด R2: ขาด session UAT แยก ADMIN/MEMBER, upload Cloudinary จริง (ยังไม่อนุญาต) และ password reset ยังตอบ 503 ตาม gate
 
 - เชื่อม Dashboard ADMIN (ไม่ query หรือส่งข้อมูลเงิน) และฟอร์มบัตร/รูปในหน้าสมาชิกแล้ว; build และชุดเทสรวมก่อน build ผ่าน (มี 1 skip ในชุดรวม; ไม่ใช้แทน production UAT)
 - ซ้อม card/avatar กับ snapshot ที่ป้องกันสิทธิ์บน PostgreSQL จริง: คอลัมน์เดิมครบ 36 ตารางตรงหลัง restore/rollback/commit ในฐานซ้อม, catalog 19 ส่วน, inventory เดิม 2 รายการคงเดิม; runner 7/7 ผ่าน
 - ผลล่าสุด: apply card/avatar บน production สำเร็จ ตรวจ read-only postflight ผ่าน ข้อมูลเดิม 36 ตารางไม่เปลี่ยน ตารางใหม่ 5 ตารางว่าง และ effective ACL ผ่าน; runner 7/7, TypeScript/build ผ่าน ไม่ลง password/R3+
 - ประวัติรอบแรก: Production apply หยุดก่อนส่ง DDL (`not-attempted`): effective ACL ของ `neon_service` ยังไม่ผ่าน gate แม้ revoke PUBLIC แล้ว ต้องตรวจเทียบสิทธิ์เดิมราย operation และแยกสิทธิ์ที่สืบทอดกับสิทธิ์ใหม่ ห้ามข้าม guard หรือแก้ grant เอง ดู `R2_PRODUCTION_ROLLOUT.md`
-- รอบนี้ยังไม่ push/deploy หรือ UAT บัตร/รูปจริง, ไม่เรียก Cloudinary, password ยังปิด และไม่ข้าม R3
+- Push `168d513` ขึ้น `main` แล้ว; endpoint บัตรบน production ตอบ 401 เมื่อไม่ล็อกอิน. Browser tool timeout จึงยังไม่ผ่าน UAT แบบล็อกอิน; ไม่เรียก Cloudinary, password ยังปิด และไม่ข้าม R3
 
 ### Production UAT ผลจริงหลัง push `5d7f18e`
 

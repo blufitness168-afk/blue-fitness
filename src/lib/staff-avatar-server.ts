@@ -52,7 +52,7 @@ async function managedUpload(bytes: Buffer, publicId: string, contentHash: strin
 }
 export async function staffAvatarRequest(request: Request, memberCode: string) {
   if (!["GET", "POST"].includes(request.method)) return json({ error: "ไม่รองรับวิธีเรียกนี้" }, 405);
-  if (!request.headers.get("origin") || !sameOrigin(request)) return json({ error: "ไม่อนุญาตคำขอจากเว็บไซต์อื่น" }, 403);
+  if (!sameOrigin(request) || (request.method === "POST" && !request.headers.get("origin"))) return json({ error: "ไม่อนุญาตคำขอจากเว็บไซต์อื่น" }, 403);
   try {
     if (!memberCode || memberCode.length > 50 || new URL(request.url).search) throw new Denied(400);
     if (request.method === "GET") return json({ avatar: await getStaffAvatar(memberCode) });

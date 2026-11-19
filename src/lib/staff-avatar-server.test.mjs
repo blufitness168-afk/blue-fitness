@@ -33,6 +33,13 @@ function harness({actor={role:'ADMIN',status:'ACTIVE'},token='a'.repeat(64),sqlE
  },{DATABASE_URL:'OFFLINE_ONLY',CLOUDINARY_CLOUD_NAME:'offline',CLOUDINARY_API_KEY:'OFFLINE',CLOUDINARY_API_SECRET:'OFFLINE'});
  return {run:handler.staffAvatarRequest,read:handler.getStaffAvatar,calls,provider};
 }
+test('same-origin GET without an Origin header reads via auth without contacting the provider',async()=>{
+ const h=harness();
+ const url='https://offline.invalid/api/admin/members/BLU-3/avatar';
+ assert.equal((await h.run(new Request(url),'BLU-3')).status,200);
+ assert.equal((await h.run(req({method:'GET',origin:'https://evil.invalid'}),'BLU-3')).status,403);
+ assert.equal(h.calls.length,1);assert.equal(h.provider.length,0);
+});
 test('production handler rejects auth/origin/live SQL denial before provider',async()=>{
  for(const [options,request,status] of [[{actor:null},{},401],[{actor:{role:'MEMBER'}},{},403],[{actor:{role:'OWNER',status:'SUSPENDED'}},{},403],[{token:'bad'},{},401],[{},{origin:'https://evil.invalid'},403],[{},{origin:''},403],[{sqlError:{code:'42501',message:'SECRET'}},{},403],[{sqlError:{code:'42883'}},{},503]]) {
   const h=harness(options),r=await h.run(req(request),'BLU-3');assert.equal(r.status,status);assert.equal(h.provider.length,0);assert.doesNotMatch(JSON.stringify(r),/SECRET/);
