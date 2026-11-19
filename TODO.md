@@ -10,8 +10,11 @@
 ### R2 Dashboard / บัตร / รูป — production checkpoint
 
 - Browser OWNER บน production: BLU-3 ผูกบัตรชั่วคราว 200, replay 200 เพิ่ม version ครั้งเดียว, ปลดคืนและ GET ยืนยัน `null` version 2 โดยเก็บ audit; Dashboard OWNER 200; ฟอร์มรูปแสดง แต่ยังไม่อัปโหลดหรือสแกน USB จริง
-- พบ GET รูป 403 เมื่อ browser ไม่ส่ง Origin; ปรับให้ GET ใช้ same-origin guard มาตรฐานและคงการตรวจ session/role ส่วน POST ยังต้องมี Origin. Tests เฉพาะส่วน 6/6 และ TypeScript ผ่าน
-- ยังไม่ปิด R2: ขาด session UAT แยก ADMIN/MEMBER, upload Cloudinary จริง (ยังไม่อนุญาต) และ password reset ยังตอบ 503 ตาม gate
+- พบ GET รูป 403 เมื่อ browser ไม่ส่ง Origin; ปรับให้ GET ใช้ same-origin guard มาตรฐานและคงการตรวจ session/role ส่วน POST ยังต้องมี Origin. Tests เฉพาะส่วน 6/6 และ TypeScript ผ่าน; push `2b3c49a` แล้ว และ Browser OWNER ตรวจ GET รูปบน production ได้ 200 หลัง deploy
+- Production UAT เพิ่ม: ใช้ Playwright เปิด session แยกและล็อกอินด้วยบัญชีทดสอบเดิมจากไฟล์ที่ป้องกันไว้ ไม่เปิดเผยรหัสผ่าน; BLU-4 ADMIN เข้า Dashboard โดยไม่พบยอดเงินหรือฟิลด์ยอดเงินใน HTML ที่ตรวจ, finance export 403, card GET 200; BLU-3 MEMBER ถูกส่งกลับ `/member`, finance export/card 403; ปิด session ทดสอบหลังเสร็จ
+- ผู้ใช้อนุญาต Cloudinary หนึ่งรูป: ส่งรูป PNG สังเคราะห์ผ่านเบราว์เซอร์ OWNER ไปยัง BLU-3 สำเร็จ POST/GET 200, version เพิ่ม 1 และ source `STAFF_UPLOAD`; ไม่อัปโหลดรูปบุคคลจริง
+- Reset concurrency ตรวจแล้วบน PostgreSQL 18.4 จริงแบบ isolated ด้วย `scripts/r2-password-postgres-test.py`: 4/4 ผ่าน ยืนยัน lock wait จริง 4 ครั้ง ครอบคลุม login/reset และ password completion/reset ทั้งสองลำดับ; auth/reset Node tests 41/41 และ TypeScript ผ่าน รายละเอียด `admin-member-password.md`
+- ยังไม่ปิด production R2: reset ยังปิดตาม gate และยังไม่ apply migration; เครื่องนี้ไม่มี Vercel project link, CLI หรือ token ใน environment จึงยังยืนยันการ drain auth รุ่นเก่าและควบคุม flag สำหรับ UAT ไม่ได้ ต้องผ่าน rollout ก่อนเปิด ไม่ถือว่า native test แทน production UAT; สแกน USB จริงพักไว้ตามผู้ใช้สั่ง
 
 - เชื่อม Dashboard ADMIN (ไม่ query หรือส่งข้อมูลเงิน) และฟอร์มบัตร/รูปในหน้าสมาชิกแล้ว; build และชุดเทสรวมก่อน build ผ่าน (มี 1 skip ในชุดรวม; ไม่ใช้แทน production UAT)
 - ซ้อม card/avatar กับ snapshot ที่ป้องกันสิทธิ์บน PostgreSQL จริง: คอลัมน์เดิมครบ 36 ตารางตรงหลัง restore/rollback/commit ในฐานซ้อม, catalog 19 ส่วน, inventory เดิม 2 รายการคงเดิม; runner 7/7 ผ่าน

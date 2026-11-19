@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 import { local } from './db-safety.mjs';
-import { plan, selectedPlan, cardAvatarPlan, cardAvatarAclCheck, main, comparisonSql, recoverySql, reconcileExisting, catalogOnlyBaseline, rehearseCardAvatar, nativeDatabase, nativeCatalog, scopeCatalog } from './r2-production-rollout.mjs';
+import { plan, selectedPlan, cardAvatarPlan, cardAvatarAclCheck, passwordPlan, passwordAclCheck, main, comparisonSql, recoverySql, reconcileExisting, catalogOnlyBaseline, rehearseCardAvatar, nativeDatabase, nativeCatalog, scopeCatalog } from './r2-production-rollout.mjs';
 import { splitSql } from './db-payments-sql.mjs';
 
 const require=createRequire(import.meta.url);
@@ -13,6 +13,7 @@ const {PGlite}=require('../.local-db/payment-sql-tests/node_modules/@electric-sq
 test('R2 pinned inventory is bounded; production selection excludes password',()=>{
   const migrations=plan();
   assert.equal(migrations.length,3);
+  assert.deepEqual(passwordPlan(),migrations.filter(m=>m.file==='20261118_R2_admin_member_password.sql'));
   assert.deepEqual(cardAvatarPlan().map(m=>m.file),['20261118_R2_member_cards.sql','20261118_R2_staff_avatar.sql']);
   assert.deepEqual(selectedPlan().map(m=>m.file),['20261118_R2_admin_member_profile.sql','20261118_R2_member_contact_email.sql']);
   for(const m of migrations){
@@ -25,6 +26,8 @@ test('R2 pinned inventory is bounded; production selection excludes password',()
 
 test('unknown/conflicting flags fail before env/database access',async()=>{
   await assert.rejects(main(['--all']),/Invalid arguments/);
+  await assert.rejects(main(['--apply-password-schema','--apply']),/Invalid arguments/);
+  await assert.rejects(main(['--rehearse-password-schema','--apply-password-schema']),/Invalid arguments/);
   await assert.rejects(main(['--apply-card-avatar','--apply']),/Invalid arguments/);
   await assert.rejects(main(['--apply-card-avatar','--dry-run']),/Invalid arguments/);
   await assert.rejects(main(['--apply','--dry-run']),/Invalid arguments/);
@@ -137,8 +140,27 @@ test('native synthetic card/avatar rehearsal: reject inventory drift before DDL 
       db.run(`SET ROLE fixture_owner; REVOKE ${revoke};`);
       assert.equal(acl(),true,revoke);
     }
+    await testPasswordAcl(db);
   }finally{
     if(db)db.close();
     fs.rmSync(dir,{recursive:true,force:true,maxRetries:3});
   }
 });
+
+function testPasswordAcl(db) {
+  db.run(`SET ROLE fixture_owner; CREATE TABLE auth_password_tickets(id integer);
+    ${passwordPlan()[0].statements.join(';\n')};`);
+  const acl=()=>db.query(`SET ROLE fixture_owner; SELECT to_json(${passwordAclCheck});`);
+  assert.equal(acl(),true,'unchanged inherited managed privileges match existing auth and audit analogs');
+  for(const [grant,revoke] of [
+    ['SELECT ON admin_member_password_requests TO fixture_service','SELECT ON admin_member_password_requests FROM fixture_service'],
+    ['SELECT ON SEQUENCE admin_member_password_audit_id_seq TO fixture_access WITH GRANT OPTION','SELECT ON SEQUENCE admin_member_password_audit_id_seq FROM fixture_access'],
+    ['SELECT(reason) ON admin_member_password_requests TO fixture_outsider','SELECT(reason) ON admin_member_password_requests FROM fixture_outsider'],
+    ['EXECUTE ON FUNCTION admin_member_password_action(text,uuid,jsonb,text) TO PUBLIC','EXECUTE ON FUNCTION admin_member_password_action(text,uuid,jsonb,text) FROM PUBLIC'],
+  ]) {
+    db.run(`SET ROLE fixture_owner; GRANT ${grant};`);
+    assert.equal(acl(),false,grant);
+    db.run(`SET ROLE fixture_owner; REVOKE ${revoke};`);
+    assert.equal(acl(),true,revoke);
+  }
+}

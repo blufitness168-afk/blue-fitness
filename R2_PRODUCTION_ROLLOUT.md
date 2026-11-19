@@ -159,3 +159,21 @@ This offline-only mode accepts only the named protected capture, with the pinned
 - Profile/contact browser role/functional UAT and application deployment remain separate work. This is schema rollout/recovery verification, not completion of all R2 acceptance.
 - No old migration/bootstrap, R3–R7 rerun, db:push, auth fixture, customer mutation, paid API, commit, push, deployment, TODO or current app/auth edit was performed.
 - Roll back feature availability at the application layer first if needed. Retain profile/contact data, append-only audit, migration records and recovery artifacts. Do not drop audit, undo member values from snapshots, resurrect sessions or automatically restore this backup over production. Any destructive recovery/data correction needs separate approval.
+
+## 9. Password reset schema-only production rollout — APPLIED and verified
+
+19 Nov 2026. This supersedes earlier **NOT APPLIED** notes for password schema only. The operator reported Ready on `main` `2b3c49a` with the coordinated auth locks and a POST reset probe returning `503`. This run did not query deployment/provider configuration or repeat the HTTP probe. The flag was not changed; keep it OFF. No live reset, customer record write, or functional browser UAT was performed.
+
+```sh
+pnpm exec node --check scripts/r2-production-rollout.mjs
+pnpm exec node --test scripts/r2-production-rollout.test.mjs
+pnpm exec node scripts/r2-production-rollout.mjs --apply-password-schema
+```
+
+- Runner tests **7 passed, 0 failed, 0 skipped**. Native ACL fixtures reject PUBLIC function access, explicit table/column grants and a sequence grant option reachable via `SET ROLE`.
+- The apply command captured a fresh read-only snapshot in a verified restrictive Windows directory, restored it into disposable loopback native PostgreSQL, and matched **41 original tables** by typed multiset and **22 catalog sections**, including ACLs and role memberships. Existing sequence states matched separately. Only the pinned password migration ran in rehearsal, first with rollback and then with local commit. Both preserved old rows, catalog and sequences; the two new tables were empty and the new identity sequence was uncalled. The native cluster stopped.
+- The guarded production transaction committed **only `20261118_R2_admin_member_password.sql`** (SHA256 `1e2122644fffd107dcd6c359320b1a67b2fc43f37ddebf5b3a5e3402136b3e08`). It used bounded timeouts, an advisory transaction lock and SHARE locks on old tables. Before and after DDL it checked target identity, expected catalog and old-row digests/counts and sequence states; it also checked no enabled event triggers before DDL, and enforced the rehearsed ACL and required invoker access after DDL. No inventory rows were appended or altered. Old row payloads were not sent back to production for the guards.
+- Separate read-only Repeatable Read postflight passed: all **41 old tables** and old catalog unchanged, **2 new empty tables**, no unexpected privilege expansion. The ACL policy rejects any explicit non-owner grant on password objects and checks effective privileges (including grant options) for all role contexts against the existing auth/audit analogs. This is not a claim that pre-existing managed-role powers were removed. No migration source edits, Git commands, or external provider actions.
+- Protected evidence: `.local-db/r2-password-schema-doKqh4/report.json`; `snapshot.json` SHA256 `abb32abafa780b5295e25c87eb751af0e7ecc8355068f157eb22b1cb8d8a3b59`. Do not print, attach, or publish the snapshot or native cluster files.
+
+`--rehearse-password-schema` runs the same capture/recovery/rehearsal gates without a production write transaction; use only against a pre-apply baseline. Both modes refuse an existing password schema. Do not replay this commit. If a future transaction's outcome is unknown, reconcile read-only before any retry. Deployment-wide flag verification, old-instance drain, secret/logging readiness, and functional UAT remain separate gates before enablement.

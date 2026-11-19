@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
 import { pathToFileURL } from 'node:url';
+import dotenv from 'dotenv';
 import { client, root, local, protect, save, stamp, digest, quote, safeFailure } from './db-safety.mjs';
 import { splitSql } from './db-payments-sql.mjs';
 
@@ -30,6 +31,8 @@ function pinnedPlan(inventory) {
 }
 export const selectedPlan = () => plan().filter(m => !m.file.includes('password'));
 export const cardAvatarPlan = () => pinnedPlan(cardAvatarSources);
+const passwordFile='20261118_R2_admin_member_password.sql';
+export const passwordPlan=()=>pinnedPlan({[passwordFile]:approved[passwordFile]});
 
 // All values/SQL below are kept in protected artifacts or memory; never log query errors/rows.
 const queries = {
@@ -59,12 +62,14 @@ const queries = {
   uat: "SELECT count(*) FILTER (WHERE member_code='BLU-3' AND role='MEMBER')::integer AS member_matches,count(*) FILTER (WHERE member_code='BLU-4' AND role='ADMIN')::integer AS admin_matches FROM public.members WHERE member_code IN ('BLU-3','BLU-4')",
 };
 const dataQuery = name => `SELECT count(*)::text AS row_count,coalesce(json_agg(t ORDER BY to_jsonb(t)::text),'[]'::json)::text AS rows,md5(coalesce(json_agg(t ORDER BY to_jsonb(t)::text),'[]'::json)::text) AS fingerprint FROM public.${quote(name)} t`;
-async function capture(sql, fullVisibility=false) {
+// Live guards send only row counts and digests back to production, never backup row payloads.
+const passwordDataQuery = name => `SELECT row_count,rows,encode(sha256(convert_to(rows,'UTF8')),'hex') AS fingerprint FROM (SELECT count(*)::text AS row_count,coalesce(json_agg(t ORDER BY to_jsonb(t)::text COLLATE "C",row_to_json(t)::text COLLATE "C"),'[]'::json)::text AS rows FROM public.${quote(name)} t) b`;
+async function capture(sql, fullVisibility=false, rowsQuery=dataQuery) {
   const discovered = await sql.query("SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' ORDER BY relname");
   const names = discovered.map(r => r.relname);
   const sequences = await sql.query("SELECT sequencename FROM pg_sequences WHERE schemaname='public' ORDER BY sequencename");
   const keys = Object.keys(queries);
-  const results = await sql.transaction([sql.query(fullVisibility?"SELECT set_config('TimeZone','UTC',true),set_config('row_security','off',true)":"SET LOCAL TIME ZONE 'UTC'"), ...keys.map(k => sql.query(`SELECT coalesce(json_agg(t),'[]'::json)::text AS records FROM (${queries[k]}) t`)), ...names.map(n => sql.query(dataQuery(n))), ...sequences.map(s=>sql.query(`SELECT last_value::text,is_called FROM public.${quote(s.sequencename)}`))], { readOnly: true, isolationLevel: 'RepeatableRead' });
+  const results = await sql.transaction([sql.query(fullVisibility?"SELECT set_config('TimeZone','UTC',true),set_config('row_security','off',true)":"SET LOCAL TIME ZONE 'UTC'"), ...keys.map(k => sql.query(`SELECT coalesce(json_agg(t),'[]'::json)::text AS records FROM (${queries[k]}) t`)), ...names.map(n => sql.query(rowsQuery(n))), ...sequences.map(s=>sql.query(`SELECT last_value::text,is_called FROM public.${quote(s.sequencename)}`))], { readOnly: true, isolationLevel: 'RepeatableRead' });
   const bundle = Object.fromEntries(keys.map((k,i) => [k,JSON.parse(results[i+1][0].records)]));
   bundle.tables = Object.fromEntries(names.map((n,i) => [n, results[keys.length+1+i][0]]));
     bundle.sequenceState = Object.fromEntries(sequences.map((s,i)=>[s.sequencename,results[keys.length+1+names.length+i][0]]));
@@ -443,15 +448,16 @@ const cardAclBaselines={
 };
 const aclOperations={r:['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN'],S:['USAGE','SELECT','UPDATE'],f:['EXECUTE']};
 
-export const cardAvatarAclCheck = `(WITH objects AS (
+function newObjectAclCheck(pattern,baselines,extra,ownerOnly=false) {
+  return `(WITH objects AS (
   SELECT c.oid,c.relkind::text AS kind,c.relname::text AS name,c.relowner AS owner,
     coalesce(c.relacl,acldefault(CASE WHEN c.relkind='S' THEN 's'::"char" ELSE 'r'::"char" END,c.relowner)) AS acl
     FROM pg_class c WHERE c.relnamespace='public'::regnamespace AND c.relkind IN ('r','S')
   UNION ALL
   SELECT p.oid,'f',p.proname,p.proowner,coalesce(p.proacl,acldefault('f',p.proowner))
     FROM pg_proc p WHERE p.pronamespace='public'::regnamespace
-), baseline(kind,name) AS (VALUES ${Object.entries(cardAclBaselines).flatMap(([kind,names])=>names.map(name=>`(${literal(kind)},${literal(name)})`)).join(',')}),
-  targets AS (SELECT * FROM objects WHERE name ~ '${cardObjectPattern}'),
+), baseline(kind,name) AS (VALUES ${Object.entries(baselines).flatMap(([kind,names])=>names.map(name=>`(${literal(kind)},${literal(name)})`)).join(',')}),
+  targets AS (SELECT * FROM objects WHERE name ~ '${pattern}'),
   -- Check every role context, not just logins: has_* resolves inherited rights, and
   -- evaluating all roles covers every SET ROLE destination (and dormant grantees).
   contexts AS (SELECT r.oid FROM pg_roles r),
@@ -463,22 +469,44 @@ export const cardAvatarAclCheck = `(WITH objects AS (
         WHEN 'f' THEN has_function_privilege(r.oid,o.oid,v.privilege || g.suffix) END AS allowed
     FROM objects o JOIN operations v USING(kind) CROSS JOIN contexts r
     CROSS JOIN (VALUES (''),(' WITH GRANT OPTION')) g(suffix)
-    WHERE o.name ~ '${cardObjectPattern}' OR EXISTS (SELECT FROM baseline b WHERE (b.kind,b.name)=(o.kind,o.name))
+    WHERE o.name ~ '${pattern}' OR EXISTS (SELECT FROM baseline b WHERE (b.kind,b.name)=(o.kind,o.name))
   )
   SELECT NOT EXISTS (SELECT FROM baseline b WHERE (SELECT count(*) FROM objects o WHERE (o.kind,o.name)=(b.kind,b.name))<>1)
     AND NOT EXISTS (SELECT FROM rights t JOIN baseline b ON b.kind=t.kind
-      WHERE t.name ~ '${cardObjectPattern}' AND t.allowed AND NOT EXISTS (
+      WHERE t.name ~ '${pattern}' AND t.allowed AND NOT EXISTS (
         SELECT FROM rights a WHERE (a.kind,a.name,a.role,a.bit)=(b.kind,b.name,t.role,t.bit) AND a.allowed))
     AND NOT EXISTS (SELECT FROM targets t JOIN baseline b USING(kind) JOIN objects o ON (o.kind,o.name)=(b.kind,b.name)
-      WHERE t.owner<>o.owner OR EXISTS (SELECT FROM aclexplode(t.acl) a WHERE a.grantee=0 OR NOT EXISTS (
-        SELECT FROM aclexplode(o.acl) x WHERE x=a)))
+      WHERE t.owner<>o.owner OR EXISTS (SELECT FROM aclexplode(t.acl) a WHERE ${ownerOnly ? 'a.grantee<>t.owner OR a.grantor<>t.owner' : 'a.grantee=0 OR NOT EXISTS (SELECT FROM aclexplode(o.acl) x WHERE x=a)'}))
     AND NOT EXISTS (SELECT FROM pg_attribute a JOIN targets t ON t.kind='r' AND t.oid=a.attrelid
       WHERE a.attnum>0 AND NOT a.attisdropped AND a.attacl IS NOT NULL)
+    ${extra}
+)`;
+}
+
+export const cardAvatarAclCheck=newObjectAclCheck(cardObjectPattern,cardAclBaselines,`
     AND EXISTS (SELECT FROM pg_attribute a WHERE a.attrelid='public.members'::regclass
       AND a.attname='avatar_version' AND NOT a.attisdropped AND a.attacl IS NULL)
     AND NOT EXISTS (SELECT FROM contexts r CROSS JOIN operations v CROSS JOIN (VALUES (''),(' WITH GRANT OPTION')) g(suffix)
       WHERE v.kind='c' AND has_column_privilege(r.oid,'public.members','avatar_version',v.privilege || g.suffix)
-        AND NOT has_column_privilege(r.oid,'public.members','avatar_url',v.privilege || g.suffix))
+        AND NOT has_column_privilege(r.oid,'public.members','avatar_url',v.privilege || g.suffix))`);
+
+const passwordPattern='^admin_member_password_';
+const passwordTables=['admin_member_password_audit','admin_member_password_requests'];
+const passwordSequence='admin_member_password_audit_id_seq';
+export const passwordAclCheck=newObjectAclCheck(passwordPattern,{
+  r:['admin_member_profile_audit','auth_password_tickets'],
+  S:['admin_member_profile_audit_id_seq'],
+  f:['admin_member_profile_update'],
+},'AND NOT EXISTS (SELECT FROM targets WHERE owner<>current_user::regrole)',true);
+
+const passwordInvokerCheck=`(
+  has_table_privilege('public.members','SELECT') AND has_table_privilege('public.members','UPDATE')
+  AND has_table_privilege('public.auth_sessions','SELECT') AND has_table_privilege('public.auth_sessions','UPDATE')
+  AND has_table_privilege('public.auth_otp_challenges','SELECT') AND has_table_privilege('public.auth_otp_challenges','UPDATE')
+  AND has_table_privilege('public.auth_password_tickets','SELECT') AND has_table_privilege('public.auth_password_tickets','UPDATE')
+  AND has_table_privilege('public.admin_member_password_requests','SELECT') AND has_table_privilege('public.admin_member_password_requests','INSERT') AND has_table_privilege('public.admin_member_password_requests','UPDATE')
+  AND has_table_privilege('public.admin_member_password_audit','INSERT') AND has_sequence_privilege('public.admin_member_password_audit_id_seq','USAGE')
+  AND has_function_privilege('public.admin_member_password_action(text,uuid,jsonb,text)','EXECUTE')
 )`;
 
 function driftCatalog(b) {
@@ -573,7 +601,143 @@ async function applyCardAvatar() {
   return report;
 }
 
+function protectedPasswordDirectory() {
+  // Do not invoke Git in this mode. Verify the repository exclusion and isolate the new directory.
+  if(process.platform!=='win32'||!fs.readFileSync(path.join(root,'.gitignore'),'utf8').split(/\r?\n/).includes('/.local-db/')||!fs.lstatSync(local).isDirectory()||fs.realpathSync(local)!==local)throw new Error('Protected Windows backup directory required');
+  const dir=fs.mkdtempSync(path.join(local,'r2-password-schema-'));
+  try {
+    const script=String.raw`
+$ErrorActionPreference='Stop'
+$p=$env:R2_PROTECTED_DIRECTORY
+$ids=@([Security.Principal.WindowsIdentity]::GetCurrent().User,[Security.Principal.SecurityIdentifier]::new('S-1-5-18'))
+$acl=Get-Acl -LiteralPath $p
+$acl.SetAccessRuleProtection($true,$false)
+foreach($r in $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])) { $acl.RemoveAccessRuleSpecific($r) }
+foreach($id in $ids) { $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($id,'FullControl','ContainerInherit,ObjectInherit','None','Allow')) }
+Set-Acl -LiteralPath $p -AclObject $acl
+$a=Get-Acl -LiteralPath $p
+$r=@($a.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))
+if(!$a.AreAccessRulesProtected -or $r.Count -ne 2 -or @($r | Where-Object { $_.IsInherited -or $_.IdentityReference.Value -notin $ids.Value -or $_.AccessControlType -ne 'Allow' -or $_.FileSystemRights -ne 'FullControl' -or $_.InheritanceFlags -ne 'ContainerInherit,ObjectInherit' -or $_.PropagationFlags -ne 'None' }).Count -ne 0) { throw 'Unexpected backup ACL' }
+`;
+    execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{env:{...process.env,R2_PROTECTED_DIRECTORY:dir},stdio:'pipe',timeout:15000});
+    if(fs.realpathSync(dir)!==dir)throw new Error();
+    return dir;
+  } catch {
+    fs.rmdirSync(dir);
+    throw new Error('Backup directory ACL could not be restricted and verified');
+  }
+}
+
+const passwordCatalogFields={columns:'table_name',relations:'relname',functions:'proname',constraints:'table_name',triggers:'table_name',indexes:'tablename',sequences:'sequencename',relationAcl:'relname',functionAcl:'proname'};
+const passwordObject=name=>name.startsWith('admin_member_password_');
+function passwordCatalogWithoutAdditions(c) {
+  return Object.fromEntries(Object.entries(c).map(([k,rows])=>[k,passwordCatalogFields[k]?rows.filter(r=>!passwordObject(r[passwordCatalogFields[k]])):rows]));
+}
+const passwordEmptyChecks=[...passwordTables.map(name=>`NOT EXISTS (SELECT FROM public.${quote(name)})`),`(SELECT NOT is_called AND last_value=1 FROM public.${quote(passwordSequence)})`];
+const passwordDependencyColumns={members:['id','role','status','member_code','password_hash','updated_at','phone'],auth_sessions:['id','member_id','token_hash','mode','revoked_at','expires_at'],auth_otp_challenges:['phone','purpose','consumed_at','password_hash_at_issue'],auth_password_tickets:['phone','consumed_at','password_hash_at_issue','hash_started_at']};
+
+async function passwordSchemaRollout(apply) {
+  const report={mode:apply?'apply-password-schema':'rehearse-password-schema',applied:[],commitOutcome:'not-attempted',featureFlag:'unchanged (OFF per operator; deployment not queried)'};
+  let stage='backup-path-protection',dir,db;
+  const requireGate=(ok,message)=>{if(!ok){report.failedCheck=message;throw new Error('Password rollout gate failed');}};
+  try {
+    dir=protectedPasswordDirectory();report.artifacts=path.relative(root,dir);
+    stage='source-and-target-config';
+    const [migration]=passwordPlan();
+    report.migrationChecksum=migration.checksum;
+    const configured=dotenv.parse(fs.readFileSync(path.join(root,'.env.local')));
+    requireGate(Boolean(configured.DATABASE_URL)&&(!process.env.DATABASE_URL||process.env.DATABASE_URL===configured.DATABASE_URL),'Use the known production .env.local, not a DATABASE_URL override');
+    requireGate(configured.ENABLE_ADMIN_PASSWORD_RESET!=='true'&&process.env.ENABLE_ADMIN_PASSWORD_RESET!=='true','Local reset flag must not be true');
+    const sql=client();
+    requireGate(process.env.ENABLE_ADMIN_PASSWORD_RESET!=='true','Loaded reset flag must not be true');
+    stage='production-read-only-capture';
+    const b=await capture(sql,true,passwordDataQuery);
+    const {database,principal,version}=b.identity[0];
+    requireGate(digest(database)==='693fe5919fc229a2cf404ad99e03e8e9277fa4a6d34e88a0d4224d81b0b057a8'&&digest(principal)==='6f198191100386e1f0c093fc1c902c0520c6382059d75fb4743ec1ec75cc7842','Database or principal differs from documented production fingerprint');
+    const before=driftCatalog(b);
+    requireGate(isDeepStrictEqual(before,passwordCatalogWithoutAdditions(before)),'Password objects already exist; reconcile read-only, do not replay');
+    reconcileExisting(b);
+    requireGate(b.relations.some(r=>r.relname==='member_cards'&&r.relkind==='r')&&b.columns.some(c=>c.table_name==='members'&&c.column_name==='avatar_version'),'Expected post-card/avatar production baseline is absent');
+    requireGate(Object.entries(passwordDependencyColumns).every(([table,cols])=>cols.every(col=>b.columns.some(c=>c.table_name===table&&c.column_name===col)))&&['PASSWORD_SETUP','PASSWORD_RESET'].every(label=>b.enums.some(e=>e.typname==='auth_otp_purpose'&&e.enumlabel===label))&&b.constraints.some(c=>c.table_name==='auth_sessions'&&c.conname==='auth_sessions_mode_check'&&c.contype==='c'&&c.definition.includes("'NORMAL'")&&c.definition.includes("'KIOSK'")),'Hardened auth dependency columns, OTP purposes or session-mode constraint are missing');
+    stage='backup-integrity';
+    const snapshot=JSON.stringify(b),file=path.join(dir,'snapshot.json');
+    save(file,snapshot);
+    report.snapshotChecksum=digest(snapshot);
+    save(path.join(dir,'manifest.json'),JSON.stringify({files:{'snapshot.json':report.snapshotChecksum}}));
+    const saved=fs.readFileSync(file,'utf8');
+    requireGate(digest(saved)===report.snapshotChecksum,'Snapshot checksum mismatch');
+    stage='native-recovery';
+    const backup=JSON.parse(saved),restore=recoverySql(backup);
+    db=await nativeDatabase(dir,backup.roles.find(r=>r.rolsuper).rolname);
+    db.run(restore);
+    const recovered=driftCatalog(nativeCatalog(db));
+    report.recoveryCatalogDifferences=Object.keys(before).filter(k=>!isDeepStrictEqual(before[k],recovered[k]));
+    requireGate(!report.recoveryCatalogDifferences.length,'Native recovery catalog mismatch');
+    verifyRows(db,backup.tables);
+    requireGate(isDeepStrictEqual(backup.sequenceState,sequenceStates(db,backup.sequences)),'Native recovery sequence state mismatch');
+    report.recovery={readOnlyCapture:true,oldTables:Object.keys(b.tables).length,catalogSections:Object.keys(before).length};
+    stage='native-password-schema-rehearsal';
+    const batch=`BEGIN; SET LOCAL ROLE ${quote(principal)}; SET LOCAL search_path=public,pg_catalog; SET LOCAL row_security=off; SET LOCAL statement_timeout='60s'; ${migration.statements.join(';\n')};`;
+    const checkOldRowsAndSequences=()=>{
+      verifyRows(db,backup.tables);
+      requireGate(isDeepStrictEqual(backup.sequenceState,sequenceStates(db,backup.sequences)),'Existing sequence state changed');
+    };
+    db.run(`${batch} ROLLBACK;`);
+    requireGate(isDeepStrictEqual(before,driftCatalog(nativeCatalog(db))),'Native rollback did not restore catalog');
+    checkOldRowsAndSequences();
+    db.run(`${batch} COMMIT;`);
+    const after=driftCatalog(nativeCatalog(db));
+    requireGate(isDeepStrictEqual(before,passwordCatalogWithoutAdditions(after)),'Native rehearsal changed existing catalog or ACL');
+    const newNames=(key,field)=>after[key].map(r=>r[field]).filter(passwordObject).sort();
+    requireGate(isDeepStrictEqual(newNames('relations','relname').filter(n=>after.relations.some(r=>r.relname===n&&r.relkind==='r')),passwordTables)&&isDeepStrictEqual(newNames('sequences','sequencename'),[passwordSequence])&&isDeepStrictEqual(newNames('functions','proname'),['admin_member_password_action','admin_member_password_immutable']),'Unexpected password object inventory');
+    checkOldRowsAndSequences();
+    const nativeCheck=condition=>db.query(`SET ROLE ${quote(principal)}; SELECT to_json(${condition});`);
+    requireGate(nativeCheck(passwordEmptyChecks.join(' AND ')),'New password tables or sequence were used');
+    stage='native-password-acl';
+    requireGate(nativeCheck(passwordAclCheck),'New password-object ACL or effective role privileges exceed baseline');
+    requireGate(nativeCheck(passwordInvokerCheck),'Actual application principal lacks required invoker privileges');
+    report.rehearsal={rollbackVerified:true,oldRowsAndCatalogUnchanged:true,newEmptyTables:passwordTables.length,effectiveAclVerified:true};
+    if(!apply){report.outcome='VERIFIED native password schema rehearsal; production unchanged';return report;}
+    stage='prepare-production-guards';
+    requireGate(isDeepStrictEqual([migration],passwordPlan()),'Pinned password source changed');
+    const settings=s=>[s.query("SET LOCAL statement_timeout='60s'"),s.query("SET LOCAL TIME ZONE 'UTC'"),s.query('SET LOCAL search_path=public,pg_catalog'),s.query('SET LOCAL row_security=off')];
+    const identity=s=>guard(s,"current_database()=$1 AND current_user=$2 AND current_setting('server_version_num')=$3",[database,principal,version]);
+    const catalog=(s,c)=>Object.entries(c).map(([k,rows])=>guard(s,
+      `(SELECT coalesce(jsonb_agg(to_jsonb(t)-$2::text[]),'[]'::jsonb) FROM (${queries[k]}) t)=$1::jsonb`,
+      [JSON.stringify(rows),k==='sequences'?[...catalogOmit,'last_value']:catalogOmit]));
+    const oldRows=s=>Object.entries(b.tables).map(([name,t])=>guard(s,`(SELECT fingerprint=$1 AND row_count=$2 FROM (${passwordDataQuery(name)}) x)`,[t.fingerprint,t.row_count]));
+    const oldSequences=s=>Object.entries(b.sequenceState).map(([name,state])=>guard(s,`(SELECT last_value::text=$1 AND is_called=$2 FROM public.${quote(name)})`,[state.last_value,state.is_called]));
+    const post=s=>[...catalog(s,after),...oldRows(s),...oldSequences(s),...passwordEmptyChecks.map(c=>guard(s,c)),guard(s,passwordAclCheck),guard(s,passwordInvokerCheck)];
+    const transaction=[...settings(sql),sql.query("SET LOCAL lock_timeout='5s'"),sql.query('SELECT pg_advisory_xact_lock(18261118,20)'),
+      sql.query('LOCK TABLE '+Object.keys(b.tables).map(n=>'public.'+quote(n)).join(',')+' IN SHARE MODE'),identity(sql),
+      guard(sql,"NOT EXISTS (SELECT FROM pg_event_trigger WHERE evtenabled<>'D')"),...catalog(sql,before),...oldRows(sql),...oldSequences(sql),
+      ...migration.statements.map(s=>sql.query(s)),...post(sql)];
+    stage='production-transaction';
+    save(path.join(dir,'transaction-intent.json'),JSON.stringify({status:'reconcile read-only if no final report',migration:migration.file,checksum:migration.checksum}));
+    report.commitOutcome='unknown';
+    await sql.transaction(transaction,{isolationLevel:'ReadCommitted'});
+    report.commitOutcome='committed';report.applied=[migration.file];
+    stage='production-read-only-postflight';
+    const audit=client();
+    await audit.transaction([...settings(audit),identity(audit),guard(audit,"current_setting('transaction_read_only')='on'"),...post(audit)],{readOnly:true,isolationLevel:'RepeatableRead'});
+    report.postflight={readOnly:true,oldTables:Object.keys(b.tables).length,oldCatalogUnchanged:true,newEmptyTables:passwordTables.length,unexpectedPrivilegeExpansion:false};
+    report.outcome='VERIFIED production password schema only';
+  } catch(e) {
+    const safe=/^(Protected Windows backup directory required|Backup directory ACL could not be restricted and verified|Existing R2 source\/schema checksum mismatch|Unknown migration inventory|Existing R2 objects have no trusted migration inventory|Typed row comparison failed|Native operation failed|Native engine unavailable|Unsupported recovery feature; fail closed|Unreviewed R2 migration)$/;
+    report.blocker={stage,reason:report.failedCheck??(safe.test(e.message)?e.message:undefined),code:/^[0-9A-Z]{5}$/.test(e?.code??'')?e.code:undefined};
+    delete report.failedCheck;
+    report.outcome=report.commitOutcome==='committed'?'Committed; read-only postflight failed, do not replay':report.commitOutcome==='unknown'?'Transaction submitted; reconcile read-only before any retry':'BLOCKED; no migration transaction attempted';
+    process.exitCode=1;
+  } finally {
+    if(db)try{db.close();report.nativeStopped=true;}catch{report.nativeStopped=false;process.exitCode=1;}
+    if(dir)try{save(path.join(dir,'report.json'),JSON.stringify(report,null,2));}catch{report.reportWriteFailed=true;process.exitCode=1;}
+    console.log(JSON.stringify(report,null,2));
+  }
+  return report;
+}
+
 export async function main(args=process.argv.slice(2)) {
+  if(args.length===1&&['--rehearse-password-schema','--apply-password-schema'].includes(args[0]))return passwordSchemaRollout(args[0]==='--apply-password-schema');
   if(args.length===1&&args[0]==='--apply-card-avatar')return applyCardAvatar();
   if(['--rehearse-card-avatar','--rehearse-card-avatar-catalog','--rehearse-card-avatar-protected'].includes(args[0])&&args.length<=2&&!args[1]?.startsWith('-')) {
     const report=await offlineCardAvatar(args[1],args[0]);
