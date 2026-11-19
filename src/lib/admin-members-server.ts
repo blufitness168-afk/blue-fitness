@@ -25,8 +25,8 @@ export interface MemberDetail extends MemberRow {
   emergencyName: string | null; emergencyPhone: string | null; emergencyRelation: string | null;
 }
 // Bind each read to the same persisted role and normal session as the page guard.
-async function memberReader() {
-  const caller = await requireAdminPage("/admin/members");
+async function memberReader(path = "/admin/members") {
+  const caller = await requireAdminPage(path);
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token || !/^[a-f0-9]{64}$/.test(token) || !["ADMIN", "OWNER"].includes(caller.role)) throw new Error("Forbidden");
   const digest = createHash("sha256").update(token).digest("hex");
@@ -123,31 +123,43 @@ export async function getAdminMember(memberCode: string, input: MemberHistoryInp
       totalQuota: row.totalQuota, usedCount: row.usedCount, expireDate: row.expireDate })) as CouponRow[], pages.coupons), asOf: Date.now() };
 }
 export async function getAdminDashboard(monthInput?: string) {
-  await requireAdminPage("/admin");
-  const sql = client();
+  const { sql, callerRole } = await memberReader("/admin");
   const range = monthRange(monthInput);
   const [summary, sales, visits, expiring] = await Promise.all([
-    sql`SELECT
+    callerRole === "OWNER" ? sql`SELECT
       (SELECT count(*)::int FROM members) AS "totalMembers",
       (SELECT count(*)::int FROM members WHERE status = 'ACTIVE' AND expire_date > now()) AS "activeMembers",
       (SELECT count(*)::int FROM members WHERE created_at >= ${range.start}::timestamptz AND created_at < ${range.end}::timestamptz) AS "newMembers",
       (SELECT count(*)::int FROM checkins WHERE checkin_time >= ${range.start}::timestamptz AND checkin_time < ${range.end}::timestamptz) AS "checkins",
       (SELECT count(*)::int FROM package_payment_orders WHERE status = 'PAID' AND paid_at >= ${range.start}::timestamptz AND paid_at < ${range.end}::timestamptz) AS "paidOrders",
-      (SELECT coalesce(sum(amount_satang), 0)::text FROM package_payment_orders WHERE status = 'PAID' AND paid_at >= ${range.start}::timestamptz AND paid_at < ${range.end}::timestamptz) AS "paidSatang"`,
-    sql`SELECT o.id, m.member_code AS "memberCode", m.full_name AS "fullName", o.package_snapshot->>'name' AS "packageName",
+      (SELECT coalesce(sum(amount_satang), 0)::text FROM package_payment_orders WHERE status = 'PAID' AND paid_at >= ${range.start}::timestamptz AND paid_at < ${range.end}::timestamptz) AS "paidSatang"`
+      : sql`SELECT
+        (SELECT count(*)::int FROM members) AS "totalMembers",
+        (SELECT count(*)::int FROM members WHERE status = 'ACTIVE' AND expire_date > now()) AS "activeMembers",
+        (SELECT count(*)::int FROM members WHERE created_at >= ${range.start}::timestamptz AND created_at < ${range.end}::timestamptz) AS "newMembers",
+        (SELECT count(*)::int FROM checkins WHERE checkin_time >= ${range.start}::timestamptz AND checkin_time < ${range.end}::timestamptz) AS "checkins"`,
+    callerRole === "OWNER" ? sql`SELECT o.id, m.member_code AS "memberCode", m.full_name AS "fullName", o.package_snapshot->>'name' AS "packageName",
       o.amount_satang AS "amountSatang", o.paid_at AS "paidAt" FROM package_payment_orders o JOIN members m ON m.id = o.member_id
-      WHERE o.status = 'PAID' AND o.paid_at >= ${range.start}::timestamptz AND o.paid_at < ${range.end}::timestamptz ORDER BY o.paid_at DESC, o.id DESC LIMIT 10`,
+      WHERE o.status = 'PAID' AND o.paid_at >= ${range.start}::timestamptz AND o.paid_at < ${range.end}::timestamptz ORDER BY o.paid_at DESC, o.id DESC LIMIT 10` : Promise.resolve([]),
     sql`SELECT c.id, m.member_code AS "memberCode", m.full_name AS "fullName", c.checkin_time AS "checkinTime"
       FROM checkins c JOIN members m ON m.id = c.member_id
       WHERE c.checkin_time >= ${range.start}::timestamptz AND c.checkin_time < ${range.end}::timestamptz ORDER BY c.checkin_time DESC, c.id DESC LIMIT 10`,
     sql`SELECT member_code AS "memberCode", full_name AS "fullName", expire_date AS "expireDate" FROM members
       WHERE status = 'ACTIVE' AND expire_date > now() AND expire_date <= now() + interval '7 days' ORDER BY expire_date, id LIMIT 10`,
   ]);
-  return {
+  if (!summary[0]) throw new Error("Forbidden");
+  const row = summary[0];
+  const common = {
     month: range.month,
-    summary: summary[0] as { totalMembers: number; activeMembers: number; newMembers: number; checkins: number; paidOrders: number; paidSatang: string },
-    sales: sales as { id: string; memberCode: string; fullName: string; packageName: string | null; amountSatang: number; paidAt: string }[],
-    visits: visits as { id: number; memberCode: string; fullName: string; checkinTime: string }[],
-    expiring: expiring as { memberCode: string; fullName: string; expireDate: string }[],
+    summary: { totalMembers: Number(row.totalMembers), activeMembers: Number(row.activeMembers),
+      newMembers: Number(row.newMembers), checkins: Number(row.checkins) },
+    visits: visits.map(row => ({ id: Number(row.id), memberCode: String(row.memberCode), fullName: String(row.fullName), checkinTime: String(row.checkinTime) })),
+    expiring: expiring.map(row => ({ memberCode: String(row.memberCode), fullName: String(row.fullName), expireDate: String(row.expireDate) })),
+  };
+  if (callerRole !== "OWNER") return { ...common, callerRole: "ADMIN" as const };
+  return { ...common, callerRole: "OWNER" as const,
+    summary: { ...common.summary, paidOrders: Number(row.paidOrders), paidSatang: String(row.paidSatang) },
+    sales: sales.map(row => ({ id: String(row.id), memberCode: String(row.memberCode), fullName: String(row.fullName),
+      packageName: row.packageName == null ? null : String(row.packageName), amountSatang: Number(row.amountSatang), paidAt: String(row.paidAt) })),
   };
 }

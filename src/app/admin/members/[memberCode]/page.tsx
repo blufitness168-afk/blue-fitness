@@ -7,6 +7,8 @@ import AdminMemberPasswordForm from "./AdminMemberPasswordForm";
 import { isAdminPasswordResetEnabled } from "@/lib/admin-member-password-server";
 import AdminMemberContactEmailForm from "./AdminMemberContactEmailForm";
 import { getMemberContactEmail } from "@/lib/member-contact-email-server";
+import MemberCardSection from "./MemberCardSection";
+import { StaffAvatarSection } from "./StaffAvatarSection";
 
 export default async function Page({ params, searchParams }: { params: Promise<{ memberCode: string }>; searchParams: Promise<MemberHistoryInput> }) {
   const caller = await requireAdminPage("/admin/members");
@@ -27,6 +29,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
       ? <AdminMemberContactEmailForm key={`contact:${m.memberCode}:${contact.version}`} memberCode={m.memberCode} contact={contact} />
       : <p role="status" className="mt-6">อีเมลติดต่อยังไม่พร้อมใช้งาน ไม่สามารถอ่านหรือแก้ไขได้ กรุณาติดต่อผู้ดูแล</p>)}
     {canEdit && <AdminMemberProfileForm key={`${m.memberCode}:${JSON.stringify(snapshot)}`} memberCode={m.memberCode} snapshot={snapshot} />}
+    {canEdit && <MemberCardSection key={`card:${m.memberCode}`} memberCode={m.memberCode} />}
+    {canEdit && caller.memberCode !== m.memberCode && <StaffAvatarSection key={`avatar:${m.memberCode}`} memberCode={m.memberCode} />}
     {isAdminPasswordResetEnabled() && canEdit && caller.memberCode !== m.memberCode && m.status !== "SUSPENDED" && <AdminMemberPasswordForm key={`password:${m.memberCode}`} memberCode={m.memberCode} />}
   </>;
 }

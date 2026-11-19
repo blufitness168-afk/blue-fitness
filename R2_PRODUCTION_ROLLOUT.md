@@ -112,7 +112,48 @@ node --test scripts/r2-production-rollout.test.mjs
 
 Validation run: **6/6 new runner tests passed, 0 skipped**. Covers scope/password exclusion, pinned sources, unsafe flags, collision refusal, exact timestamp microseconds, bigint beyond JavaScript safe integer range, numeric precision, enum/text differences, duplicate multiplicity and safe quoting. Scoped ESLint passed with zero errors/warnings via the installed ESLint API. `pnpm exec eslint` CLI attempts timed out (30/60-second bounded commands); the same installed ESLint was then run successfully through its API. No full app build/test suite or browser feature acceptance is claimed; app/auth files were not changed.
 
-## 6. Remaining scope / rollback
+## 6. Card/avatar follow-up — offline rehearsal only
+
+```sh
+node scripts/r2-production-rollout.mjs --rehearse-card-avatar .local-db/<sanitized-baseline-dir>
+```
+
+Pass an explicitly prepared, trusted `sanitized-snapshot.json` (existing runner snapshot format) from **after profile/contact** and **before card/avatar**. It must preserve the two profile/contact inventory records and matching catalog definitions, the application principal/ownership, and the existing card admission prerequisites. Table data must be synthetic or sanitized; do not supply a production dump or include credentials, tokens, or real customer data. The documented historical backup predates profile/contact and is not this baseline. No baseline is selected automatically. This command does not call the production client, load `.env` files or accept `--apply`.
+
+The runner restores to disposable loopback native PostgreSQL, checks restored catalog and data, reconciles the exact old inventory before and after rehearsal, and runs only the pinned card/avatar migrations as the restored principal. All existing tables are compared as typed multisets; for `members` this comparison uses every pre-existing column. Separately, `members.avatar_version` must be `integer NOT NULL DEFAULT 0` and all pre-existing rows must have `0`. Old column definitions must match, new tables must be empty, and new relation/function ACLs must not expose objects to `PUBLIC`. Production selection is unchanged.
+
+Validation: runner **7/7 passed**, including a synthetic native baseline, refusal on missing inventory rows, wrong checksum and schema drift before DDL, and preservation of old data with the new column. Existing native card/avatar SQL suites: **29/29 passed**, PostgreSQL 18.4. Running the offline command without a baseline returned `BLOCKED` (exit 1). No sanitized post-rollout baseline was supplied or verified in this round; these results are not a rehearsal against the actual post-rollout catalog, nor approval to apply.
+
+### Follow-up: actual post-rollout catalog, without production application rows
+
+Use `--capture-only` to write a single checksummed snapshot and manifest to protected, ignored `.local-db` using the existing read-only Repeatable Read capture. It does not generate a raw restore script or run migration SQL. Use `--rehearse-card-avatar-catalog <protected-capture-dir>` offline to check the checksum and project the snapshot in memory: all ordinary table rows are dropped except the two validated rollout inventory records. No sanitized snapshot file is exported. Catalog definitions and sequence state are retained in the disposable protected native cluster.
+
+Verified on `.local-db/r2-capture-ORPEIJ`: 36 captured tables; SHA256 `85417368e7f4510c8eb00b05967fec6678949750e5ede00f43969d18e38a459c`. The native rehearsal matched 19 catalog sections and reconciled both existing inventory entries before and after running the pinned card/avatar migrations as the restored application principal. It compared all 36 existing tables in the projected baseline, verified `members.avatar_version` as `integer NOT NULL DEFAULT 0`, found 5 new empty tables, and passed the new-object PUBLIC ACL guard. The default-value check against existing production member rows was vacuous: no member rows were restored. This verifies catalog compatibility and inventory preservation, not production row fidelity, populated-table migration behavior, or production readiness. No production apply.
+
+### Follow-up: authorized full-data rehearsal
+
+```sh
+pnpm exec node scripts/r2-production-rollout.mjs --rehearse-card-avatar-protected .local-db/r2-capture-ORPEIJ
+```
+
+This offline-only mode accepts only the named protected capture, with the pinned SHA256 above and a matching manifest. The directory and files were verified Git-ignored and ACL-restricted to the current account and SYSTEM. The disposable native cluster uses SCRAM on `127.0.0.1` and lives under `.local-db`. No rows or credentials are printed, and no restore script is exported.
+
+**Verified:** 19 catalog sections, both profile/contact inventory entries, and typed row multisets for all 36 original tables against the capture, after restore, after explicit `ROLLBACK` of the complete card/avatar batch, and after replay with local `COMMIT`. Comparison retains duplicate multiplicity and uses all old `members` columns; `avatar_version` was separately verified as `integer NOT NULL DEFAULT 0` and `0` on every restored member. Rollback restored the catalog and left existing sequence states unchanged; the commit also preserved those states. Five new tables were empty and the new-object PUBLIC ACL check passed. Runner tests: **7 passed, 0 failed, 0 skipped**. This proves pre-commit transactional rollback on the captured baseline, not post-commit recovery or behavior under live traffic.
+
+## 7. Authorized card/avatar apply attempt — BLOCKED before production DDL
+
+`pnpm exec node scripts/r2-production-rollout.mjs --apply-card-avatar` selects only the two pinned card/avatar migrations. It does not change the legacy `--apply` selection or append to or replace the existing profile/contact inventory. The new mode requires the pinned protected rehearsal, live identity/catalog agreement, fresh native recovery, and an effective ACL check before submitting the migration transaction. The transaction is guarded by locked before/after catalog and typed data comparisons, sequence checks, the avatar default check, and empty-new-table checks. A read-only postflight is required after a confirmed commit.
+
+- Protected rehearsal rerun: 36 old tables, 19 catalog sections, both inventory rows, rollback and local replay verified; 5 new empty tables and `avatar_version = 0` on existing members. Live read-only identity/catalog comparison found no drift.
+- First attempt stopped because native recovery encoded the database ACL differently. Local diagnosis confirmed the database owner and expanded ACL rows matched exactly. The runner now compares those rather than the raw ACL encoding.
+- Second attempt verified the fresh snapshot through native restore and replay: all 36 old tables, 19 catalog sections, existing sequence states and both inventory rows. Protected report: `.local-db/r2-card-avatar-apply-LS0wPM/report.json`.
+- **Blocking ACL:** the restored production `neon_service` login had effective access to new tables/sequences directly and through reachable `pg_read_all_data`, `pg_write_all_data` and `neon_superuser` role contexts. No unexpected function execution or extra avatar-column rights were found by this check. PUBLIC revocation alone does not remove these rights. No managed-service exception was established, so the runner failed closed (exit 1; `commitOutcome: not-attempted`). No production migration transaction or postflight ran, no grants were changed, and no password/R3+ migration, git write, or external avatar-provider action occurred.
+- Runner tests: **7 passed, 0 failed, 0 skipped**, including effective sequence access via a non-inherited `SET ROLE` path. Before a retry, verify the service-role trust policy or restrict the access; do not bypass the guard based on a role name alone.
+
+## 8. Remaining scope / rollback
+
+- Card/avatar: resolve the effective ACL blocker and rerun all gates against a fresh recovery point. Review cross-feature contention and coordinate schema-before-app deployment with feature enablement held until UAT.
+- Card UAT: browser role flows and real USB CARD scans for expired/off-slot/valid paid memberships and supplements, using approved evidence rather than fabricated payment records. Avatar UAT: browser staff role/target flows and an authorized real provider upload; existing provider success evidence is stub-only.
 
 - Password remains blocked until coordinated auth deployment/drain and its own race/secret/logging gates are evidenced. Do not enable staff reset merely because profile/contact DB migrations now exist.
 - Profile/contact browser role/functional UAT and application deployment remain separate work. This is schema rollout/recovery verification, not completion of all R2 acceptance.

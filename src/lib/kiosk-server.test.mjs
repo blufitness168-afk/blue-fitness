@@ -37,6 +37,16 @@ test('server owns station identity; UUID binds scan and SQL enforces auth again'
  assert.match(a.calls[0].text,/kiosk_checkin/);assert.equal(a.calls[0].values[1],process.env.KIOSK_STATION_ID||'LOCAL_FRONT_DESK');
  assert.equal(a.calls[0].values[2],key);assert.equal(a.calls[0].values[3],'BLU-2');
 });
+test('kiosk CARD USB input uses lookup/admission wrapper, never client member or entitlement',async()=>{
+ const a=load({kiosk:{member:{role:'ADMIN'}},rows:[{result:{ok:false,reason:'NO_ENTITLEMENT'}}]});
+ const key=crypto.randomUUID();
+ assert.equal((await a.run(request({code:' card-00123 \r\n',requestKey:key}),'scan')).body.reason,'NO_ENTITLEMENT');
+ assert.equal(a.calls.length,1);assert.match(a.calls[0].text,/member_card_admit/);
+ assert.equal(a.calls[0].values[3],'CARD-00123');assert.equal(a.calls[0].values[4],null);
+ for(const code of ['CARD-A1','CARD-','123','CARD-１２','CARD-'+'1'.repeat(96),'https://x/CARD-1']){
+  const b=load({kiosk:{member:{role:'ADMIN'}}});assert.equal((await b.run(request({code,requestKey:crypto.randomUUID()}),'scan')).status,400);assert.equal(b.calls.length,0);
+ }
+});
 test('normal-member guard excludes kiosk centrally; welcome SQL cannot bypass purpose',()=>{
  const auth=readFileSync(new URL('./auth/server.ts',import.meta.url),'utf8');
  assert.match(auth,/current\?\.session\.mode === "NORMAL" \? current.member : null/);

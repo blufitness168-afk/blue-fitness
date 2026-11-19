@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
+import { randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
@@ -14,8 +15,13 @@ const approved = {
   '20261118_R2_admin_member_password.sql': '1e2122644fffd107dcd6c359320b1a67b2fc43f37ddebf5b3a5e3402136b3e08',
   '20261118_R2_member_contact_email.sql': '865febf7807952fcf2c68a71e4c7e4f15272a32235d0d61b05add1ad558aaccd',
 };
-export function plan() {
-  return Object.entries(approved).map(([file, checksum]) => {
+const cardAvatarSources = {
+  '20261118_R2_member_cards.sql': '79a1f5f131efeb7d09f06efefa1eb91112454b0898900765a1a380faeab8c545',
+  '20261118_R2_staff_avatar.sql': '492bac193b2b8095a54bbae6eb68624096cc7a504f7d894c2a80338b35a8f10b',
+};
+export const plan = () => pinnedPlan(approved);
+function pinnedPlan(inventory) {
+  return Object.entries(inventory).map(([file, checksum]) => {
     const text = fs.readFileSync(path.join(root, 'src/db/migrations', file), 'utf8');
     const statements = splitSql(text);
     if (digest(text) !== checksum || statements.shift() !== 'BEGIN' || statements.pop() !== 'COMMIT') throw new Error('Unreviewed R2 migration');
@@ -23,6 +29,7 @@ export function plan() {
   });
 }
 export const selectedPlan = () => plan().filter(m => !m.file.includes('password'));
+export const cardAvatarPlan = () => pinnedPlan(cardAvatarSources);
 
 // All values/SQL below are kept in protected artifacts or memory; never log query errors/rows.
 const queries = {
@@ -52,12 +59,12 @@ const queries = {
   uat: "SELECT count(*) FILTER (WHERE member_code='BLU-3' AND role='MEMBER')::integer AS member_matches,count(*) FILTER (WHERE member_code='BLU-4' AND role='ADMIN')::integer AS admin_matches FROM public.members WHERE member_code IN ('BLU-3','BLU-4')",
 };
 const dataQuery = name => `SELECT count(*)::text AS row_count,coalesce(json_agg(t ORDER BY to_jsonb(t)::text),'[]'::json)::text AS rows,md5(coalesce(json_agg(t ORDER BY to_jsonb(t)::text),'[]'::json)::text) AS fingerprint FROM public.${quote(name)} t`;
-async function capture(sql) {
+async function capture(sql, fullVisibility=false) {
   const discovered = await sql.query("SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' ORDER BY relname");
   const names = discovered.map(r => r.relname);
   const sequences = await sql.query("SELECT sequencename FROM pg_sequences WHERE schemaname='public' ORDER BY sequencename");
   const keys = Object.keys(queries);
-  const results = await sql.transaction([sql.query("SET LOCAL TIME ZONE 'UTC'"), ...keys.map(k => sql.query(`SELECT coalesce(json_agg(t),'[]'::json)::text AS records FROM (${queries[k]}) t`)), ...names.map(n => sql.query(dataQuery(n))), ...sequences.map(s=>sql.query(`SELECT last_value::text,is_called FROM public.${quote(s.sequencename)}`))], { readOnly: true, isolationLevel: 'RepeatableRead' });
+  const results = await sql.transaction([sql.query(fullVisibility?"SELECT set_config('TimeZone','UTC',true),set_config('row_security','off',true)":"SET LOCAL TIME ZONE 'UTC'"), ...keys.map(k => sql.query(`SELECT coalesce(json_agg(t),'[]'::json)::text AS records FROM (${queries[k]}) t`)), ...names.map(n => sql.query(dataQuery(n))), ...sequences.map(s=>sql.query(`SELECT last_value::text,is_called FROM public.${quote(s.sequencename)}`))], { readOnly: true, isolationLevel: 'RepeatableRead' });
   const bundle = Object.fromEntries(keys.map((k,i) => [k,JSON.parse(results[i+1][0].records)]));
   bundle.tables = Object.fromEntries(names.map((n,i) => [n, results[keys.length+1+i][0]]));
     bundle.sequenceState = Object.fromEntries(sequences.map((s,i)=>[s.sequencename,results[keys.length+1+names.length+i][0]]));
@@ -143,8 +150,10 @@ function sequenceDdl(s) {
 
 // Compare in PostgreSQL, not JavaScript Number/Date: preserve bigint/numeric and microseconds.
 // Typed JSON record conversion normalizes ONLY according to each declared PostgreSQL type.
-export function comparisonSql(name, rows) {
-  return `WITH expected AS (SELECT to_jsonb(ROW(t.*))::text COLLATE "C" AS row FROM json_populate_recordset(NULL::public.${quote(name)},${literal(rows)}::json) t),actual AS (SELECT to_jsonb(ROW(t.*))::text COLLATE "C" AS row FROM public.${quote(name)} t),missing AS (SELECT row FROM expected EXCEPT ALL SELECT row FROM actual),extra AS (SELECT row FROM actual EXCEPT ALL SELECT row FROM expected) SELECT json_build_object('expectedCount',(SELECT count(*) FROM expected),'actualCount',(SELECT count(*) FROM actual),'missingCount',(SELECT count(*) FROM missing),'extraCount',(SELECT count(*) FROM extra))::text;`;
+export function comparisonSql(name, rows, columns, parameterized=false) {
+  if(columns && !columns.length)throw new Error('Empty comparison projection');
+  const fields=columns ? columns.map(c=>`t.${quote(c)}`).join(',') : 't.*';
+  return `WITH expected AS (SELECT to_jsonb(ROW(${fields}))::text COLLATE "C" AS row FROM json_populate_recordset(NULL::public.${quote(name)},${parameterized?'$1':literal(rows)}::json) t),actual AS (SELECT to_jsonb(ROW(${fields}))::text COLLATE "C" AS row FROM public.${quote(name)} t),missing AS (SELECT row FROM expected EXCEPT ALL SELECT row FROM actual),extra AS (SELECT row FROM actual EXCEPT ALL SELECT row FROM expected) SELECT json_build_object('expectedCount',(SELECT count(*) FROM expected),'actualCount',(SELECT count(*) FROM actual),'missingCount',(SELECT count(*) FROM missing),'extraCount',(SELECT count(*) FROM extra))::text;`;
 }
 
 const nativeBridge = String.raw`
@@ -178,19 +187,24 @@ try:
 finally:finish(conn)
 sys.exit(code)
 `;
-async function nativeDatabase(directory, bootstrap) {
+export async function nativeDatabase(directory, bootstrap) {
   const tools = path.join(local,'portable-postgres-uat');
   const bin = path.join(tools,'package/native/bin');
   for (const f of ['initdb.exe','pg_ctl.exe']) if (!fs.existsSync(path.join(bin,f))) throw new Error('Native engine unavailable');
   const port = await new Promise((resolve,reject)=>{const s=net.createServer();s.once('error',reject);s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(e=>e?reject(e):resolve(p));});});
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k])=>!k.startsWith('PG')&&!['DATABASE_URL','SMS_API_SECRET'].includes(k)));
+  const env = Object.fromEntries(['PATH','SystemRoot','WINDIR','TEMP','TMP','USERPROFILE'].flatMap(k=>process.env[k]===undefined?[]:[[k,process.env[k]]]));
   env.PYTHONIOENCODING='utf-8';
   const data=path.join(directory,'native-data');
   const invoke=(file,args,input,timeout=60000)=>{
     try { return execFileSync(file,args,{env,input,encoding:'utf8',timeout,maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe']}); }
     catch(e){ const safe=new Error('Native operation failed');safe.code=String(e.stderr??'').match(/SQLSTATE=([0-9A-Z]{5})/)?.[1];throw safe; }
   };
-  invoke(path.join(bin,'initdb.exe'),['-D',data,'-U',bootstrap,'--auth-local=reject','--auth-host=trust','--encoding=UTF8','--locale=C']);
+  const passwordFile=path.join(directory,'bootstrap-password');
+  env.PGPASSWORD=randomBytes(32).toString('hex');
+  fs.writeFileSync(passwordFile,`${env.PGPASSWORD}\n`,{mode:0o600,flag:'wx'});
+  try {
+    invoke(path.join(bin,'initdb.exe'),['-D',data,'-U',bootstrap,'--auth-local=reject','--auth-host=scram-sha-256',`--pwfile=${passwordFile}`,'--encoding=UTF8','--locale=C']);
+  } finally { fs.rmSync(passwordFile,{force:true}); }
   fs.appendFileSync(path.join(data,'postgresql.conf'),`\nlisten_addresses='127.0.0.1'\nport=${port}\nmax_connections=10\nlog_statement='none'\nlog_min_error_statement='panic'\n`);
   const log=fs.openSync(path.join(directory,'pg_ctl.log'),'a',0o600);
   let started=false;
@@ -211,7 +225,7 @@ const normalized = (rows, omit=[]) => rows.map(r=>Object.fromEntries(Object.entr
 function catalogComparable(b) {
   return Object.fromEntries(['databaseAcl','columns','relations','functions','constraints','triggers','roles','memberships','policies','schemas','defaults','enums','indexes','sequences','views','relationAcl','functionAcl','schemaAcl','defaultAcl'].map(k=>[k,normalized(b[k],['oid','relacl','proacl','nspacl','defaclacl','attacl'])]));
 }
-function nativeCatalog(db) {
+export function nativeCatalog(db) {
   return Object.fromEntries(Object.entries(queries).filter(([k])=>!['identity','uat'].includes(k)).map(([k,q])=>[k,db.query(`SELECT coalesce(json_agg(t),'[]'::json)::text FROM (${q}) t;`)]));
 }
 export async function diagnoseOriginalBackup(directory) {
@@ -246,7 +260,7 @@ export async function diagnoseOriginalBackup(directory) {
 }
 
 const scopeName = name => /^(admin_member_profile_|member_contact_)/.test(name);
-function scopeCatalog(b) {
+export function scopeCatalog(b) {
   const out=catalogComparable(b);
   return {
     columns:out.columns.filter(r=>scopeName(r.table_name)),relations:out.relations.filter(r=>scopeName(r.relname)),
@@ -311,7 +325,273 @@ export async function auditApplied(directory) {
   save(path.join(dir,'independent-audit-'+stamp()+'.json'),JSON.stringify(result,null,2));
   return result;
 }
+function nativeRows(db,name) {
+  return db.query(`SELECT row_to_json(x)::text FROM (${dataQuery(name)}) x;`);
+}
+
+function verifyRows(db,tables,projection=()=>undefined) {
+  for(const [name,t] of Object.entries(tables)) {
+    const result=db.query(comparisonSql(name,t.rows,projection(name)));
+    if(result.missingCount!==0||result.extraCount!==0||String(result.expectedCount)!==t.row_count||String(result.actualCount)!==t.row_count)throw new Error('Typed row comparison failed');
+  }
+}
+
+function sequenceStates(db,sequences) {
+  return Object.fromEntries(sequences.map(s=>[s.sequencename,db.query(`SELECT row_to_json(t)::text FROM (SELECT last_value::text,is_called FROM public.${quote(s.sequencename)}) t;`)]));
+}
+
+export function rehearseCardAvatar(db,principal,sourceTables) {
+  const migrations=cardAvatarPlan();
+  const before=nativeCatalog(db);
+  reconcileExisting({...before,tables:{r2_schema_rollouts:before.relations.some(r=>r.relname==='r2_schema_rollouts')?nativeRows(db,'r2_schema_rollouts'):undefined}});
+  const reserved=n=>/^(member_card|member_scan_|staff_avatar_|admin_member_password_)/.test(n);
+  if(before.relations.some(r=>reserved(r.relname))||before.functions.some(r=>reserved(r.proname))||
+     before.columns.some(r=>r.table_name==='members'&&r.column_name==='avatar_version'))throw new Error('Card/avatar baseline has conflicting objects');
+  const names=before.relations.filter(r=>r.relkind==='r').map(r=>r.relname);
+  const tables=sourceTables??Object.fromEntries(names.map(name=>[name,nativeRows(db,name)]));
+  if(!isDeepStrictEqual([...names].sort(),Object.keys(tables).sort()))throw new Error('Incomplete old-table inventory');
+  const states=sequenceStates(db,before.sequences);
+  const batch=`BEGIN; SET LOCAL ROLE ${quote(principal)}; SET LOCAL search_path=public,pg_catalog; SET LOCAL statement_timeout='60s'; ${migrations.flatMap(m=>m.statements).join(';\n')};`;
+  db.run(`${batch} ROLLBACK;`);
+  const rolledBack=nativeCatalog(db);
+  if(!isDeepStrictEqual(before,rolledBack)||!isDeepStrictEqual(states,sequenceStates(db,before.sequences)))throw new Error('Rollback catalog or sequence state changed');
+  verifyRows(db,tables);
+  db.run(`${batch} COMMIT;`);
+  const after=nativeCatalog(db);
+  after.tables={r2_schema_rollouts:nativeRows(db,'r2_schema_rollouts')};
+  reconcileExisting(after);
+  const avatar=c=>c.table_name==='members'&&c.column_name==='avatar_version';
+  const added=after.columns.find(avatar);
+  if(!added||added.type!=='integer'||!added.not_null||added.default_expr!=='0'||
+     db.query('SELECT to_json(count(*)::text) FROM public.members WHERE avatar_version IS DISTINCT FROM 0;')!=='0')throw new Error('Unexpected avatar_version definition or values');
+  const oldRelations=new Set(before.relations.map(r=>r.relname));
+  if(!isDeepStrictEqual(before.columns,after.columns.filter(c=>oldRelations.has(c.table_name)&&!avatar(c))))throw new Error('Old column definitions changed');
+  verifyRows(db,tables,name=>name==='members'?before.columns.filter(c=>c.table_name===name).map(c=>c.column_name):undefined);
+  if(!isDeepStrictEqual(states,sequenceStates(db,before.sequences)))throw new Error('Existing sequence state changed');
+  if(after.functionAcl.some(a=>reserved(a.proname)&&a.grantee==='PUBLIC')||after.relationAcl.some(a=>reserved(a.relname)&&a.grantee==='PUBLIC'))throw new Error('PUBLIC exposure');
+  const addedTables=after.relations.filter(r=>r.relkind==='r'&&!oldRelations.has(r.relname));
+  if(addedTables.some(r=>nativeRows(db,r.relname).row_count!=='0'))throw new Error('Unexpected rows in new tables');
+  return {migrations:migrations.map(m=>m.file),inventoryVerified:true,oldTablesCompared:names.length,rollbackVerified:true,avatarVersionDefault:0,avatarDefaultVerifiedOnExistingMembers:BigInt(tables.members.row_count)>0n,newEmptyTables:addedTables.length};
+}
+
+// Drop application rows before restore in catalog-only mode.
+export function catalogOnlyBaseline(b) {
+  reconcileExisting(b);
+  return {...b, tables:Object.fromEntries(Object.entries(b.tables).map(([name,t])=>[
+    name,name==='r2_schema_rollouts'?t:{rows:'[]',row_count:'0'},
+  ]))};
+}
+
+const authorizedCapture='r2-capture-ORPEIJ';
+const authorizedSnapshotHash='85417368e7f4510c8eb00b05967fec6678949750e5ede00f43969d18e38a459c';
+
+async function offlineCardAvatar(directory, mode) {
+  const catalogOnly=mode==='--rehearse-card-avatar-catalog';
+  const full=mode==='--rehearse-card-avatar-protected';
+  let db,dir,stage='baseline';
+  try {
+    if(!directory)throw new Error('Baseline unavailable');
+    const source=fs.realpathSync(directory);
+    const base=fs.realpathSync(local);
+    if(!source.startsWith(base+path.sep))throw new Error('Protected baseline required');
+    if(full&&(base!==local||source!==path.join(base,authorizedCapture)))throw new Error('Authorized capture required');
+    protect();
+    const file=path.join(source,catalogOnly||full?'snapshot.json':'sanitized-snapshot.json');
+    if(!fs.lstatSync(file).isFile())throw new Error('Baseline unavailable');
+    const text=fs.readFileSync(file,'utf8');
+    if(catalogOnly||full){
+      if(full&&digest(text)!==authorizedSnapshotHash)throw new Error('Unexpected snapshot digest');
+      const manifest=path.join(source,'manifest.json');
+      if(!fs.lstatSync(manifest).isFile()||JSON.parse(fs.readFileSync(manifest,'utf8')).files?.['snapshot.json']!==digest(text))throw new Error('Backup checksum mismatch');
+    }
+    const b=catalogOnly?catalogOnlyBaseline(JSON.parse(text)):JSON.parse(text);
+    reconcileExisting(b);
+    if(full&&(Object.keys(b.tables).length!==36||!(BigInt(b.tables.members.row_count)>0n)))throw new Error('Incomplete populated capture');
+    const bootstrap=b.roles.find(r=>r.rolsuper).rolname;
+    const restore=recoverySql(b);
+    stage='native-recovery';
+    protect();dir=fs.mkdtempSync(path.join(local,'r2-card-avatar-'));
+    db=await nativeDatabase(dir,bootstrap);db.run(restore);
+    const expected=catalogComparable(b),actual=catalogComparable(nativeCatalog(db));
+    if(!isDeepStrictEqual(expected,actual))throw new Error('Native catalog comparison failed');
+    verifyRows(db,b.tables);
+    if(!isDeepStrictEqual(b.sequenceState,sequenceStates(db,b.sequences)))throw new Error('Native sequence recovery mismatch');
+    stage='card-avatar-rehearsal';
+    const rehearsal=rehearseCardAvatar(db,b.identity[0].principal,b.tables);
+    stage='effective-acl';
+    if(!db.query(`SET ROLE ${quote(b.identity[0].principal)}; SELECT to_json(${cardAvatarAclCheck});`))throw new Error('Effective access exceeds card/avatar policy');
+    return {outcome:'VERIFIED offline rehearsal',baseline:full?'authorized protected capture':catalogOnly?'production catalog + inventory only; no application rows':'caller-sanitized',catalogSections:Object.keys(expected).length,effectiveAcl:'verified',...rehearsal};
+  }catch(e){
+    process.exitCode=1;
+    return {outcome:'BLOCKED',stage,reason:stage==='baseline'?'Post-profile/contact baseline missing, unauthorized, or invalid':'Native verification failed',code:/^[0-9A-Z]{5}$/.test(e?.code??'')?e.code:undefined};
+  }finally{
+    if(db)db.close();
+    if(dir)fs.rmSync(dir,{recursive:true,force:true,maxRetries:3});
+  }
+}
+
+const catalogOmit=['oid','relacl','proacl','nspacl','defaclacl','datacl'];
+const cardObjectPattern='^(member_card|member_scan_|staff_avatar_)';
+const avatarCheck="NOT EXISTS (SELECT 1 FROM public.members WHERE avatar_version IS DISTINCT FROM 0)";
+
+// Fixed baseline analogs, themselves covered by the catalog and inventory guards.
+// Compare effective bits separately from object ACLs: a redundant explicit GRANT is still new.
+const cardAclBaselines={
+  r:['members','auth_sessions','admin_member_profile_audit','member_contact_details','member_contact_email_audit'],
+  S:['admin_member_profile_audit_id_seq','member_contact_email_audit_id_seq'],
+  f:['admin_member_profile_update','member_contact_email_update'],
+};
+const aclOperations={r:['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN'],S:['USAGE','SELECT','UPDATE'],f:['EXECUTE']};
+
+export const cardAvatarAclCheck = `(WITH objects AS (
+  SELECT c.oid,c.relkind::text AS kind,c.relname::text AS name,c.relowner AS owner,
+    coalesce(c.relacl,acldefault(CASE WHEN c.relkind='S' THEN 's'::"char" ELSE 'r'::"char" END,c.relowner)) AS acl
+    FROM pg_class c WHERE c.relnamespace='public'::regnamespace AND c.relkind IN ('r','S')
+  UNION ALL
+  SELECT p.oid,'f',p.proname,p.proowner,coalesce(p.proacl,acldefault('f',p.proowner))
+    FROM pg_proc p WHERE p.pronamespace='public'::regnamespace
+), baseline(kind,name) AS (VALUES ${Object.entries(cardAclBaselines).flatMap(([kind,names])=>names.map(name=>`(${literal(kind)},${literal(name)})`)).join(',')}),
+  targets AS (SELECT * FROM objects WHERE name ~ '${cardObjectPattern}'),
+  -- Check every role context, not just logins: has_* resolves inherited rights, and
+  -- evaluating all roles covers every SET ROLE destination (and dormant grantees).
+  contexts AS (SELECT r.oid FROM pg_roles r),
+  operations(kind,privilege) AS (VALUES ${Object.entries(aclOperations).flatMap(([kind,ops])=>ops.map(op=>`(${literal(kind)},${literal(op)})`)).join(',')},('c','SELECT'),('c','INSERT'),('c','UPDATE'),('c','REFERENCES')),
+  rights AS (
+    SELECT o.kind,o.name,o.oid,r.oid AS role,v.privilege || g.suffix AS bit,
+      CASE o.kind WHEN 'r' THEN has_table_privilege(r.oid,o.oid,v.privilege || g.suffix)
+        WHEN 'S' THEN has_sequence_privilege(r.oid,o.oid,v.privilege || g.suffix)
+        WHEN 'f' THEN has_function_privilege(r.oid,o.oid,v.privilege || g.suffix) END AS allowed
+    FROM objects o JOIN operations v USING(kind) CROSS JOIN contexts r
+    CROSS JOIN (VALUES (''),(' WITH GRANT OPTION')) g(suffix)
+    WHERE o.name ~ '${cardObjectPattern}' OR EXISTS (SELECT FROM baseline b WHERE (b.kind,b.name)=(o.kind,o.name))
+  )
+  SELECT NOT EXISTS (SELECT FROM baseline b WHERE (SELECT count(*) FROM objects o WHERE (o.kind,o.name)=(b.kind,b.name))<>1)
+    AND NOT EXISTS (SELECT FROM rights t JOIN baseline b ON b.kind=t.kind
+      WHERE t.name ~ '${cardObjectPattern}' AND t.allowed AND NOT EXISTS (
+        SELECT FROM rights a WHERE (a.kind,a.name,a.role,a.bit)=(b.kind,b.name,t.role,t.bit) AND a.allowed))
+    AND NOT EXISTS (SELECT FROM targets t JOIN baseline b USING(kind) JOIN objects o ON (o.kind,o.name)=(b.kind,b.name)
+      WHERE t.owner<>o.owner OR EXISTS (SELECT FROM aclexplode(t.acl) a WHERE a.grantee=0 OR NOT EXISTS (
+        SELECT FROM aclexplode(o.acl) x WHERE x=a)))
+    AND NOT EXISTS (SELECT FROM pg_attribute a JOIN targets t ON t.kind='r' AND t.oid=a.attrelid
+      WHERE a.attnum>0 AND NOT a.attisdropped AND a.attacl IS NOT NULL)
+    AND EXISTS (SELECT FROM pg_attribute a WHERE a.attrelid='public.members'::regclass
+      AND a.attname='avatar_version' AND NOT a.attisdropped AND a.attacl IS NULL)
+    AND NOT EXISTS (SELECT FROM contexts r CROSS JOIN operations v CROSS JOIN (VALUES (''),(' WITH GRANT OPTION')) g(suffix)
+      WHERE v.kind='c' AND has_column_privilege(r.oid,'public.members','avatar_version',v.privilege || g.suffix)
+        AND NOT has_column_privilege(r.oid,'public.members','avatar_url',v.privilege || g.suffix))
+)`;
+
+function driftCatalog(b) {
+  const c=catalogComparable(b);
+  c.sequences=normalized(c.sequences,['last_value']);
+    c.columns=b.columns;
+  // Database ACL is compared as expanded grantor/grantee/privilege rows above.
+    return {...c,database:normalized(b.database,['datacl']),extensions:b.extensions,unsupported:b.unsupported};
+}
+
+async function applyCardAvatar() {
+  const report={mode:'apply-card-avatar',applied:[],password:'NOT APPLIED',r3Plus:'NOT APPLIED'};
+  let db,dir,stage='protected-baseline',commit='not-attempted';
+  try {
+    const protectedDir=path.join(local,authorizedCapture);
+    report.protectedRehearsal=await offlineCardAvatar(protectedDir,'--rehearse-card-avatar-protected');
+    if(!report.protectedRehearsal.outcome.startsWith('VERIFIED'))throw new Error('Pinned protected rehearsal could not be verified');
+    const source=fs.readFileSync(path.join(protectedDir,'snapshot.json'),'utf8');
+    if(digest(source)!==authorizedSnapshotHash)throw new Error('Pinned protected capture changed');
+    const baseline=JSON.parse(source),migrations=cardAvatarPlan();
+    stage='production-read-only-capture';
+    const sql=client(),b=await capture(sql,true);
+    stage='baseline-drift';
+    reconcileExisting(b);
+    const expected=driftCatalog(baseline),actual=driftCatalog(b);
+    report.driftSections=Object.keys(expected).filter(k=>!isDeepStrictEqual(expected[k],actual[k]));
+    if(report.driftSections.length||!isDeepStrictEqual(baseline.identity,b.identity))throw new Error('Live identity or catalog differs from protected rehearsal');
+    stage='fresh-recovery';
+    protect();dir=fs.mkdtempSync(path.join(local,'r2-card-avatar-apply-'));
+    report.artifacts=path.relative(root,dir);
+    const text=JSON.stringify(b),file=path.join(dir,'snapshot.json');
+    save(file,text);
+    report.snapshotChecksum=digest(text);
+    save(path.join(dir,'manifest.json'),JSON.stringify({files:{'snapshot.json':report.snapshotChecksum}}));
+    const saved=fs.readFileSync(file,'utf8');
+    if(digest(saved)!==report.snapshotChecksum)throw new Error('Fresh snapshot checksum mismatch');
+    db=await nativeDatabase(dir,b.roles.find(r=>r.rolsuper).rolname);
+    db.run(recoverySql(JSON.parse(saved)));
+    if(!isDeepStrictEqual(driftCatalog(nativeCatalog(db)),actual))throw new Error('Fresh native recovery catalog mismatch');
+    verifyRows(db,b.tables);
+    if(!isDeepStrictEqual(b.sequenceState,sequenceStates(db,b.sequences)))throw new Error('Fresh native sequence recovery mismatch');
+    report.recovery={tables:Object.keys(b.tables).length,catalogSections:Object.keys(catalogComparable(b)).length};
+    stage='fresh-rehearsal';
+    const principal=b.identity[0].principal;
+    report.rehearsal=rehearseCardAvatar(db,principal,b.tables);
+    const staged=nativeCatalog(db),after=driftCatalog(staged);
+    stage='effective-acl';
+    if(!db.query(`SET ROLE ${quote(principal)}; SELECT to_json(${cardAvatarAclCheck});`))throw new Error('Fresh rehearsal: effective access exceeds card/avatar policy');
+    stage='prepare-production-guards';
+    const added=staged.relations.filter(r=>r.relkind==='r'&&!Object.hasOwn(b.tables,r.relname)).map(r=>r.relname);
+    if(added.length!==5)throw new Error('Unexpected new table inventory');
+    const catalogGuards=(dbSql,c)=>Object.entries(c).map(([k,rows])=>guard(dbSql,
+      `(SELECT coalesce(jsonb_agg(to_jsonb(t)-$2::text[]),'[]'::jsonb) FROM (${queries[k]}) t)=$1::jsonb`,
+      [JSON.stringify(rows),k==='sequences'?[...catalogOmit,'last_value']:catalogOmit]));
+    const dataGuards=(dbSql,post)=>Object.entries(b.tables).map(([name,t])=>{
+      const cols=post&&name==='members'?b.columns.filter(c=>c.table_name===name).map(c=>c.column_name):undefined;
+      const comparison=comparisonSql(name,t.rows,cols,true).slice(0,-1);
+      return guard(dbSql,`(SELECT (j::jsonb->>'missingCount')='0' AND (j::jsonb->>'extraCount')='0' AND (j::jsonb->>'actualCount')=$2 FROM (${comparison}) x(j))`,[t.rows,t.row_count]);
+    });
+    const stateGuards=dbSql=>Object.entries(b.sequenceState).map(([name,s])=>guard(dbSql,
+      `(SELECT last_value::text=$1 AND is_called=$2 FROM public.${quote(name)})`,[s.last_value,s.is_called]));
+    const postGuards=dbSql=>[...catalogGuards(dbSql,after),...dataGuards(dbSql,true),...stateGuards(dbSql),guard(dbSql,avatarCheck),guard(dbSql,cardAvatarAclCheck),
+      ...added.map(name=>guard(dbSql,`NOT EXISTS (SELECT FROM public.${quote(name)})`))];
+    const settings=dbSql=>[dbSql.query("SET LOCAL statement_timeout='60s'"),dbSql.query("SET LOCAL TIME ZONE 'UTC'"),dbSql.query('SET LOCAL search_path=public,pg_catalog'),dbSql.query('SET LOCAL row_security=off')];
+    const identityGuard=dbSql=>guard(dbSql,'current_database()=$1 AND current_user=$2 AND current_setting(\'server_version_num\')=$3',[b.identity[0].database,principal,b.identity[0].version]);
+    if(!isDeepStrictEqual(migrations,cardAvatarPlan()))throw new Error('Pinned migration source changed');
+    const tx=[...settings(sql),sql.query("SET LOCAL lock_timeout='5s'"),sql.query('SELECT pg_advisory_xact_lock(18261118,20)'),
+      sql.query('LOCK TABLE '+Object.keys(b.tables).map(n=>'public.'+quote(n)).join(',')+' IN SHARE MODE'),
+      identityGuard(sql),
+      guard(sql,"NOT EXISTS (SELECT FROM pg_event_trigger WHERE evtenabled<>'D')"),
+      ...catalogGuards(sql,actual),...dataGuards(sql,false),...stateGuards(sql),...migrations.flatMap(m=>m.statements.map(s=>sql.query(s))),...postGuards(sql)];
+    stage='production-transaction';
+    commit='unknown';
+    await sql.transaction(tx,{isolationLevel:'ReadCommitted'});
+    commit='committed';report.applied=migrations.map(m=>m.file);
+    stage='production-postflight';
+    const audit=client();
+    await audit.transaction([...settings(audit),identityGuard(audit),guard(audit,"current_setting('transaction_read_only')='on'"),...postGuards(audit)],{readOnly:true,isolationLevel:'RepeatableRead'});
+    report.postflight={readOnly:true,existingTables:Object.keys(b.tables).length,newEmptyTables:added.length,effectiveAcl:'verified'};
+    report.outcome='VERIFIED card/avatar schema-only commit; existing inventory unchanged';
+  }catch(e){
+    report.outcome=commit==='committed'?'Committed; postflight failed; do not replay':commit==='unknown'?'Transaction attempted; reconcile read-only before retry':'BLOCKED; no migration transaction attempted';
+    const safeStages=['protected-baseline','baseline-drift','fresh-recovery','effective-acl','prepare-production-guards'];
+    report.blocker={stage,reason:safeStages.includes(stage)&&!e.code&&/^(Pinned |Existing R2 |Unknown migration inventory|Live identity |Fresh |Unexpected new table inventory|Native operation failed|Typed row comparison failed)/.test(e.message)?e.message:undefined,code:/^[0-9A-Z]{5}$/.test(e?.code??'')?e.code:undefined};
+    process.exitCode=1;
+  }finally{
+    if(db)try{db.close();}catch{report.nativeCleanup='failed';process.exitCode=1;}
+    report.commitOutcome=commit;
+    if(dir)save(path.join(dir,'report.json'),JSON.stringify(report,null,2));
+    console.log(JSON.stringify(report,null,2));
+  }
+  return report;
+}
+
 export async function main(args=process.argv.slice(2)) {
+  if(args.length===1&&args[0]==='--apply-card-avatar')return applyCardAvatar();
+  if(['--rehearse-card-avatar','--rehearse-card-avatar-catalog','--rehearse-card-avatar-protected'].includes(args[0])&&args.length<=2&&!args[1]?.startsWith('-')) {
+    const report=await offlineCardAvatar(args[1],args[0]);
+    console.log(JSON.stringify(report,null,2));return report;
+  }
+  if(args.length===1&&args[0]==='--capture-only'){
+    protect();
+    if(!fs.lstatSync(local).isDirectory()||fs.realpathSync(local)!==local)throw new Error('Protected backup path required');
+    const b=await capture(client());
+    const dir=fs.mkdtempSync(path.join(local,'r2-capture-'));
+    const file=path.join(dir,'snapshot.json');
+    const text=JSON.stringify(b,null,2),checksum=digest(text);
+    save(file,text);
+    if(digest(fs.readFileSync(file))!==checksum)throw new Error('Backup checksum mismatch');
+    save(path.join(dir,'manifest.json'),JSON.stringify({files:{'snapshot.json':checksum}},null,2));
+    const report={outcome:'Captured read-only',artifacts:path.relative(root,dir),tables:Object.keys(b.tables).length,snapshotChecksum:checksum};
+    console.log(JSON.stringify(report,null,2));return report;
+  }
   if(args.some(a=>!['--dry-run','--backup','--apply'].includes(a))||(args.includes('--dry-run')&&args.includes('--apply')))throw new Error('Invalid arguments');
   const migrations=selectedPlan(),sql=client(),b=await capture(sql);
   const allR2=b.relations.filter(r=>scopeName(r.relname)).length+b.functions.filter(r=>scopeName(r.proname)).length;

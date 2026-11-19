@@ -5,18 +5,18 @@ import { setupMock } from "./mock-test-harness.mjs";
 
 test("persisted role matrix and safe route boundaries", () => {
   const { canAccessAdminPath, adminLanding } = setupMock().load("admin-permissions");
-  for (const path of ["/admin/checkin", "/admin/rewards", "/admin/promo-codes", "/admin/coupons", "/admin/packages", "/admin/members", "/admin/members/BLU-1"]) {
+  for (const path of ["/admin", "/admin/checkin", "/admin/rewards", "/admin/promo-codes", "/admin/coupons", "/admin/packages", "/admin/members", "/admin/members/BLU-1"]) {
     assert.equal(canAccessAdminPath("ADMIN", path), true);
     assert.equal(canAccessAdminPath("OWNER", path), true);
     assert.equal(canAccessAdminPath("MEMBER", path), false);
   }
-  for (const path of ["/admin", "/admin/finance", "/admin/packages/finance", "/admin/packages-extra"]) {
+  for (const path of ["/admin/finance", "/admin/finance/export", "/admin/packages/finance", "/admin/packages-extra"]) {
     assert.equal(canAccessAdminPath("ADMIN", path), false);
     assert.equal(canAccessAdminPath("OWNER", path), true);
   }
   for (const path of ["/admin/members-extra", "/administrator", "/admin/coupons-extra", "/admin/coupons/../members", "/admin//coupons", "/admin/coupons?next=/admin/members"]) assert.equal(canAccessAdminPath("ADMIN", path), false);
   assert.equal(canAccessAdminPath("STAFF", "/admin/checkin"), false);
-  assert.equal(adminLanding("ADMIN"), "/admin/checkin");
+  assert.equal(adminLanding("ADMIN"), "/admin");
   assert.equal(adminLanding("MEMBER"), "/member");
 });
 

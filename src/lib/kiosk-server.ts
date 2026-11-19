@@ -50,7 +50,11 @@ export async function kioskAction(request: Request, action: string) {
       return response;
     }
     if (action === "scan") {
-      if (typeof body.code !== "string" || !/^BLU-\d{1,12}$/i.test(body.code.trim()) || typeof body.requestKey !== "string" || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(body.requestKey)) return json({ error: "รหัสสแกนไม่ถูกต้อง" }, 400);
+      if (typeof body.code !== "string" || !/^(?:BLU-\d{1,12}|CARD-[0-9]{1,95})$/i.test(body.code.trim()) || typeof body.requestKey !== "string" || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(body.requestKey)) return json({ error: "รหัสสแกนไม่ถูกต้อง" }, 400);
+      if (body.code.trim().toUpperCase().startsWith("CARD-")) {
+        const rows = await sql`SELECT member_card_admit(${await digest()},${station()},${body.requestKey}::uuid,${body.code.trim().toUpperCase()},${null}::text) AS result`;
+        return json(rows[0].result);
+      }
       const rows = await sql`SELECT kiosk_checkin(${await digest()},${station()},${body.requestKey}::uuid,${body.code.trim().toUpperCase()}) AS result`;
       return json(rows[0].result);
     }

@@ -9,13 +9,16 @@ const reasons: Record<string, string> = { PAID_ENTRY: "เข้าใช้บ�
 async function api(action: string, body: object) {
   const response = await fetch(`/api/admin/checkin/${action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), cache: "no-store" });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "โหลดข้อมูลไม่สำเร็จ");
+  if (!response.ok) throw Object.assign(new Error(data.error || "โหลดข้อมูลไม่สำเร็จ"), {
+    operationUnavailable: response.status === 422 && data.reason === "OUT_UNSUPPORTED" && data.operationUnavailable === true,
+  });
   return data;
 }
 
 export default function CheckinPage() {
   const [code, setCode] = useState("");
     const [direction, setDirection] = useState<"IN" | "OUT">("IN");
+  const [outSupported, setOutSupported] = useState<boolean | null>(null);
     const [from, setFrom] = useState("");
     const [to, setTo] = useState("");
     const [hourly, setHourly] = useState<{ hour: number; entries: number }[]>([]);
@@ -35,7 +38,13 @@ export default function CheckinPage() {
     const version = ++historyVersion.current;
     try {
       const data = await api("history", { query, page, from: from ? `${from}+07:00` : "", to: to ? `${to}+07:00` : "" });
-      if (version === historyVersion.current) { setRecords(data.records); setHasMore(data.hasMore); setHourly(data.hourly); }
+      if (version === historyVersion.current) {
+              setRecords(data.records); setHasMore(data.hasMore); setHourly(data.hourly);
+              if (typeof data.outSupported === "boolean") {
+                setOutSupported(data.outSupported);
+                if (!data.outSupported && !pending.current) setDirection("IN");
+              }
+            }
     } catch (cause) { if (version === historyVersion.current) setError((cause as Error).message); }
   }, [query, page, from, to]);
   useEffect(() => {
@@ -53,7 +62,7 @@ export default function CheckinPage() {
   async function scan() {
     if (processing.current) return;
     const normalized = code.trim().toUpperCase();
-    if (!/^BLU-\d{1,12}$/.test(normalized)) { setError("กรุณากรอกรหัสสมาชิก BLU-..."); return; }
+    if (!/^(?:BLU-\d{1,12}|CARD-[0-9]{1,95})$/.test(normalized)) { setError("กรุณากรอก BLU-... หรือ CARD-ตามด้วยตัวเลข"); return; }
     // Preserve the key after ambiguous network failures; retry cannot consume a second entitlement.
     if (pending.current && (pending.current.code !== normalized || pending.current.direction !== direction)) { setError("กรุณาลองคำขอเดิมให้สำเร็จก่อนเปลี่ยนสมาชิก"); return; }
     pending.current ??= { code: normalized, direction, requestKey: crypto.randomUUID() };
@@ -61,16 +70,25 @@ export default function CheckinPage() {
     processing.current = true; setBusy(true); setError(""); setResult(null);
     try {
       const data = await api("scan", pending.current);
-      pending.current = null; setRetryPending(false); setResult(data); await load();
-    } catch (cause) { setError((cause as Error).message); }
+      pending.current = null; setRetryPending(false); setResult(data);
+      if (typeof data.outSupported === "boolean") setOutSupported(data.outSupported);
+      await load();
+    } catch (cause) {
+      if ((cause as Error & { operationUnavailable?: boolean }).operationUnavailable === true) {
+        // Only the server's explicit pre-write unsupported response can release this request.
+        pending.current = null; setRetryPending(false); setOutSupported(false); setDirection("IN");
+      }
+      setError((cause as Error).message);
+    }
     finally { processing.current = false; setBusy(false); }
   }
   return <div className="space-y-6 p-6">
     <h1 className="text-2xl font-bold">เช็คอินเข้าใช้บริการ</h1>
-    <p>เข้า–ออกจับคู่ครั้งบริการ ตรวจสิทธิ์เดิม ไม่เพิ่มคะแนน ประวัติเก่าไม่มีเวลาออก = ไม่ทราบระยะเวลา</p>
+    <p>ตรวจสิทธิ์เข้าใช้เดิม ไม่เพิ่มคะแนน ประวัติเก่าไม่มีเวลาออก = ไม่ทราบระยะเวลา</p>
+    {outSupported === false && <p role="status">ระบบปัจจุบันรองรับ IN เท่านั้น — ยังไม่เปิด OUT และไม่สร้างเวลาออกย้อนหลัง</p>}
     <form className="flex gap-3" onSubmit={event => { event.preventDefault(); void scan(); }}>
-      <select aria-label="เข้าออก" value={direction} disabled={busy || retryPending} onChange={event => setDirection(event.target.value as "IN" | "OUT")}><option value="IN">IN เข้า</option><option value="OUT">OUT ออก</option></select>
-            <input aria-label="รหัสสมาชิก" className="rounded border p-2" value={code} onChange={event => setCode(event.target.value)} placeholder="สแกนหรือกรอก BLU-..." disabled={busy} />
+      <select aria-label="เข้าออก" value={direction} disabled={busy || retryPending} onChange={event => setDirection(event.target.value as "IN" | "OUT")}><option value="IN">IN เข้า</option><option value="OUT" disabled={outSupported === false}>OUT ออก{outSupported === false ? " (ยังไม่รองรับ)" : ""}</option></select>
+            <input aria-label="รหัสสมาชิก" className="rounded border p-2" value={code} onChange={event => setCode(event.target.value)} placeholder="สแกน BLU-... / CARD-..." disabled={busy} />
       <button className="rounded bg-blue-700 px-4 py-2 text-white" disabled={busy}>{busy ? "กำลังบันทึก…" : "บันทึก / ลองคำขอเดิม"}</button>
     </form>
     {error && <p role="alert" className="text-red-600">{error}</p>}

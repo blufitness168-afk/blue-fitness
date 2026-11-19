@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { plan, selectedPlan, main, comparisonSql, recoverySql, reconcileExisting } from './r2-production-rollout.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { local } from './db-safety.mjs';
+import { plan, selectedPlan, cardAvatarPlan, cardAvatarAclCheck, main, comparisonSql, recoverySql, reconcileExisting, catalogOnlyBaseline, rehearseCardAvatar, nativeDatabase, nativeCatalog, scopeCatalog } from './r2-production-rollout.mjs';
 import { splitSql } from './db-payments-sql.mjs';
 
 const require=createRequire(import.meta.url);
@@ -10,6 +13,7 @@ const {PGlite}=require('../.local-db/payment-sql-tests/node_modules/@electric-sq
 test('R2 pinned inventory is bounded; production selection excludes password',()=>{
   const migrations=plan();
   assert.equal(migrations.length,3);
+  assert.deepEqual(cardAvatarPlan().map(m=>m.file),['20261118_R2_member_cards.sql','20261118_R2_staff_avatar.sql']);
   assert.deepEqual(selectedPlan().map(m=>m.file),['20261118_R2_admin_member_profile.sql','20261118_R2_member_contact_email.sql']);
   for(const m of migrations){
     assert.match(m.checksum,/^[a-f0-9]{64}$/);
@@ -21,7 +25,12 @@ test('R2 pinned inventory is bounded; production selection excludes password',()
 
 test('unknown/conflicting flags fail before env/database access',async()=>{
   await assert.rejects(main(['--all']),/Invalid arguments/);
+  await assert.rejects(main(['--apply-card-avatar','--apply']),/Invalid arguments/);
+  await assert.rejects(main(['--apply-card-avatar','--dry-run']),/Invalid arguments/);
   await assert.rejects(main(['--apply','--dry-run']),/Invalid arguments/);
+  await assert.rejects(main(['--rehearse-card-avatar','--apply']),/Invalid arguments/);
+  await assert.rejects(main(['--apply','--rehearse-card-avatar']),/Invalid arguments/);
+  await assert.rejects(main(['--rehearse-card-avatar-protected','--apply']),/Invalid arguments/);
 });
 
 test('unsupported recovery features fail closed',()=>{
@@ -60,4 +69,76 @@ test('comparison SQL safely quotes data and identifiers without broad normalizat
   assert.ok(sql.includes("O''Reilly"));
   assert.match(sql,/EXCEPT ALL/);
   assert.doesNotMatch(sql,/date_trunc|round\(|substring|regexp_replace/);
+});
+
+test('native synthetic card/avatar rehearsal: reject inventory drift before DDL and preserve old rows', {timeout:120000}, async()=>{
+  const dir=fs.mkdtempSync(path.join(local,'r2-card-avatar-test-'));
+  let db;
+  try {
+    db=await nativeDatabase(dir,'postgres');
+    db.run(`CREATE ROLE fixture_owner; GRANT CREATE ON SCHEMA public TO fixture_owner;
+      SET ROLE fixture_owner;
+      CREATE TABLE members (id integer PRIMARY KEY, member_code text, role text, status text, full_name text, nickname text, gender text, birth_day integer, birth_month integer, emergency_name text, emergency_phone text, emergency_relation text, avatar_url text);
+      CREATE TABLE auth_sessions (id integer PRIMARY KEY, member_id integer, token_hash text, mode text, revoked_at timestamptz, expires_at timestamptz);
+      INSERT INTO members(id,member_code,avatar_url) VALUES (1,'SYNTHETIC',NULL),(2,'SYNTHETIC-2','legacy');
+      CREATE FUNCTION kiosk_checkin(text,text,uuid,text) RETURNS jsonb LANGUAGE sql AS $$ SELECT '{}'::jsonb $$;
+      CREATE FUNCTION real_frontdesk_checkin(text,text,uuid,text) RETURNS jsonb LANGUAGE sql AS $$ SELECT '{}'::jsonb $$;
+      CREATE TABLE r2_schema_rollouts(name text PRIMARY KEY,checksum text NOT NULL,objects jsonb NOT NULL);
+      ${selectedPlan().flatMap(m=>m.statements).join(';\n')};`);
+    const json=JSON.stringify(scopeCatalog(nativeCatalog(db))).replaceAll("'","''");
+    const seed=selectedPlan().map(m=>`('${m.file}','${m.checksum}','${json}'::jsonb)`).join(',');
+    assert.throws(()=>rehearseCardAvatar(db,'fixture_owner'),/Unknown migration inventory/);
+    db.run(`INSERT INTO r2_schema_rollouts VALUES ${seed}; UPDATE r2_schema_rollouts SET checksum='bad';`);
+    assert.throws(()=>rehearseCardAvatar(db,'fixture_owner'),/source\/schema checksum mismatch/);
+    db.run(`DELETE FROM r2_schema_rollouts; INSERT INTO r2_schema_rollouts VALUES ${seed}; ALTER TABLE member_contact_details ADD COLUMN drift integer;`);
+    assert.throws(()=>rehearseCardAvatar(db,'fixture_owner'),/source\/schema checksum mismatch/);
+    assert.equal(db.query("SELECT to_json(to_regclass('public.member_cards') IS NULL);"),true);
+    db.run('ALTER TABLE member_contact_details DROP COLUMN drift;');
+    const baseline=nativeCatalog(db);
+    baseline.tables={members:{rows:'[{"member_code":"SYNTHETIC"}]',row_count:'1'},r2_schema_rollouts:{rows:JSON.stringify(selectedPlan().map(m=>({name:m.file,checksum:m.checksum,objects:scopeCatalog(baseline)}))),row_count:'2'}};
+    const projected=catalogOnlyBaseline(baseline);
+    assert.deepEqual(projected.tables.members,{rows:'[]',row_count:'0'});
+    assert.equal(projected.tables.r2_schema_rollouts,baseline.tables.r2_schema_rollouts);
+    assert.equal(baseline.tables.members.row_count,'1');
+    assert.throws(()=>rehearseCardAvatar(db,'fixture_owner',{}),/Incomplete old-table inventory/);
+    const result=rehearseCardAvatar(db,'fixture_owner');
+    assert.deepEqual(result,{migrations:['20261118_R2_member_cards.sql','20261118_R2_staff_avatar.sql'],inventoryVerified:true,oldTablesCompared:6,rollbackVerified:true,avatarVersionDefault:0,avatarDefaultVerifiedOnExistingMembers:true,newEmptyTables:5});
+    assert.equal(db.query(comparisonSql('members','[{"id":1},{"id":2}]',['id'])).missingCount,0);
+    assert.equal(db.query(comparisonSql('members','[{"id":1},{"id":3}]',['id'])).missingCount,1);
+    assert.throws(()=>rehearseCardAvatar(db,'fixture_owner'),/conflicting objects/);
+    const acl=()=>db.query(`SET ROLE fixture_owner; SELECT to_json(${cardAvatarAclCheck});`);
+    assert.equal(acl(),true);
+    db.run(`CREATE ROLE fixture_outsider LOGIN; CREATE ROLE fixture_access;
+      GRANT fixture_access TO fixture_outsider WITH INHERIT FALSE, SET TRUE;
+      GRANT SELECT ON public.member_card_audit_id_seq TO fixture_access;`);
+    assert.equal(acl(),false);
+    db.run('REVOKE SELECT ON public.member_card_audit_id_seq FROM fixture_access;');
+    assert.equal(acl(),true);
+    db.run(`CREATE ROLE fixture_service LOGIN; CREATE ROLE fixture_managed;
+      GRANT fixture_managed TO fixture_service WITH INHERIT TRUE, SET TRUE;
+      GRANT pg_read_all_data, pg_write_all_data TO fixture_managed WITH INHERIT TRUE, SET TRUE;
+      GRANT pg_maintain TO fixture_managed WITH INHERIT TRUE, SET FALSE;`);
+    assert.equal(db.query(`SELECT to_json(pg_has_role('fixture_service','pg_read_all_data','USAGE')
+      AND pg_has_role('fixture_service','pg_write_all_data','SET')
+      AND pg_has_role('fixture_service','pg_maintain','USAGE')
+      AND NOT pg_has_role('fixture_service','pg_maintain','SET')
+      AND has_sequence_privilege('fixture_service','public.member_card_audit_id_seq','SELECT'));`),true);
+    assert.equal(acl(),true,'intrinsic privileges match the same baseline operations');
+    for(const [grant,revoke] of [
+      ['SELECT ON member_cards TO fixture_service','SELECT ON member_cards FROM fixture_service'],
+      ['TRUNCATE ON member_cards TO fixture_service','TRUNCATE ON member_cards FROM fixture_service'],
+      ['SELECT ON SEQUENCE member_card_audit_id_seq TO fixture_managed WITH GRANT OPTION','SELECT ON SEQUENCE member_card_audit_id_seq FROM fixture_managed'],
+      ['EXECUTE ON FUNCTION member_card_immutable() TO fixture_access','EXECUTE ON FUNCTION member_card_immutable() FROM fixture_access'],
+      ['UPDATE (avatar_version) ON members TO fixture_service','UPDATE (avatar_version) ON members FROM fixture_service'],
+      ['SELECT ON member_cards TO PUBLIC','SELECT ON member_cards FROM PUBLIC'],
+    ]) {
+      db.run(`SET ROLE fixture_owner; GRANT ${grant};`);
+      assert.equal(acl(),false,grant);
+      db.run(`SET ROLE fixture_owner; REVOKE ${revoke};`);
+      assert.equal(acl(),true,revoke);
+    }
+  }finally{
+    if(db)db.close();
+    fs.rmSync(dir,{recursive:true,force:true,maxRetries:3});
+  }
 });

@@ -7,6 +7,14 @@
 > ส่วนนี้เป็นแผนหลักสำหรับรอบถัดไป ส่วนด้านล่างเป็นประวัติ ไม่ถือว่า checkbox เก่าเป็นหลักฐานว่าบรีฟใหม่เสร็จแล้ว ทำตามลำดับพร้อมผ่าน checkpoint แต่ละรอบ ไม่รวบแก้ทุกระบบแล้วค่อยตรวจท้ายงาน
 > มี implementation บางส่วนแล้ว ดูบันทึกสถานะและหลักฐานด้านล่าง ไม่ใช่ production acceptance; migration ใหม่ทั้งหมดเป็น prepare-only ยังไม่ apply/deploy
 
+### R2 Dashboard / บัตร / รูป — checkpoint ก่อนขึ้น production
+
+- เชื่อม Dashboard ADMIN (ไม่ query หรือส่งข้อมูลเงิน) และฟอร์มบัตร/รูปในหน้าสมาชิกแล้ว; build และชุดเทสรวมก่อน build ผ่าน (มี 1 skip ในชุดรวม; ไม่ใช้แทน production UAT)
+- ซ้อม card/avatar กับ snapshot ที่ป้องกันสิทธิ์บน PostgreSQL จริง: คอลัมน์เดิมครบ 36 ตารางตรงหลัง restore/rollback/commit ในฐานซ้อม, catalog 19 ส่วน, inventory เดิม 2 รายการคงเดิม; runner 7/7 ผ่าน
+- ผลล่าสุด: apply card/avatar บน production สำเร็จ ตรวจ read-only postflight ผ่าน ข้อมูลเดิม 36 ตารางไม่เปลี่ยน ตารางใหม่ 5 ตารางว่าง และ effective ACL ผ่าน; runner 7/7, TypeScript/build ผ่าน ไม่ลง password/R3+
+- ประวัติรอบแรก: Production apply หยุดก่อนส่ง DDL (`not-attempted`): effective ACL ของ `neon_service` ยังไม่ผ่าน gate แม้ revoke PUBLIC แล้ว ต้องตรวจเทียบสิทธิ์เดิมราย operation และแยกสิทธิ์ที่สืบทอดกับสิทธิ์ใหม่ ห้ามข้าม guard หรือแก้ grant เอง ดู `R2_PRODUCTION_ROLLOUT.md`
+- รอบนี้ยังไม่ push/deploy หรือ UAT บัตร/รูปจริง, ไม่เรียก Cloudinary, password ยังปิด และไม่ข้าม R3
+
 ### Production UAT ผลจริงหลัง push `5d7f18e`
 
 - commit/push `5d7f18e` บน main สำเร็จ; รอ endpointใหม่จาก404→401 ก่อน browser UAT จึงยืนยันมี deploymentใหม่จริง ไม่ใช้ working tree แทนเว็บ live
