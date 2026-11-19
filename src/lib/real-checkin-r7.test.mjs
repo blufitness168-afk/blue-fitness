@@ -27,6 +27,8 @@ test('R7 isolated SQL chain preserves R3/R6 and pairs visits atomically', { time
   for (const name of ['20261031_payment_receiver_bank','20261031_payment_currency_recheck','20261031_package_catalog','20261031_package_catalog_order_guard','20261118_r3_package_catalog','20261118_r3_package_catalog_checkin','20261118_R6_time_supplement']) await db.exec(read(`../db/migrations/${name}.sql`));
   const before=await rows("SELECT pg_get_functiondef(oid) AS body FROM pg_proc WHERE proname IN ('kiosk_checkin','real_frontdesk_checkin') ORDER BY proname");
   await db.exec(read('../db/migrations/20261118_R7_visits.sql'));
+  // The route uses the R2 card dispatcher, which delegates paired visits to installed R7.
+  await db.exec(read('../db/migrations/20261118_R2_member_cards.sql'));
   assert.deepEqual(await rows("SELECT pg_get_functiondef(oid) AS body FROM pg_proc WHERE proname IN ('kiosk_checkin','real_frontdesk_checkin') ORDER BY proname"),before);
   await db.exec(`INSERT INTO members(member_code,full_name,status,role) SELECT 'BLU-'||i,'SYNTHETIC','EXPIRED',CASE WHEN i=1 THEN 'OWNER' WHEN i=2 THEN 'ADMIN' ELSE 'MEMBER' END FROM generate_series(1,4) i;
    INSERT INTO auth_sessions(member_id,token_hash,expires_at) SELECT id,'r7-'||id,now()+interval '1 day' FROM members;

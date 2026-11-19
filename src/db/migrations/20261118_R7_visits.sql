@@ -77,7 +77,9 @@ BEGIN
       SELECT jsonb_build_object('reason',result->>'reason','package',o.package_snapshot,'orderId',o.id,
     'mainTimeSlot',o.package_snapshot->>'timeSlot',
         'usedTimeSlot',CASE WHEN result->>'reason'='FREE_ENTRY' THEN '07:00-22:00'
-         WHEN package_catalog_slot_allows(o.package_snapshot->>'timeSlot',(t AT TIME ZONE 'Asia/Bangkok')::time) THEN o.package_snapshot->>'timeSlot'
+         WHEN package_catalog_slot_allows(o.package_snapshot->>'timeSlot',(t AT TIME ZONE 'Asia/Bangkok')::time)
+           OR (package_catalog_legacy_paid_slot(o.package_snapshot)
+            AND (t AT TIME ZONE 'Asia/Bangkok')::time=right(o.package_snapshot->>'timeSlot',5)::time) THEN o.package_snapshot->>'timeSlot'
          ELSE (SELECT g.daily_slot FROM time_supplement_grants g JOIN time_supplement_activations a USING(coupon_id)
           WHERE g.member_id=m.id AND a.activated_at<=t AND a.expires_at>t
           AND package_catalog_slot_allows(g.daily_slot,(t AT TIME ZONE 'Asia/Bangkok')::time) ORDER BY a.activated_at LIMIT 1) END,

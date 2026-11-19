@@ -14,7 +14,8 @@
 - Production UAT เพิ่ม: ใช้ Playwright เปิด session แยกและล็อกอินด้วยบัญชีทดสอบเดิมจากไฟล์ที่ป้องกันไว้ ไม่เปิดเผยรหัสผ่าน; BLU-4 ADMIN เข้า Dashboard โดยไม่พบยอดเงินหรือฟิลด์ยอดเงินใน HTML ที่ตรวจ, finance export 403, card GET 200; BLU-3 MEMBER ถูกส่งกลับ `/member`, finance export/card 403; ปิด session ทดสอบหลังเสร็จ
 - ผู้ใช้อนุญาต Cloudinary หนึ่งรูป: ส่งรูป PNG สังเคราะห์ผ่านเบราว์เซอร์ OWNER ไปยัง BLU-3 สำเร็จ POST/GET 200, version เพิ่ม 1 และ source `STAFF_UPLOAD`; ไม่อัปโหลดรูปบุคคลจริง
 - Reset concurrency ตรวจแล้วบน PostgreSQL 18.4 จริงแบบ isolated ด้วย `scripts/r2-password-postgres-test.py`: 4/4 ผ่าน ยืนยัน lock wait จริง 4 ครั้ง ครอบคลุม login/reset และ password completion/reset ทั้งสองลำดับ; auth/reset Node tests 41/41 และ TypeScript ผ่าน รายละเอียด `admin-member-password.md`
-- ยังไม่ปิด production R2: reset ยังปิดตาม gate และยังไม่ apply migration; เครื่องนี้ไม่มี Vercel project link, CLI หรือ token ใน environment จึงยังยืนยันการ drain auth รุ่นเก่าและควบคุม flag สำหรับ UAT ไม่ได้ ต้องผ่าน rollout ก่อนเปิด ไม่ถือว่า native test แทน production UAT; สแกน USB จริงพักไว้ตามผู้ใช้สั่ง
+- **R2 software UAT ผ่าน:** ซ้อม restore/rollback บน PostgreSQL ก่อน apply schema reset บน production; ตรวจหลังลงว่าข้อมูลเดิม 41 ตารางไม่เปลี่ยนและ ACL ผ่าน เปิด `ENABLE_ADMIN_PASSWORD_RESET` เฉพาะ Production และ redeploy โค้ด auth ปัจจุบันผ่าน Vercel จากนั้นทดสอบด้วย Playwright: ADMIN BLU-4 เห็นฟอร์มและ reset BLU-3 ผ่าน API 200; MEMBER ถูกปฏิเสธ 403, session เดิมถูกเพิกถอน, login รหัสเดิม 401 และรหัสใหม่ 200, replay 200 ไม่เพิกถอน session ใหม่, UUID เดิมแต่เปลี่ยนเหตุผล 409; คืนรหัสเดิมให้บัญชี UAT และ login ยืนยัน 200. Read-only audit พบ 2 รายการ/2 UUID ตรงกับ reset และคืนรหัส ไม่มีการแก้รหัสลูกค้า
+- สแกนด้วยเครื่อง USB จริงพักไว้ตามผู้ใช้สั่ง ไม่ถือว่าผ่าน hardware UAT และยังไม่เริ่ม R3
 
 - เชื่อม Dashboard ADMIN (ไม่ query หรือส่งข้อมูลเงิน) และฟอร์มบัตร/รูปในหน้าสมาชิกแล้ว; build และชุดเทสรวมก่อน build ผ่าน (มี 1 skip ในชุดรวม; ไม่ใช้แทน production UAT)
 - ซ้อม card/avatar กับ snapshot ที่ป้องกันสิทธิ์บน PostgreSQL จริง: คอลัมน์เดิมครบ 36 ตารางตรงหลัง restore/rollback/commit ในฐานซ้อม, catalog 19 ส่วน, inventory เดิม 2 รายการคงเดิม; runner 7/7 ผ่าน
@@ -172,9 +173,12 @@ pnpm exec eslint --max-warnings 0 src/lib/member-contact-email-server.ts src/lib
 - [ ] ตัดยอดรวม/รายงานเงินออกจาก payload สำหรับ ADMIN รวม dashboard/export; ยังให้ทำยอดเฉพาะรายการที่มีสิทธิ์ได้
 - [ ] ใช้ role เดิม MEMBER/ADMIN/OWNER เท่านั้น ไม่เพิ่มประเภทบุคคล; เพิ่ม/แก้ข้อมูลชื่อ รูป เพศ วันเดือนเกิด อีเมล ข้อมูลฉุกเฉิน และผูกบัตรตาม scope ตรวจ unique เฉพาะ identifier ที่ต้องไม่ซ้ำ (อีเมลติดต่อใช้ร่วมกันได้)
 - [ ] ตั้งรหัสผ่านใหม่ผ่านช่องทาง admin ที่ปลอดภัย เก็บ audit ไม่เผย password/hash/session; คงกติกา OTP เปลี่ยนเบอร์เดิม
-- [ ] CHECKPOINT R2: tests MEMBER/ADMIN/OWNER รวมเรียก URL/API/export ตรง, แก้ไข role ข้ามสิทธิ์, session ถูกระงับ/revoked และข้อมูลส่วนตัว
+- [x] CHECKPOINT R2 ด้านซอฟต์แวร์: ตรวจสิทธิ์ MEMBER/ADMIN/OWNER และ production UAT โปรไฟล์/อีเมล/บัตร/รูป/reset ตามหลักฐานด้านบน; สแกน USB ด้วยเครื่องจริงพักไว้ตามผู้ใช้สั่ง
 
 ### R3 — แพ็กเกจหลักและช่วงเวลา
+
+- ลง schema R3 สี่ migrations แล้ว (catalog → checkin → bonus → override) หลัง fresh backup/native restore/rollback; postflight ผ่านเทียบ 43 ตาราง, 21 sequences, 24 หมวด catalog และ ACL. คงกติกาเช็กอินของ PAID เดิมตรงเวลาปิดและ CLOSED นอกเวลาทำการ; ออเดอร์ใหม่ไม่รวมเวลาปิด. อ่านหลักฐานที่ `R3_PRODUCTION_REHEARSAL.md`
+- เพิ่มโบนัสตาม catalog บวกสูตรเดิมหลังส่วนลด และฟอร์ม override เฉพาะออเดอร์ PAID ที่ยืนยันที่มาได้ ไม่เขียนทับ snapshot เดิม. Native tests และ build ผ่าน. ยังไม่เปิดขายช่วงใหม่/ตั้งโบนัสจริง; ต้องตรวจ deployment และ browser UAT รวมถึงสิทธิ์เสริมก่อนปิด R3
 
 - [ ] เพิ่ม/แก้ไข/ปิดแพ็กเกจ ราคา จำนวนวัน ช่วงเวลา และออฟชั่นเดิม (คูปองพาเพื่อน/เพิ่มวัน/โบนัสตามข้อสรุป) พร้อม version/audit
 - [ ] เอาข้อจำกัด 2 ช่วงเวลา/10 รายการออกให้สอดคล้องทั้ง UI/API/SQL/PromptPay quote/checkin โดยไม่เปิดรับราคาจาก client

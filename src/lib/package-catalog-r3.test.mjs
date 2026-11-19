@@ -81,8 +81,10 @@ test('R3 SQL chain: catalog ACL/audit/replay, immutable quote/settlement and kio
    assert.deepEqual(await one('SELECT * FROM finalize_package_payment($1,$2,$3,$4)',[payment.id,payment.member_id,`r3-${payment.member_id}`,attempt]),finalized);
    return finalized;
   };
-  const original = (await action('list',{},null))[0];
+  const catalogBefore = await action('list',{},null);
+  const original = catalogBefore[0];
   const oldPaid=await settle(await order(original,6));
+  await settle(await order(catalogBefore.find(pkg=>pkg.timeSlot==='07:00-22:00'),5));
   const pendingKey=randomUUID(), pending=await order(original,3,pendingKey);
   const historicalRows=await rows('SELECT * FROM package_payment_orders ORDER BY id');
   const originalCatalog=await rows('SELECT * FROM package_catalog ORDER BY id');
@@ -100,10 +102,11 @@ test('R3 SQL chain: catalog ACL/audit/replay, immutable quote/settlement and kio
   for (const before of previousFunctions) {
    const after=afterFunctions.find(f=>f.oid===before.oid);
    assert.ok(after);
-   assert.deepEqual(['kiosk_checkin','real_frontdesk_checkin'].includes(before.proname)?{...after,body:before.body}:after,before);
+   assert.deepEqual(['kiosk_checkin','real_frontdesk_checkin','guard_package_catalog_order_insert'].includes(before.proname)?{...after,body:before.body}:after,before);
   }
   assert.deepEqual(await rows('SELECT * FROM package_catalog ORDER BY id'),originalCatalog);
   assert.deepEqual(await rows('SELECT * FROM package_payment_orders ORDER BY id'),historicalRows);
+  assert.equal(oldPaid.package_snapshot.r3HalfOpenTimeSlot,undefined);
   for (const slot of [...valid,...invalid.filter(s=>typeof s==='string')]) {
    const value = await one('SELECT package_catalog_daily_slot_valid($1) AS valid',[slot]);
    assert.equal(value.valid, packageCatalogDailySlot(slot)!==null, slot);
@@ -180,7 +183,7 @@ test('R3 SQL chain: catalog ACL/audit/replay, immutable quote/settlement and kio
   ]) assert.equal((await one('SELECT package_catalog_slot_allows($1,$2::time) AS allowed',[slot,time])).allowed,allowed,`${slot} ${time}`);
   // Freeze only test copies of deployed functions, never introduce a client clock.
   const checkinDefinitions=await rows("SELECT proname,pg_get_functiondef(oid) AS body FROM pg_proc WHERE proname IN ('kiosk_checkin','real_frontdesk_checkin')");
-  await db.exec("UPDATE members SET status='ACTIVE',expire_date='2027-12-31' WHERE id IN (4,6); INSERT INTO auth_sessions(member_id,token_hash,expires_at,mode,device_id) VALUES(2,'r3-kiosk',now()+interval '1 day','KIOSK','R3-STATION')");
+  await db.exec("UPDATE members SET status='ACTIVE',expire_date='2027-12-31' WHERE id IN (4,5,6); INSERT INTO auth_sessions(member_id,token_hash,expires_at,mode,device_id) VALUES(2,'r3-kiosk',now()+interval '1 day','KIOSK','R3-STATION')");
   for (const def of checkinDefinitions) {
    assert.match(def.body,/package_catalog_slot_allows\(slot,local_time\)/);
    const token=def.proname==='kiosk_checkin'?'r3-kiosk':'r3-2';
@@ -195,11 +198,20 @@ test('R3 SQL chain: catalog ACL/audit/replay, immutable quote/settlement and kio
     assert.equal((await scan('R3-4')).reason,'BOUNCE');
     await assert.rejects(scan('R3-4',randomUUID(),'r3-3'),/required/);
    }
-   await db.exec(def.body.replace('t:=clock_timestamp()',"t:=timestamptz '2026-11-18 14:00:00+07'"));
-   await db.exec('DELETE FROM kiosk_member_bounce');
-   assert.equal((await scan('R3-6')).reason,'OFF_PEAK');
-   await db.exec(def.body.replace('t:=clock_timestamp()',"t:=timestamptz '2026-11-18 13:59:59+07'"));
-   assert.equal((await scan('R3-6')).reason,'PAID_ENTRY');
+   for (const [time,short,full] of [
+    ['06:59:59.999999','CLOSED','CLOSED'],['07:00:00','PAID_ENTRY','PAID_ENTRY'],
+    ['14:00:00','PAID_ENTRY','PAID_ENTRY'],['14:00:00.000001','OFF_PEAK','PAID_ENTRY'],
+    ['22:00:00','OFF_PEAK','PAID_ENTRY'],['22:00:00.000001','CLOSED','CLOSED'],
+   ]) {
+    await db.exec(def.body.replace('t:=clock_timestamp()',`t:=timestamptz '2026-11-18 ${time}+07'`));
+    await db.exec('DELETE FROM kiosk_member_bounce');
+    for (const [code,reason] of [['R3-6',short],['R3-5',full]]) {
+     const result=await scan(code);
+     assert.equal(result.reason,reason,`${def.proname} ${code} ${time}`);
+     assert.equal(result.ok,reason==='PAID_ENTRY');
+     assert.equal(result.checkinId!==null,result.ok);
+    }
+   }
    await db.exec("UPDATE members SET status='EXPIRED',expire_date='2026-11-17' WHERE id=4; DELETE FROM kiosk_member_bounce");
    assert.equal((await scan('R3-4')).ok,false);
    await db.exec("UPDATE members SET status='SUSPENDED' WHERE id=4");
@@ -211,7 +223,10 @@ test('R3 SQL chain: catalog ACL/audit/replay, immutable quote/settlement and kio
   await db.exec('BEGIN');
   const narrow=await action('create',{...payload,timeSlot:'12:34-18:56'});
   await settle(await order(narrow,7));
-  await db.exec("UPDATE members SET status='ACTIVE',expire_date='2027-12-31' WHERE id=7; INSERT INTO coupons(member_id,type,source,title,total_quota,used_count,created_at,expire_date) VALUES(8,'FREE_ENTRY','WELCOME_REGISTRATION','Synthetic welcome',1,0,'2026-11-17','2026-12-01')");
+  const sameSlot = await action('create',{...payload,timeSlot:'07:00-14:00'});
+  const newPaid = await settle(await order(sameSlot,5));
+  assert.equal(newPaid.package_snapshot.r3HalfOpenTimeSlot,true);
+  await db.exec("UPDATE members SET status='ACTIVE',expire_date='2027-12-31' WHERE id IN (5,7); INSERT INTO coupons(member_id,type,source,title,total_quota,used_count,created_at,expire_date) VALUES(8,'FREE_ENTRY','WELCOME_REGISTRATION','Synthetic welcome',1,0,'2026-11-17','2026-12-01')");
   for (const def of checkinDefinitions) {
    const token=def.proname==='kiosk_checkin'?'r3-kiosk':'r3-2';
    const scan=async code=>(await one(`SELECT ${def.proname}($1,'R3-STATION',$2,$3) AS result`,[token,randomUUID(),code])).result;
@@ -221,7 +236,10 @@ test('R3 SQL chain: catalog ACL/audit/replay, immutable quote/settlement and kio
     assert.equal((await scan('R3-7')).ok,ok,`${def.proname} ${time}`);
    }
    await db.exec(def.body.replace('t:=clock_timestamp()',"t:=timestamptz '2026-11-18 01:00:00+07'"));
+   assert.equal((await scan('R3-5')).reason,'OFF_PEAK');
    assert.equal((await scan('R3-8')).reason,'CLOSED');
+   await db.exec(def.body.replace('t:=clock_timestamp()',"t:=timestamptz '2026-11-18 14:00:00+07'"));
+   assert.equal((await scan('R3-5')).reason,'OFF_PEAK');
    assert.equal((await one('SELECT used_count FROM coupons WHERE member_id=8')).used_count,0);
    await db.exec(def.body.replace('t:=clock_timestamp()',"t:=timestamptz '2026-11-18 07:00:00+07'"));
    assert.equal((await scan('R3-8')).reason,'FREE_ENTRY');

@@ -286,6 +286,8 @@ export default function Home() {
                       )}
                     </div>
 
+                    {(pkg.bonusPoints ?? 0) > 0 && <p className="text-xs font-semibold text-blu-steel">{lang === "en" ? `+${pkg.bonusPoints} package bonus points` : `โบนัสแพ็กเกจ +${pkg.bonusPoints} แต้ม`}</p>}
+
                     {/* 3. Select CTA Button */}
                     <button
                       type="button"

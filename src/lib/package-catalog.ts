@@ -11,9 +11,12 @@ export function packageCatalogDailySlot(value: unknown): { startMinute: number; 
   return start < end ? { startMinute: start, endMinute: end } : null;
 }
 
+export const PACKAGE_BONUS_POINTS_MAX = 1_000_000;
+
 export interface PackageCatalogItem extends Omit<MockPackage, "timeSlot"> {
   timeSlot: string;
   version: number;
   catalogVersion?: number;
   priceSatang?: number;
+  bonusPoints?: number; // Older catalog responses and order snapshots omit it.
 }

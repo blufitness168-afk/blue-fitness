@@ -11,7 +11,7 @@ const code = name => ts.transpileModule(fs.readFileSync(new URL(`./${name}.ts`, 
 const token = 'a'.repeat(64);
 const requestKey = 'A1234567-1234-4123-8123-123456789ABC';
 const valid = { requestKey, id: 2, expectedVersion: 7, name: ' BLU 30 ', label: ' Monthly ', description: 'DB catalog', price: 901.25, durationDays: 30, timeSlot: '07:00-22:00', friendCoupons: 2, bonusDays: 3, isActive: true };
-const packages = [{ id: 2, catalogVersion: 7, name: 'DB only', price: 901.25 }];
+const packages = [{ id: 2, catalogVersion: 7, name: 'DB only', price: 901.25, bonusPoints: 17 }];
 const request = (body = valid, headers = {}) => new Request('https://local/api/admin/packages', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
 const get = () => new Request('https://local/api/admin/packages');
 
@@ -115,6 +115,16 @@ test('OWNER/ADMIN active, pending and expired can list and edit; only hashed tok
   }
 });
 
+test('bonus points preserve explicit zero, integer values and omission in versioned mutations', async () => {
+  for (const bonusPoints of [undefined, 0, 17, 1000000]) {
+    const app = setup();
+    noStore(await app.adminPackages(request({ ...valid, bonusPoints })));
+    const sent = JSON.parse(app.queries[0].values[3]);
+    if (bonusPoints === undefined) assert.equal('bonusPoints' in sent, false);
+    else assert.equal(sent.bonusPoints, bonusPoints);
+  }
+});
+
 test('CSRF and unsupported methods reject before authentication or SQL', async () => {
   for (const req of [request(valid, { Origin: 'https://evil' }), request(valid, { 'Sec-Fetch-Site': 'cross-site' }), new Request('https://local/api/admin/packages', { method: 'DELETE' })]) {
     const app = setup();
@@ -130,6 +140,7 @@ test('strict schema rejects precision, forged fields, invalid UUID, id and expec
   assert.ok(omittedVersion && omittedId);
   for (const body of [missingVersion, missingId, ...[
     { price: 1.001 }, { price: 0 }, { price: -1 }, { price: 1000001 },
+    { bonusPoints: -1 }, { bonusPoints: 1.5 }, { bonusPoints: '2' }, { bonusPoints: null }, { bonusPoints: 1000001 },
     { priceSatang: 1 }, { role: 'OWNER' }, { catalogVersion: 7 }, { requestKey: 'invalid' },
     { id: 0 }, { id: 2147483648 }, { id: 1.5 }, { id: '2' },
     { expectedVersion: 0 }, { expectedVersion: 1.5 }, { expectedVersion: 2147483648 }, { expectedVersion: '7' },

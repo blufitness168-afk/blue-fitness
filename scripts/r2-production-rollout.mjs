@@ -601,10 +601,10 @@ async function applyCardAvatar() {
   return report;
 }
 
-function protectedPasswordDirectory() {
+function protectedPasswordDirectory(prefix='r2-password-schema-') {
   // Do not invoke Git in this mode. Verify the repository exclusion and isolate the new directory.
   if(process.platform!=='win32'||!fs.readFileSync(path.join(root,'.gitignore'),'utf8').split(/\r?\n/).includes('/.local-db/')||!fs.lstatSync(local).isDirectory()||fs.realpathSync(local)!==local)throw new Error('Protected Windows backup directory required');
-  const dir=fs.mkdtempSync(path.join(local,'r2-password-schema-'));
+  const dir=fs.mkdtempSync(path.join(local,prefix));
   try {
     const script=String.raw`
 $ErrorActionPreference='Stop'
@@ -844,4 +844,6 @@ export async function main(args=process.argv.slice(2)) {
   finally{if(db)try{db.close();report.nativeStopped=true;}catch{report.nativeStopped=false;process.exitCode=1;}report.finishedAt=new Date().toISOString();record();console.log(JSON.stringify(report,null,2));}
   return report;
 }
+// Shared recovery primitives; importing this module never runs its CLI.
+export { queries as recoveryQueries, driftCatalog, verifyRows, sequenceStates, protectedPasswordDirectory };
 if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url)main().catch(safeFailure);

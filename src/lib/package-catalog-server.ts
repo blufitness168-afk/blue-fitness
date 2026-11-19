@@ -7,7 +7,7 @@ import { getCurrentMember, SESSION_COOKIE } from "./auth/server";
 import { json, sameOrigin } from "./auth/http";
 import { boundedBody } from "./payment-server";
 import { satang } from "./payment-policy";
-import { packageCatalogDailySlot } from "./package-catalog";
+import { PACKAGE_BONUS_POINTS_MAX, packageCatalogDailySlot } from "./package-catalog";
 
 const catalogFields = {
   requestKey: z.uuid(),
@@ -15,6 +15,7 @@ const catalogFields = {
   price: z.number().positive().max(1000000).refine(value => { try { return satang(value) > 0; } catch { return false; } }),
   durationDays: z.number().int().min(1).max(3660), timeSlot: z.string().refine(value => packageCatalogDailySlot(value) !== null),
   friendCoupons: z.number().int().min(0).max(100), bonusDays: z.number().int().min(0).max(365), isActive: z.boolean(),
+  bonusPoints: z.number().int().min(0).max(PACKAGE_BONUS_POINTS_MAX).optional(),
 };
 const updateSchema = z.object({ ...catalogFields, action: z.literal("update").default("update"),
   id: z.number().int().min(1).max(2147483647), expectedVersion: z.number().int().min(1).max(2147483647),

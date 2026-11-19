@@ -1,15 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { packageCatalogDailySlot, type PackageCatalogItem } from "@/lib/package-catalog";
+import { PACKAGE_BONUS_POINTS_MAX, packageCatalogDailySlot, type PackageCatalogItem } from "@/lib/package-catalog";
 
-type Draft = Omit<PackageCatalogItem, "price"> & { price: string };
+type Draft = Omit<PackageCatalogItem, "price" | "bonusPoints"> & { price: string; bonusPoints: number };
 type Pending = { requestKey: string; body: string; id: number };
 const inputClass = "mt-1 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 disabled:opacity-60 text-sm";
 const buttonClass = "rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold disabled:opacity-50";
 
 function draftOf(item: PackageCatalogItem): Draft {
-  return { ...item, price: String(item.price) };
+  return { ...item, price: String(item.price), bonusPoints: item.bonusPoints ?? 0 };
 }
 
 // Parse decimal digits as satang first; never round an invalid third decimal place.
@@ -109,11 +109,11 @@ export default function PackageCatalogClient() {
       setMessage("ราคาต้องเป็น 0.01–1,000,000 บาท ทศนิยมไม่เกิน 2 ตำแหน่ง");
       return;
     }
-    const ranges = [[draft.durationDays, 1, 3660], [draft.friendCoupons, 0, 100], [draft.bonusDays, 0, 365]];
+    const ranges = [[draft.durationDays, 1, 3660], [draft.friendCoupons, 0, 100], [draft.bonusDays, 0, 365], [draft.bonusPoints, 0, PACKAGE_BONUS_POINTS_MAX]];
     if (ranges.some(([value, min, max]) => !Number.isInteger(value) || value < min || value > max)
       || !draft.name.trim() || !draft.label.trim()
       || !packageCatalogDailySlot(draft.timeSlot)) {
-      setMessage("กรุณาตรวจสอบชื่อ ช่วงเวลา และจำนวนวัน/คูปอง");
+      setMessage("กรุณาตรวจสอบชื่อ ช่วงเวลา จำนวนวัน คูปอง และคะแนนโบนัส");
       return;
     }
     const requestKey = crypto.randomUUID();
@@ -121,7 +121,7 @@ export default function PackageCatalogClient() {
       requestKey, ...(draft.id === 0 ? { action: "create" } : { action: "update", id: draft.id, expectedVersion: draft.version }),
       name: draft.name.trim(), label: draft.label.trim(), durationDays: draft.durationDays,
       timeSlot: draft.timeSlot, price, friendCoupons: draft.friendCoupons,
-      bonusDays: draft.bonusDays, description: draft.description, isActive: draft.isActive,
+      bonusDays: draft.bonusDays, bonusPoints: draft.bonusPoints, description: draft.description, isActive: draft.isActive,
     });
     void send({ requestKey, body, id: draft.id });
   }
@@ -129,7 +129,7 @@ export default function PackageCatalogClient() {
   function handleAddOrActivateClick() {
     setMessage("");
     setDraft({ id: 0, version: 0, name: "", label: "", description: "", price: "",
-      durationDays: 30, timeSlot: selectedSlot || "00:00-24:00", friendCoupons: 0, bonusDays: 0, isActive: true });
+      durationDays: 30, timeSlot: selectedSlot || "00:00-24:00", friendCoupons: 0, bonusDays: 0, bonusPoints: 0, isActive: true });
   }
 
   const disabled = busy || !!pending || loading || needsReload || !!loadError;
@@ -143,6 +143,7 @@ export default function PackageCatalogClient() {
         <h1 className="text-2xl font-black text-blu-dark">จัดการแพ็กเกจ</h1>
         <p className="mt-2 text-sm text-slate-600">เพิ่ม แก้ไข และเปิด/ปิดขายแพ็กเกจ ไม่ลบประวัติซื้อ</p>
         <p className="mt-1 text-sm text-slate-600">ราคาใหม่ใช้กับคำสั่งซื้อใหม่ คำสั่งซื้อเก่าที่รอชำระยังคงราคาและสิทธิ์เดิม วันโบนัสเป็นคูปอง ไม่ได้เพิ่มวันสมาชิกอัตโนมัติ</p>
+                <p className="mt-1 text-sm text-slate-600">คะแนนโบนัสแพ็กเกจบวกเพิ่มจากคะแนนตามยอดชำระจริง และให้เมื่อยืนยันการชำระสำเร็จ</p>
       </header>
 
       <label className="block text-sm">กรองช่วงเวลา
@@ -264,6 +265,8 @@ export default function PackageCatalogClient() {
                   )}
                 </div>
 
+                <p className="text-xs text-blu-steel">คะแนนโบนัส {pkg.bonusPoints ?? 0} แต้ม</p>
+
                 {/* 3. Edit Action Button */}
                 <button
                   type="button"
@@ -376,6 +379,7 @@ export default function PackageCatalogClient() {
                   ["durationDays", "จำนวนวัน (1–3660)", 1, 3660],
                   ["friendCoupons", "คูปองพาเพื่อน (0–100)", 0, 100],
                   ["bonusDays", "วันในคูปองโบนัส (0–365)", 0, 365],
+                  ["bonusPoints", "คะแนนโบนัสแพ็กเกจ", 0, PACKAGE_BONUS_POINTS_MAX],
                 ] as const).map(([key, label, min, max]) => (
                   <label key={key} className="min-w-0 text-sm">
                     {label}
