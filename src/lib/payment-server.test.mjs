@@ -26,6 +26,7 @@ function setup({ authenticated = true, masked = false, timeout = false, failFina
     }
     if (text.includes('create_catalog_package_payment_order')) {
           if (state.staleCatalog) throw Error('Stale catalog version');
+          if (state.staffTerm) throw Object.assign(Error('Private database detail'), { code: 'P4F01' });
           return [state.order];
         }
     if (text.includes('prepare_owner_payment_currency_recheck') || text.includes('prepare_owner_payment_recheck')) { state.recheckPrepared = true; return [{ id: 'offline-attempt' }]; }
@@ -46,6 +47,8 @@ function setup({ authenticated = true, masked = false, timeout = false, failFina
       if (state.order.status !== 'PAID') { state.benefits++; state.order.status = 'PAID'; state.order.paid_at = state.attempt.evidence.paidAt; state.order.membership_expires_at = new Date(Date.now() + 30 * 86400000).toISOString(); }
       return [state.order];
     }
+    if (text.includes('to_regclass')) return [state.schema ?? {}];
+    if (text.includes('r4_online_private.active_paid_orders')) return [state.snapshot];
     if (text.includes('FROM package_payment_orders')) return [state.order];
     if (text.includes('FROM package_payment_attempts')) return state.attempt ? [state.attempt] : [];
     throw Error('Unexpected SQL');
@@ -101,6 +104,17 @@ test('client price, unknown fields, invalid UUID and forged signature are reject
   assert.equal((await app.verifyOrder(upload(), 'invalid')).status, 404);
   assert.equal((await app.verifyOrder(upload({ spoof: true }), orderId)).status, 400);
   assert.equal((await app.verifyOrder(upload({ extra: true }), orderId)).status, 400);
+  assert.equal(app.calls.length, 0);
+});
+test('staff term blocks online checkout with a contact-staff message and no payment details', async () => {
+  const app = setup();
+  app.state.staffTerm = true;
+  const response = await app.createOrder(new Request('https://local/api/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: 2, catalogVersion: 7, requestKey: randomUUID() }) }));
+  assert.equal(response.status, 409);
+  const body = await response.json();
+  assert.deepEqual(Object.keys(body).sort(), ['code', 'error']);
+  assert.equal(body.code, 'STAFF_TERM_PURCHASE_BLOCKED');
+  assert.match(body.error, /ติดต่อเจ้าหน้าที่/);
   assert.equal(app.calls.length, 0);
 });
 test('order creation sends catalog identity and normalized promo only; response uses DB amounts and points', async () => {
@@ -380,4 +394,32 @@ test('POST route delegates cancellation with awaited params; installed claim loc
   assert.match(claim, /SELECT \* INTO o FROM package_payment_orders WHERE id=p_order AND member_id=p_member FOR UPDATE/);
   assert.ok(claim.indexOf('FOR UPDATE') < claim.indexOf('INSERT INTO package_payment_attempts'));
   assert.match(claim, /IF o.status<>'PENDING' THEN RAISE EXCEPTION/);
+});
+
+test('account selects active package separately and keeps cancelled PAID history; absent schema keeps legacy behavior', async () => {
+  const app = setup();
+  const order = app.state.order;
+  order.status = 'PAID';
+  const baseline = await app.paymentAccount();
+  assert.equal(baseline.package.name, order.package_snapshot.name);
+  assert.equal(app.queries.length, 1);
+  app.env.ENABLE_ONLINE_CANCELLATION_READS = 'true';
+  app.state.schema = { history: false, active: false, points: false, cutover: false };
+  assert.deepEqual(await app.paymentAccount(), baseline);
+  app.state.schema.history = true;
+  assert.equal((await app.getPaymentAccount()).status, 503);
+  app.state.schema = { history: true, active: true, points: true, cutover: true };
+  const cancelled_at = '2026-11-26T02:00:00+00:00';
+  app.state.snapshot = { status: 'PENDING', expire_date: null, points: 2, package: null,
+    orders: [{ ...order, cancelled_at, refund_satang: order.amount_satang }] };
+  const account = await app.paymentAccount();
+  assert.equal(account.package, null);
+  assert.equal(account.status, 'PENDING');
+  assert.equal(account.points, 2);
+  assert.equal(account.purchases[0].status, 'PAID');
+  assert.equal(account.purchases[0].cancelledAt, cancelled_at);
+  assert.equal(account.purchases[0].refundSatang, order.amount_satang);
+  assert.match(app.queries.at(-1).text, /active_paid_orders[\s\S]+LEFT JOIN r4_online_private.cancellations/);
+  assert.deepEqual(app.queries.at(-1).values, [1]);
+  assert.equal(app.calls.length, 0);
 });

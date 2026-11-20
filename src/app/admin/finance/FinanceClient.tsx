@@ -268,7 +268,7 @@ export default function FinancePage({ initialData }: { initialData: FinanceData 
               {filtered.map((record, index) => <tr key={record.id} className="hover:bg-blu-ice/30">
                 <td className="px-4 py-3 text-blu-steel">{index + 1}</td><td className="whitespace-nowrap px-4 py-3">{thaiDate(record.date)}</td>
                 <td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${record.type === "INCOME" ? "bg-emerald-500/10 text-emerald-600" : "bg-rose-500/10 text-rose-500"}`}>{record.type === "INCOME" ? "รายรับ" : "รายจ่าย"}</span></td>
-                <td className="px-4 py-3 font-semibold">{record.category}{record.source === "MEMBERSHIP" && <span className="ml-1 block text-[9px] font-normal text-blu-steel">อัตโนมัติ</span>}</td>
+                <td className="px-4 py-3 font-semibold">{record.category}{record.source === "ONLINE_REFUND" && <span className="ml-1 block text-[9px] font-normal text-blu-steel">คืนเงินออนไลน์นอกระบบ · อัตโนมัติ</span>}{record.source === "MEMBERSHIP" && <span className="ml-1 block text-[9px] font-normal text-blu-steel">อัตโนมัติ</span>}</td>
                 <td className="px-4 py-3">{record.memberName ? <><span>{record.memberName}</span><span className="block font-mono text-[9px] text-blu-steel">{record.memberCode}</span></> : "-"}</td>
                 <td className={`whitespace-nowrap px-4 py-3 text-right font-black ${record.type === "INCOME" ? "text-emerald-600" : "text-rose-500"}`}>{record.type === "INCOME" ? "+" : "-"}{money(record.amount)} ฿</td>
                 <td className="max-w-65 px-4 py-3 text-blu-steel">{record.note || "-"}</td>

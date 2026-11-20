@@ -8,14 +8,16 @@ const { outputText } = ts.transpileModule(readFileSync(new URL('./page.tsx', imp
   compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
 });
 
-async function render({ callerRole = 'ADMIN', role = 'MEMBER', state, error } = {}) {
-  const data = { callerRole, member: { memberCode: 'BLU-3', role } };
-  const reads = [];
+async function render({ callerRole = 'ADMIN', dataRole = callerRole, role = 'MEMBER', status = 'ACTIVE', state, error,
+  staffFreeEnabled = false, candidates = [], env = {} } = {}) {
+  const data = { callerRole: dataRole, member: { memberCode: 'BLU-3', role, status } };
+  const reads = [], cancellationReads = [];
   const element = (type, props) => ({ type, props });
   const imports = {
     'react/jsx-runtime': { jsx: element, jsxs: element, Fragment: 'Fragment' },
     'next/navigation': { notFound: () => assert.fail('Member exists') },
     '@/lib/admin-permissions-server': { requireAdminPage: async () => ({ role: callerRole, memberCode: 'BLU-1' }) },
+    '@/lib/online-cancellation-rollout-server': { onlineCancellationEnabled: () => env.ENABLE_ONLINE_CANCELLATION === 'true' && env.ENABLE_ONLINE_CANCELLATION_READS === 'true' },
     '@/lib/admin-members-server': { getAdminMember: async () => data },
     '@/lib/member-contact-email-server': { getMemberContactEmail: async () => ({ version: 1 }) },
     '@/lib/admin-member-password-server': { isAdminPasswordResetEnabled: () => false },
@@ -25,19 +27,27 @@ async function render({ callerRole = 'ADMIN', role = 'MEMBER', state, error } = 
       return state;
     } },
     './StaffAvatarSection': { StaffAvatarSection: 'StaffAvatarSection' },
+    '@/lib/staff-free-server': { isStaffFreeEnabled: () => staffFreeEnabled },
+    '@/lib/staff-free-cancellation-server': { readStaffFreeCancellationCandidates: async code => {
+      cancellationReads.push(code);
+      return candidates;
+    } },
+    '@/lib/staff-free-display-server': { readStaffFreeTerms: async () => [] },
+    '@/components/StaffFreeEntitlement': 'StaffFreeEntitlement',
   };
   for (const name of ['MemberDetailClient', 'AdminMemberProfileForm', 'AdminMemberTimeOverrideForm',
-    'AdminMemberPasswordForm', 'AdminMemberContactEmailForm', 'MemberCardSection']) {
+    'AdminMemberPasswordForm', 'AdminMemberContactEmailForm', 'MemberCardSection', 'StaffFreeSection', 'StaffFreeCancellationSection', 'StaffTransferSection']) {
     imports[`./${name}`] = name;
   }
   const exports = {};
-  vm.runInNewContext(outputText, { exports, require: name => {
+  vm.runInNewContext(outputText, { exports, process: { env }, require: name => {
     assert.ok(name in imports, `Unexpected import: ${name}`);
     return imports[name];
   } });
   const page = await exports.default({ params: Promise.resolve({ memberCode: 'BLU-3' }), searchParams: Promise.resolve({}) });
-  const children = page.props.children.filter(Boolean);
-  return { reads, find: type => children.find(child => child.type === type) };
+  const children = Array.from(page.props.children).filter(Boolean);
+  return { reads, cancellationReads, find: type => children.find(child => child.type === type),
+    transferSections: children.filter(child => child.type === 'StaffTransferSection').map(child => child.props) };
 }
 
 test('ADMIN and OWNER receive the server-loaded override state only for MEMBER targets', async () => {
@@ -72,4 +82,49 @@ test('a successful read without an entitlement is passed to the fragment, not tr
   const { find } = await render({ state });
   assert.equal(find('AdminMemberTimeOverrideForm').props.state, state);
   assert.equal(find('p'), undefined);
+});
+
+test('staff-free form is hidden by default and only enabled for staff viewing a MEMBER', async () => {
+  assert.equal((await render()).find('StaffFreeSection'), undefined);
+  for (const callerRole of ['ADMIN', 'OWNER']) {
+    assert.equal((await render({ callerRole, staffFreeEnabled: true })).find('StaffFreeSection').props.memberCode, 'BLU-3');
+  }
+  assert.equal((await render({ callerRole: 'MEMBER', staffFreeEnabled: true })).find('StaffFreeSection'), undefined);
+  assert.equal((await render({ callerRole: 'OWNER', role: 'ADMIN', staffFreeEnabled: true })).find('StaffFreeSection'), undefined);
+});
+
+test('cancellation lists only for OWNER with flag on and active MEMBER; a list is required to render controls', async () => {
+  const candidates = [{ saleId: '11111111-1111-4111-8111-111111111111', packageName: 'Future',
+    startsAt: '2027-01-01T00:00:00Z', endsAt: '2027-02-01T00:00:00Z' }];
+  const enabled = { callerRole: 'OWNER', staffFreeEnabled: true };
+  for (const opts of [{ staffFreeEnabled: false }, { callerRole: 'ADMIN' }, { role: 'OWNER' }, { status: 'SUSPENDED' }]) {
+    const page = await render({ ...enabled, ...opts, candidates });
+    assert.deepEqual(page.cancellationReads, []);
+    assert.equal(page.find('StaffFreeCancellationSection'), undefined);
+  }
+  const empty = await render(enabled);
+  assert.deepEqual(empty.cancellationReads, ['BLU-3']);
+  assert.equal(empty.find('StaffFreeCancellationSection'), undefined);
+  const page = await render({ ...enabled, candidates });
+  assert.deepEqual(page.cancellationReads, ['BLU-3']);
+  const section = page.find('StaffFreeCancellationSection');
+  assert.equal(section.props.memberCode, 'BLU-3');
+  assert.equal(section.props.candidates, candidates);
+});
+
+test('R4 transfer and cancellation use independent default-off flags and fail closed on role or target mismatch', async () => {
+  const transfer = { ENABLE_STAFF_PAID_TRANSFER: 'true' };
+  const cancellation = { ENABLE_STAFF_PAID_CANCELLATION: 'true' };
+  const both = { ...transfer, ...cancellation };
+  const owner = { callerRole: 'OWNER' };
+  assert.deepEqual((await render(owner)).transferSections, []);
+  assert.deepEqual((await render({ ...owner, env: { ENABLE_STAFF_PAID_TRANSFER: '1', ENABLE_STAFF_PAID_CANCELLATION: 'TRUE' } })).transferSections, []);
+  for (const options of [{ callerRole: 'MEMBER' }, { role: 'ADMIN' }, { status: 'SUSPENDED' }, { dataRole: 'ADMIN' }]) {
+    assert.deepEqual((await render({ ...owner, ...options, env: both })).transferSections, []);
+  }
+  const sections = async options => (await render(options)).transferSections.map(p => [p.mode, p.memberCode, p.canBackdate]);
+  assert.deepEqual(await sections({ env: both }), [['transfer', 'BLU-3', false]]);
+  assert.deepEqual(await sections({ ...owner, env: transfer }), [['transfer', 'BLU-3', true]]);
+  assert.deepEqual(await sections({ ...owner, env: cancellation }), [['cancellation', 'BLU-3', undefined]]);
+  assert.deepEqual(await sections({ ...owner, env: both }), [['transfer', 'BLU-3', true], ['cancellation', 'BLU-3', undefined]]);
 });

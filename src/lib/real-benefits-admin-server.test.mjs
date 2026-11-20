@@ -27,7 +27,7 @@ const request = (body = {}, method = 'POST') => new Request('https://example.tes
 test('all admin operations guarded before SQL; invalid actions/methods fail closed', async () => {
  for (const member of [null, { role: 'OWNER', status: 'SUSPENDED' }, { role: 'MEMBER', status: 'ACTIVE' }]) {
   const api = load(member);
-  for (const action of ['list','create','deactivate','grant','cancel','consume']) {
+  for (const action of ['list','create','deactivate','grant-preview','grant','cancel','consume']) {
    assert.ok([401,403].includes((await api.benefitsAdminAction(request({}, action === 'list' ? 'GET' : 'POST'), action)).status));
   }
   assert.equal(api.calls.length, 0);
@@ -38,6 +38,11 @@ test('all admin operations guarded before SQL; invalid actions/methods fail clos
 });
 test('strict validation: enums, whole amounts, bonus quota, forged actor/amounts', () => {
  const api = load();
+ const preview = { definitionId: 1, memberCode: 'CARD-123', recipientGroup: '30' };
+ assert.deepEqual(api.benefitPayload('grant-preview', preview), preview);
+ assert.equal(api.benefitPayload('grant-preview', { ...preview, requestKey: randomUUID() }), null);
+ assert.equal(api.benefitPayload('grant-preview', { ...preview, recipientGroup: '31' }), null);
+ assert.equal(api.benefitPayload('grant', { definitionId: 1, memberCode: 'BLU-1' }), null);
  const coupon = { kind: 'COUPON', title: 'Bonus', couponType: 'EXTRA_DAYS', quota: 1, bonusDays: 15, expiresAt: '2099-01-01T00:00:00Z' };
  assert.equal(api.benefitPayload('create', coupon).bonusDays, 15);
  for (const patch of [{ couponType: 'BONUS_DAYS' }, { couponType: 'FREE_ENTRY' }, { quota: 2 }, { bonusDays: 0 }, { bonusDays: 1.5 }, { actorId: 2 }]) assert.equal(api.benefitPayload('create', { ...coupon, ...patch }), null);
@@ -53,9 +58,10 @@ test('hashed session, stable idempotency on transient retry, no fake success', a
  const previous = process.env.DATABASE_URL; process.env.DATABASE_URL = 'isolated-mock-only';
  try {
   const api = load(undefined, ['40001','40P01']); const requestKey = randomUUID();
-  assert.equal((await api.benefitsAdminAction(request({ definitionId: 1, memberCode: 'BLU-1', requestKey }), 'grant')).status, 200);
+  assert.equal((await api.benefitsAdminAction(request({ definitionId: 1, memberCode: 'BLU-1', recipientGroup: '30', proof: 'a'.repeat(64), requestKey }), 'grant')).status, 200);
   assert.equal(api.calls.length, 3); assert.deepEqual(api.calls[0], api.calls[2]);
   assert.match(api.calls[0].values[0], /^[a-f0-9]{64}$/); assert.notEqual(api.calls[0].values[0], 'a'.repeat(64));
+  assert.equal(api.calls[0].values[1], 'grant_targeted');
   assert.equal(api.calls[0].values[2], requestKey);
   assert.equal((await load(undefined, ['42501']).benefitsAdminAction(request({}, 'GET'), 'list')).status, 403);
  } finally { if (previous === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previous; }
@@ -83,7 +89,7 @@ test('role response boundary: OWNER retains histories; ADMIN allowlists list and
   });
   const mutations = {
    create: { kind: 'PROMO', title: 'Promo', code: 'SAVE', discountType: 'FIXED', discountValue: 100, minSatang: 0, maxDiscountSatang: null, usageLimit: 2, expiresAt: '2099-01-01T00:00:00Z' },
-   deactivate: { definitionId: 1 }, grant: { definitionId: 1, memberCode: 'BLU-2' }, cancel: { assignmentId: 2 }, consume: { couponId: 3, guestReference: 'guest' },
+   deactivate: { definitionId: 1 }, grant: { definitionId: 1, memberCode: 'BLU-2', recipientGroup: 'ALL', proof: 'a'.repeat(64) }, cancel: { assignmentId: 2 }, consume: { couponId: 3, guestReference: 'guest' },
   };
   const safe = { create: { id: 1 }, deactivate: { definitionId: 1 }, grant: { id: 1 }, cancel: { assignmentId: 2 }, consume: { couponId: 3 } };
   for (const [action, payload] of Object.entries(mutations)) {
@@ -101,6 +107,61 @@ test('role response boundary: OWNER retains histories; ADMIN allowlists list and
   const malformed = load(undefined, [], { definitions: [{ id: { amount_satang: 1 }, title: ['hidden-order'] }], assignments: null, coupons: {} });
   assert.deepEqual((await malformed.benefitsAdminAction(request({}, 'GET'), 'list')).body.data, { definitions: [{}], assignments: [], coupons: [], promoOrders: [], audit: [] });
  } finally { if (previous === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previous; }
+});
+
+test('R6 admin create distinguishes blank, zero and omitted without enabling promo activation', async () => {
+ const previous = process.env.DATABASE_URL; process.env.DATABASE_URL = 'isolated-mock-only';
+ try {
+  const api = load(undefined, [], { couponActivationReady: true, definitions: [{ id: 1, requires_activation: true, activation_duration_minutes: 0 }], coupons: [{ id: 2, activation_status: 'PENDING_ACTIVATION', campaign_expires_at: '2099-01-01' }] });
+  const coupon = { kind: 'COUPON', title: 'Pass', couponType: 'FRIEND_PASS', quota: 1, bonusDays: 0, expiresAt: '2099-01-01T00:00:00Z' };
+  for (const duration of [null, 0, 35, undefined]) {
+   const body = { ...coupon, activationDurationMinutes: duration, requestKey: randomUUID() };
+   assert.equal((await api.benefitsAdminAction(request(body), 'create')).status, 200);
+   const call = api.calls.at(-1);
+   assert.equal(call.values[1], duration === undefined ? 'create' : 'create_r6_coupon');
+   assert.equal(JSON.parse(call.values[3]).activationDurationMinutes, duration);
+  }
+  for (const value of [-1, 1.1, '0', 2147483648]) {
+   assert.equal(api.benefitPayload('create', { ...coupon, activationDurationMinutes: value }), null);
+  }
+  const promo = { kind: 'PROMO', title: 'Promo', code: 'SAVE', discountType: 'FIXED', discountValue: 100, minSatang: 0, maxDiscountSatang: null, usageLimit: 2, expiresAt: coupon.expiresAt };
+  assert.ok(api.benefitPayload('create', promo));
+  assert.equal(api.benefitPayload('create', { ...promo, activationDurationMinutes: null }), null);
+  const { data } = (await api.benefitsAdminAction(request({}, 'GET'), 'list')).body;
+  assert.equal(data.couponActivationReady, true);
+  assert.equal(data.definitions[0].activation_duration_minutes, 0);
+  assert.equal(data.coupons[0].activation_status, 'PENDING_ACTIVATION');
+ } finally { if (previous === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previous; }
+});
+
+test('scoped promo create validates fields, keeps request identity, and filters list responses', async () => {
+ const previous = process.env.DATABASE_URL;
+ process.env.DATABASE_URL = 'stub';
+ try {
+  const allowed = { id: 7, kind: 'PROMO', max_satang: 110000, eligible_package_ids: [2, 7] };
+  const api = load(undefined, ['40001'], { definitions: [allowed, { kind: 'PROMO', eligible_package_ids: [{ amount_satang: 10 }] }], promoOrders: [{ amount_satang: 10 }] });
+  const promo = { kind: 'PROMO', title: 'Scope', code: 'scope', discountType: 'PERCENT', discountValue: 5, minSatang: 99000, maxDiscountSatang: 10000, usageLimit: 1, expiresAt: '2099-01-01T00:00:00Z' };
+  for (const patch of [{ maxSatang: 98999 }, { maxSatang: '110000' }, { eligiblePackageIds: [] }, { eligiblePackageIds: [7, 7] }, { eligiblePackageIds: ['7'] }]) {
+   assert.equal((await api.benefitsAdminAction(request({ ...promo, ...patch, requestKey: randomUUID() }), 'create')).status, 400);
+  }
+  assert.equal(api.calls.length, 0);
+  const requestKey = randomUUID();
+  const response = await api.benefitsAdminAction(request({ ...promo, maxSatang: 110000, eligiblePackageIds: [2, 7], requestKey }), 'create');
+  assert.equal(response.status, 200);
+  assert.match(api.calls[0].text, /r6_create_scoped_promo/);
+  assert.deepEqual(api.calls[0], api.calls[1]);
+  assert.equal(api.calls[0].values[1], requestKey);
+  assert.deepEqual(JSON.parse(api.calls[0].values[2]), { ...promo, code: 'SCOPE', maxSatang: 110000, eligiblePackageIds: [2, 7] });
+  const listed = await api.benefitsAdminAction(request({}, 'GET'), 'list');
+  assert.deepEqual(listed.body.data.definitions, [allowed, { kind: 'PROMO' }]);
+  assert.deepEqual(listed.body.data.promoOrders, []);
+  const missing = load(undefined, ['42883']);
+  assert.equal((await missing.benefitsAdminAction(request({ ...promo, maxSatang: 110000, requestKey }), 'create')).status, 503);
+  assert.equal(missing.calls.length, 1);
+ } finally {
+  if (previous === undefined) delete process.env.DATABASE_URL;
+  else process.env.DATABASE_URL = previous;
+ }
 });
 
 test('production pages detached from browser mocks; quote never uses marketing promos', () => {

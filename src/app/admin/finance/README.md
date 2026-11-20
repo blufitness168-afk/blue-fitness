@@ -34,3 +34,26 @@ An OWNER-only dashboard could call `readRealFinance()` and sum each active retur
 ## Isolated validation
 
 `node --test src/lib/real-finance-server.test.mjs` mocks HTTP SQL calls and runs migration/CRUD assertions in the existing optional PGlite WASM harness. It never connects to DATABASE_URL. If that harness is unavailable, the SQL test explicitly skips. Run eslint on only the finance paths. Isolated TypeScript validation should include installed Next's `index.d.ts` ambient types along with the five finance TS/TSX entrypoints, with noEmit and incremental disabled.
+
+### R4 online cancellation (default off)
+
+Only for the October/R5 finance variants with the complete staff/evidence stack
+required by `20261125_R4_online_cancellation.sql`. Do not assume an R6/R7
+installation is supported by this migration. Under a separately approved rollout:
+
+1. Install the pending database changes on the supported stack and deploy the app
+   with `ENABLE_ONLINE_CANCELLATION_READS=true` and the writer still disabled.
+2. Rehearse current package/history, wallet, and OWNER finance/XLSX with the actual
+   backend role. Once **all serving app instances** use the cutover readers, the
+   trusted migration/backend owner must insert the exact writer interlock:
+   `INSERT INTO r4_online_private.reader_cutover (version) VALUES (1);`
+3. Set `ENABLE_ONLINE_CANCELLATION=true` to expose preview/record to NORMAL OWNER
+   sessions. The record action attests to a full refund already completed outside
+   the app. No provider request is made. For an unconfirmed response, resend the
+   same request rather than refunding again.
+
+To pause new records, turn off `ENABLE_ONLINE_CANCELLATION` and, if pausing at the
+DB, delete `version = 1` from `r4_online_private.reader_cutover`. Keep
+`ENABLE_ONLINE_CANCELLATION_READS=true` and the database reader changes in place
+once there are cancellations. Original income stays; `ONLINE_REFUND` is a
+separate immutable expense and is exported from the same SQL ledger.

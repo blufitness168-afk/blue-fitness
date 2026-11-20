@@ -13,6 +13,8 @@ import { useLanguage } from "@/context/LanguageContext";
 import WelcomeCoupons from "./benefits/WelcomeCoupons";
 import type { WelcomeCoupon } from "@/lib/benefits-server";
 import type { MemberWallet } from "@/lib/real-member-wallet-server";
+import StaffFreeEntitlement from "@/components/StaffFreeEntitlement";
+import type { StaffFreeDisplayTerm } from "@/lib/staff-free-display-server";
 
 const thaiMonths = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
 const enMonths = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -45,7 +47,9 @@ type AccountIdentity = {
   registeredAt: string; status: "PENDING" | "ACTIVE" | "EXPIRED" | "SUSPENDED";
 };
 
-export default function MemberAccountPage({ identity, welcomeCoupons }: { identity: AccountIdentity; welcomeCoupons: WelcomeCoupon[] }) {
+export default function MemberAccountPage({ identity, welcomeCoupons, staffFreeTerms = [] }: {
+  identity: AccountIdentity; welcomeCoupons: WelcomeCoupon[]; staffFreeTerms?: StaffFreeDisplayTerm[];
+}) {
   const router = useRouter();
   const { lang } = useLanguage();
   const isEn = lang === "en";
@@ -130,6 +134,7 @@ export default function MemberAccountPage({ identity, welcomeCoupons }: { identi
   };
 
   const months = isEn ? enMonths : thaiMonths;
+  const legacyMembership = staffFreeTerms.length > 0 && staffFreeTerms.every(term => !term.source);
 
   return <main className="min-h-screen bg-blu-ice pb-28 text-blu-dark">
     <Navbar member={member} onLogout={logout} />
@@ -162,10 +167,13 @@ export default function MemberAccountPage({ identity, welcomeCoupons }: { identi
           </div>
         </section>
         <RealPaymentAccount />
+        <StaffFreeEntitlement terms={staffFreeTerms} isEn={isEn} />
         {wallet && <>
           <section className={cardClass}>
-            <h2 className="font-bold">{isEn ? `Membership Status: ${wallet.status}` : `สถานะสมาชิก: ${wallet.status}`}</h2>
-            <p>{isEn ? "Expiry Date: " : "วันหมดอายุ: "}{wallet.expiresAt ? dateText(wallet.expiresAt, isEn) : (isEn ? "No expiry recorded" : "ไม่มีวันหมดอายุที่บันทึกไว้")}</p>
+            <h2 className="font-bold">{legacyMembership
+              ? (isEn ? `Legacy Membership Status: ${wallet.status}` : `สถานะสมาชิกเดิม: ${wallet.status}`)
+              : (isEn ? `Membership Status: ${wallet.status}` : `สถานะสมาชิก: ${wallet.status}`)}</h2>
+            <p>{legacyMembership ? (isEn ? "Legacy Expiry Date: " : "วันหมดอายุเดิม: ") : (isEn ? "Expiry Date: " : "วันหมดอายุ: ")}{wallet.expiresAt ? dateText(wallet.expiresAt, isEn) : (isEn ? "No expiry recorded" : "ไม่มีวันหมดอายุที่บันทึกไว้")}</p>
           </section>
           <section className={cardClass}>
             <h2 className="font-bold">{isEn ? `Paid Purchases (${wallet.purchases.length} latest)` : `ประวัติการซื้อที่ชำระแล้ว (ล่าสุด 100 รายการ)`}</h2>
@@ -173,7 +181,11 @@ export default function MemberAccountPage({ identity, welcomeCoupons }: { identi
               <article key={item.id} className="border-b py-3 text-sm">
                 <strong>{item.packageName ?? (isEn ? "Package name not specified" : "ไม่มีชื่อแพ็กเกจในรายการ")}</strong>
                 <p>{dateText(item.paidAt, isEn)} · ฿{(item.amountSatang / 100).toLocaleString("th-TH", { minimumFractionDigits: 2 })} · {isEn ? `Earned ${item.pointsEarned} pts` : `ได้ ${item.pointsEarned} คะแนน`}</p>
-                <p>{isEn ? "Active until " : "สมาชิกถึง "}{dateText(item.membershipExpiresAt, isEn)}</p>
+                {item.source === "STAFF_TRANSFER" && <p>{isEn ? "Bank transfer recorded by staff · Starts: " : "โอนเงินบันทึกโดยเจ้าหน้าที่ · เริ่มสิทธิ์: "}{dateText(item.startsAt ?? null, isEn)}</p>}
+                {item.source === "ONLINE_PAID" && item.cancelledAt ? <p className="text-amber-900">
+                  {isEn ? "Cancelled · full refund recorded externally: " : "ยกเลิกแล้ว · บันทึกคืนเงินเต็มจำนวนนอกระบบ: "}
+                  {dateText(item.cancelledAt, isEn)}{item.refundSatang != null && ` · ฿${(item.refundSatang / 100).toFixed(2)}`}
+                </p> : <p>{isEn ? "Active until " : "สมาชิกถึง "}{dateText(item.membershipExpiresAt, isEn)}</p>}
               </article>
             ))}
             {!wallet.purchases.length && <p>{isEn ? "No paid purchases yet" : "ยังไม่มีรายการซื้อที่ชำระแล้ว"}</p>}
@@ -206,6 +218,7 @@ export default function MemberAccountPage({ identity, welcomeCoupons }: { identi
               <strong>{coupon.title}</strong>
               <p>{couponStatus(coupon, isEn)} · {isEn ? `Used ${coupon.usedCount}/${coupon.totalQuota}` : `ใช้แล้ว ${coupon.usedCount}/${coupon.totalQuota} ครั้ง`}</p>
               <p>{isEn ? "Expires: " : "หมดอายุ: "}{coupon.expiresAt ? dateText(coupon.expiresAt, isEn) : (isEn ? "No expiry" : "ไม่ระบุ")}</p>
+              {coupon.campaignExpiresAt && <Link className="underline" href="/member/benefits">{isEn ? "Open coupon wallet" : "เปิดกระเป๋าคูปอง"}</Link>}
             </article>
           ))}
           {!wallet.coupons.some(otherCoupon) && <p>{isEn ? "No other coupons recorded" : "ไม่มีคูปองอื่นที่บันทึกไว้"}</p>}
@@ -357,5 +370,6 @@ function otherCoupon(coupon: MemberWallet["coupons"][number]) {
 function couponStatus(coupon: MemberWallet["coupons"][number], isEn = false) {
   if (coupon.status === "USED" || coupon.usedCount >= coupon.totalQuota) return isEn ? "Fully Redeemed" : "ใช้ครบแล้ว";
   if (coupon.status === "EXPIRED" || (coupon.expiresAt && Date.parse(coupon.expiresAt) <= Date.now())) return isEn ? "Expired" : "หมดอายุ";
+  if (coupon.status === "PENDING_ACTIVATION") return isEn ? "Activation required" : "รอเปิดใช้";
   return coupon.status === "AVAILABLE" ? (isEn ? "Available" : "ใช้ได้") : coupon.status;
 }

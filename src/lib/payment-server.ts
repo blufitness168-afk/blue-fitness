@@ -7,6 +7,7 @@ import { json, sameOrigin } from "./auth/http";
 import { generatePromptPayPayload } from "./promptpay";
 import { MAX_SLIP_BYTES, paymentReadiness, validateSlip, validImageSignature, type Receiver, type PaymentQuote } from "./payment-policy";
 import { z } from "zod";
+import { onlineCancellationReads } from "./online-cancellation-rollout-server";
 
 const uuid = z.string().uuid();
 const createInput = z.object({ packageId: z.number().int().positive(), promoCode: z.string().max(40).default(""), requestKey: uuid, catalogVersion: z.number().int().positive() }).strict();
@@ -80,6 +81,7 @@ export async function createOrder(request: Request) {
     const rows = await sql`SELECT * FROM create_catalog_package_payment_order(${randomUUID()}::uuid, ${auth.member.id}, ${auth.digest}, ${parsed.data.requestKey}::uuid, ${JSON.stringify(quote)}::jsonb, ${JSON.stringify(receiver)}::jsonb)`;
     return json({ order: publicOrder(rows[0] as PaymentOrder) }, 201);
   } catch (error) {
+    if ((error as { code?: string } | null)?.code === "P4F01") return json({ code: "STAFF_TERM_PURCHASE_BLOCKED", error: "ยังซื้อแพ็กเกจเพิ่มออนไลน์ไม่ได้ เนื่องจากมีสิทธิ์ต่ออายุจากเจ้าหน้าที่ กรุณาติดต่อเจ้าหน้าที่" }, 409);
     if ((error as { message?: string }).message === "Stale catalog version") return json({ code: "PACKAGE_CATALOG_CHANGED", error: "แพ็กเกจมีการเปลี่ยนราคา/สิทธิ์แล้ว กรุณาปิดหน้าต่างและโหลดแพ็กเกจใหม่ก่อนยืนยัน" }, 409);
     return json({ error: "สร้างคำสั่งซื้อไม่ได้ กรุณาโหลดรายการค้างก่อน (อาจมีรายการค้าง/โควตาเต็ม/ระบบยังไม่พร้อม)" }, 409);
   }
@@ -146,7 +148,21 @@ export async function paymentAccount() {
   const auth = await identity();
   if (!auth) throw Error("Unauthorized");
   const sql = sqlClient();
-  const orders = await sql`SELECT * FROM package_payment_orders WHERE member_id = ${auth.member.id} ORDER BY created_at DESC LIMIT 30`;
+  const onlineReads = await onlineCancellationReads(sql);
+  // The restored aggregate, current package and immutable history share one snapshot.
+  const [snapshot] = onlineReads ? await sql`
+    SELECT m.status, m.expire_date, m.points,
+      (SELECT a.package_snapshot FROM r4_online_private.active_paid_orders a
+       WHERE a.member_id = m.id ORDER BY a.created_at DESC, a.id DESC LIMIT 1) AS package,
+      COALESCE((SELECT jsonb_agg(to_jsonb(h) ORDER BY h.created_at DESC, h.id DESC) FROM (
+        SELECT o.*, c.cancelled_at, c.refund_satang
+        FROM package_payment_orders o LEFT JOIN r4_online_private.cancellations c ON c.order_id = o.id
+        WHERE o.member_id = m.id ORDER BY o.created_at DESC, o.id DESC LIMIT 30
+      ) h), '[]'::jsonb) AS orders
+    FROM members m WHERE m.id = ${auth.member.id} AND m.status <> 'SUSPENDED'` : [];
+  if (onlineReads && !snapshot) throw Error("Unauthorized");
+  const orders = (snapshot ? snapshot.orders : await sql`SELECT * FROM package_payment_orders WHERE member_id = ${auth.member.id} ORDER BY created_at DESC LIMIT 30`) as
+    (PaymentOrder & { cancelled_at?: string | null; refund_satang?: number | null })[];
   const paid = orders.filter(o => o.status === "PAID");
   const pending = orders.find(o => o.status === "PENDING");
   let ownerRecheckAvailable = false, ownerRecheckPrepared = false;
@@ -156,9 +172,11 @@ export async function paymentAccount() {
     ownerRecheckAvailable = attempts[0]?.state === "REJECTED" && attempts[0]?.rejection_reason === "PROVIDER_VALIDATION_FAILED" && attempts[0]?.provider_calls === 1 && !audits[0];
     ownerRecheckPrepared = !!audits[0] && attempts[0]?.state === "UNKNOWN" && attempts[0]?.provider_calls === 1;
   }
-  return { memberCode: auth.member.memberCode, status: auth.member.status === "ACTIVE" && (!auth.member.expireDate || auth.member.expireDate.getTime() <= Date.now()) ? "EXPIRED" : auth.member.status, expiresAt: auth.member.expireDate?.toISOString() ?? null,
-    points: auth.member.points, package: paid[0]?.package_snapshot ?? null,
-    purchases: paid.map(o => publicOrder(o as PaymentOrder)),
+  const status = snapshot ? snapshot.status : auth.member.status;
+  const expiry = snapshot ? (snapshot.expire_date == null ? null : new Date(snapshot.expire_date)) : auth.member.expireDate;
+  return { memberCode: auth.member.memberCode, status: status === "ACTIVE" && (!expiry || expiry.getTime() <= Date.now()) ? "EXPIRED" : status, expiresAt: expiry?.toISOString() ?? null,
+    points: snapshot ? snapshot.points : auth.member.points, package: snapshot ? snapshot.package : paid[0]?.package_snapshot ?? null,
+    purchases: paid.map(o => ({ ...publicOrder(o), ...(o.cancelled_at ? { cancelledAt: o.cancelled_at, refundSatang: o.refund_satang } : {}) })),
     readiness: paymentReadiness(process.env),
     pendingOrder: pending ? publicOrder(pending as PaymentOrder) : null, ownerRecheckAvailable, ownerRecheckPrepared };
 }

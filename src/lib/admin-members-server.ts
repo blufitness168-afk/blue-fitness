@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import { cookies } from "next/headers";
 import { SESSION_COOKIE } from "./auth/server";
 import { requireAdminPage } from "./admin-permissions-server";
+import { onlineCancellationReads } from "./online-cancellation-rollout-server";
+import { staffPaidReadsEnabled } from "./staff-paid-rollout-server";
 
 export interface MemberRow {
   memberCode: string; fullName: string; nickname: string | null; phone: string;
@@ -13,7 +15,7 @@ export interface MemberRow {
 export interface OrderRow {
   id: string; packageName: string; amountSatang?: number | null; status: string;
   timeSlot: string | null; membershipStartsAt: string | null;
-  createdAt: string; paidAt?: string | null; membershipExpiresAt: string | null;
+  createdAt: string; paidAt?: string | null; membershipExpiresAt: string | null; cancelledAt: string | null;
 }
 export interface CheckinRow { id: number; checkinTime: string; scannerType: string; }
 export interface CouponRow {
@@ -41,7 +43,7 @@ async function memberReader(path = "/admin/members") {
     strings[strings.length - 1] += ") AS result";
     return database(Object.assign(strings, { raw: strings.slice() }) as unknown as TemplateStringsArray, digest, caller.id, caller.role, ...values);
   };
-  return { sql, callerRole: caller.role };
+  return { sql, fragment: database, callerRole: caller.role };
 }
 function memberProfile(row: Record<string, unknown>): MemberRow {
   return { memberCode: row.memberCode, fullName: row.fullName, nickname: row.nickname, phone: row.phone,
@@ -64,7 +66,8 @@ export function monthRange(input?: string, now = new Date()) {
   return { month, start: `${month}-01T00:00:00+07:00`, end: `${number === 12 ? year + 1 : year}-${String(number === 12 ? 1 : number + 1).padStart(2, "0")}-01T00:00:00+07:00` };
 }
 export async function getAdminMembers(query = "", pageInput = "1") {
-  const { sql, callerRole } = await memberReader();
+  const { sql, fragment, callerRole } = await memberReader();
+  const expiry = staffPaidReadsEnabled() ? fragment`COALESCE(r4_staff_private.paid_active_expiry(id, now()), expire_date)` : fragment`expire_date`;
   const q = query.trim().slice(0, 100);
   // Escape LIKE metacharacters so search terms are literal, not wildcard expressions.
   const pattern = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
@@ -74,7 +77,7 @@ export async function getAdminMembers(query = "", pageInput = "1") {
   const pages = Math.max(1, Math.ceil(total / 50));
   const page = Math.min(pages, Math.max(1, Number.isSafeInteger(Number(pageInput)) ? Number(pageInput) : 1));
   const rows = await sql`SELECT member_code AS "memberCode", full_name AS "fullName", nickname, phone, gender, role, status,
-    expire_date AS "expireDate", created_at AS "createdAt", points FROM members
+    ${expiry} AS "expireDate", created_at AS "createdAt", points FROM members
     WHERE full_name ILIKE ${pattern} OR member_code ILIKE ${pattern} OR phone ILIKE ${pattern}
     ORDER BY created_at DESC, id DESC LIMIT 50 OFFSET ${(page - 1) * 50}`;
   return { members: rows.map(memberProfile), callerRole, total, page, pages, query: q, asOf: Date.now() };
@@ -88,21 +91,40 @@ function historyResult<T>(rows: T[], page: number) {
   return { rows: rows.slice(0, 100), page, hasNext: rows.length > 100 };
 }
 export async function getAdminMember(memberCode: string, input: MemberHistoryInput = {}) {
-  const { sql, callerRole } = await memberReader();
+  const { sql, fragment, callerRole } = await memberReader();
+  const r4Reads = staffPaidReadsEnabled();
+  const expiry = r4Reads ? fragment`COALESCE(r4_staff_private.paid_active_expiry(id, now()), expire_date)` : fragment`expire_date`;
   const [member] = await sql`SELECT id, member_code AS "memberCode", full_name AS "fullName", nickname, phone, gender, role, status,
-    expire_date AS "expireDate", created_at AS "createdAt", points, birth_day AS "birthDay", birth_month AS "birthMonth",
+    ${expiry} AS "expireDate", created_at AS "createdAt", points, birth_day AS "birthDay", birth_month AS "birthMonth",
     emergency_name AS "emergencyName", emergency_phone AS "emergencyPhone", emergency_relation AS "emergencyRelation"
     FROM members WHERE member_code = ${memberCode} LIMIT 1`;
   if (!member) return null;
+  const onlineReads = await onlineCancellationReads(fragment);
+  // The staff view needs only the cancellation date. Neither projection reads refund money.
+  const onlineHistorySource = onlineReads ? fragment`package_payment_orders o LEFT JOIN (
+    SELECT order_id, cancelled_at FROM r4_online_private.cancellations
+  ) c ON c.order_id = o.id` : fragment`package_payment_orders`;
   const pages = { orders: historyPage(input.ordersPage), checkins: historyPage(input.checkinsPage), coupons: historyPage(input.couponsPage) };
   const [orders, checkins, coupons] = await Promise.all([
     callerRole === "OWNER"
-      ? sql`SELECT id, package_snapshot->>'name' AS "packageName", package_snapshot->>'timeSlot' AS "timeSlot",
-        amount_satang AS "amountSatang", status, created_at AS "createdAt", paid_at AS "paidAt", membership_expires_at AS "membershipExpiresAt"
-        FROM package_payment_orders WHERE member_id = ${member.id} ORDER BY created_at DESC, id DESC LIMIT 101 OFFSET ${(pages.orders - 1) * 100}`
-      : sql`SELECT id, package_snapshot->>'name' AS "packageName", package_snapshot->>'timeSlot' AS "timeSlot",
-        status, created_at AS "createdAt", membership_expires_at AS "membershipExpiresAt"
-        FROM package_payment_orders WHERE member_id = ${member.id} ORDER BY created_at DESC, id DESC LIMIT 101 OFFSET ${(pages.orders - 1) * 100}`,
+      ? sql`SELECT id, "packageName", "timeSlot", "amountSatang", status, "createdAt", "paidAt", "membershipStartsAt", "membershipExpiresAt", "cancelledAt" FROM (
+        SELECT id::text AS id, package_snapshot->>'name' AS "packageName", package_snapshot->>'timeSlot' AS "timeSlot",
+          amount_satang AS "amountSatang", status::text AS status, created_at AS "createdAt", paid_at AS "paidAt",
+          NULL::timestamptz AS "membershipStartsAt", membership_expires_at AS "membershipExpiresAt", ${onlineReads ? fragment`c.cancelled_at` : fragment`NULL::timestamptz`} AS "cancelledAt"
+        FROM ${onlineHistorySource} WHERE member_id = ${member.id}
+        ${r4Reads ? fragment`UNION ALL
+        SELECT 'staff-transfer:' || sale_id, package_name, daily_slot, amount_satang, 'STAFF_TRANSFER', recorded_at, occurred_at, starts_at, ends_at, cancelled_at
+        FROM r4_staff_private.paid_history WHERE member_id = ${member.id}` : fragment``}
+      ) history ORDER BY "createdAt" DESC, id DESC LIMIT 101 OFFSET ${(pages.orders - 1) * 100}`
+      : sql`SELECT id, "packageName", "timeSlot", status, "createdAt", "membershipStartsAt", "membershipExpiresAt", "cancelledAt" FROM (
+        SELECT id::text AS id, package_snapshot->>'name' AS "packageName", package_snapshot->>'timeSlot' AS "timeSlot",
+          status::text AS status, created_at AS "createdAt",
+          NULL::timestamptz AS "membershipStartsAt", membership_expires_at AS "membershipExpiresAt", ${onlineReads ? fragment`c.cancelled_at` : fragment`NULL::timestamptz`} AS "cancelledAt"
+        FROM ${onlineHistorySource} WHERE member_id = ${member.id}
+        ${r4Reads ? fragment`UNION ALL
+        SELECT 'staff-transfer:' || sale_id, package_name, daily_slot, 'STAFF_TRANSFER', recorded_at, starts_at, ends_at, cancelled_at
+        FROM r4_staff_private.paid_history WHERE member_id = ${member.id}` : fragment``}
+      ) history ORDER BY "createdAt" DESC, id DESC LIMIT 101 OFFSET ${(pages.orders - 1) * 100}`,
     sql`SELECT id, checkin_time AS "checkinTime", scanner_type AS "scannerType" FROM checkins
       WHERE member_id = ${member.id} ORDER BY checkin_time DESC, id DESC LIMIT 101 OFFSET ${(pages.checkins - 1) * 100}`,
     sql`SELECT id, title, type, status, total_quota AS "totalQuota", used_count AS "usedCount", expire_date AS "expireDate"
@@ -115,7 +137,9 @@ export async function getAdminMember(memberCode: string, input: MemberHistoryInp
     orders: historyResult(orders.map(row => ({ id: row.id, packageName: row.packageName, status: row.status,
       createdAt: row.createdAt, timeSlot: row.timeSlot ?? null,
       // Legacy orders do not record the actual entitlement start; do not infer it from payment time.
-      membershipStartsAt: null, membershipExpiresAt: row.membershipExpiresAt,
+      membershipStartsAt: row.status === "STAFF_TRANSFER" ? row.membershipStartsAt : null,
+      membershipExpiresAt: row.membershipExpiresAt,
+      cancelledAt: row.status === "STAFF_TRANSFER" || (onlineReads && row.status === "PAID") ? row.cancelledAt ?? null : null,
       ...(callerRole === "OWNER" ? { amountSatang: row.amountSatang, paidAt: row.paidAt } : {})
     })) as OrderRow[], pages.orders),
     checkins: historyResult(checkins.map(row => ({ id: row.id, checkinTime: row.checkinTime, scannerType: row.scannerType })) as CheckinRow[], pages.checkins),

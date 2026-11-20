@@ -5,8 +5,16 @@ import { createRequire, Module } from 'node:module';
 import { createHash } from 'node:crypto';
 import ts from 'typescript';
 import { spawnSync } from 'node:child_process';
+import { runInNewContext } from 'node:vm';
+import { NeonQueryPromise, SqlTemplate } from '@neondatabase/serverless';
 const require = createRequire(import.meta.url);
-function setup({ allowed = true, role = 'OWNER', results = [], fail = false, state = {}, beforeRead } = {}) {
+const rolloutSource = ts.transpileModule(readFileSync(new URL('./staff-paid-rollout-server.ts', import.meta.url), 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS },
+}).outputText;
+
+function setup({ allowed = true, role = 'OWNER', results = [], fail = false, state = {}, beforeRead, reads, onlineReads = false } = {}) {
+  const rollout = {};
+  runInNewContext(rolloutSource, { exports: rollout, require: () => ({}), process: { env: { ENABLE_STAFF_PAID_READS: reads } } });
   const calls = [], guards = [];
   const token = 'a'.repeat(64), digest = createHash('sha256').update(token).digest('hex');
   const member = { id: 99, role: allowed ? role : 'MEMBER', status: 'ACTIVE', passwordHash: 'never-serialize' };
@@ -19,17 +27,21 @@ function setup({ allowed = true, role = 'OWNER', results = [], fail = false, sta
   const db = { select: () => ({ from: () => ({ innerJoin: () => ({ where: condition => ({ limit: async () => condition ? [{ member, session }] : [] }) }) }) }) };
   const cache = new Map();
   const mocks = {
-    'server-only': {},
+    'server-only': {}, './staff-paid-rollout-server': rollout, './online-cancellation-rollout-server': { onlineCancellationReads: async () => onlineReads },
     'next/headers': { cookies: async () => ({ get: () => state.cookie === null ? undefined : ({ value: state.cookie ?? token }) }) },
     'next/navigation': { redirect: path => { throw new Error(`redirect:${path}`); } },
     '@/db': { db }, '@/db/schema': schema,
     'drizzle-orm': { eq: (a, b) => value(a) === value(b), gt: (a, b) => value(a) > value(b), isNull: a => value(a) === null, and: (...conditions) => conditions.every(Boolean) },
     './password': {}, './policy': {},
-    '@neondatabase/serverless': { neon: () => async (parts, ...values) => {
+    '@neondatabase/serverless': { neon: () => (parts, ...args) => {
+      if (!parts[0].startsWith('WITH authorized')) {
+        return new NeonQueryPromise(async () => { throw new Error('Unexpected standalone SQL'); }, new SqlTemplate(parts, args));
+      }
       assert.ok(guards.length, 'authorize before SQL');
-      const text = parts.join('?');
+      const { query, params: values } = new SqlTemplate(parts, args).toParameterizedQuery();
+      const text = query.replace(/\$\d+/g, '?');
       calls.push({ text, values });
-      if (fail) throw new Error('database unavailable');
+      if (fail) return Promise.reject(new Error('database unavailable'));
       beforeRead?.({ member, session, index: calls.length - 1 });
       if (text.includes('WITH authorized')) {
         for (const predicate of ["s.token_hash =", "actor.id =", "actor.role::text =", "actor.role IN ('ADMIN', 'OWNER')", "actor.status <> 'SUSPENDED'", 's.revoked_at IS NULL', 's.expires_at > now()', "s.mode = 'NORMAL'"]) assert.ok(text.includes(predicate), predicate);
@@ -114,7 +126,7 @@ test('SQL rechecks session and exact role even when authorization changes after 
 test('ADMIN SQL never selects financial fields and allowlisted payload drops unexpected secrets; OWNER retains amounts', async () => {
   const secret = { amountSatang: 99000, subtotalSatang: 99000, discountSatang: 1, provider: 'private', slipUrl: 'private', passwordHash: 'private', tokenHash: 'private', verificationSnapshot: 'private' };
   for (const role of ['ADMIN', 'OWNER']) {
-    const s = setup({ role, results: [[{ id: 7, memberCode: 'BLU-7', phone: 'staff-visible', emergencyName: 'Contact', emergencyPhone: 'staff-visible', ...secret }], [{ id: 'order', packageName: 'Package', timeSlot: '07:00-14:00', status: 'PAID', paidAt: '2026-01-01', ...secret }], [{ id: 1, ...secret }], [{ id: 2, ...secret }]] });
+    const s = setup({ role, reads: 'true', results: [[{ id: 7, memberCode: 'BLU-7', phone: 'staff-visible', emergencyName: 'Contact', emergencyPhone: 'staff-visible', ...secret }], [{ id: 'order', packageName: 'Package', timeSlot: '07:00-14:00', status: 'PAID', paidAt: '2026-01-01', ...secret }], [{ id: 1, ...secret }], [{ id: 2, ...secret }]] });
     const data = await s.getAdminMember('BLU-7');
     assert.equal(data.member.emergencyName, 'Contact');
     assert.equal(data.member.phone, 'staff-visible');
@@ -129,10 +141,63 @@ test('ADMIN SQL never selects financial fields and allowlisted payload drops une
       assert.equal(data.orders.rows[0].amountSatang, 99000);
       assert.match(s.calls[1].text, /amount_satang/);
     }
-    const list = setup({ role, results: [[{ total: 1 }], [{ memberCode: 'BLU-7', ...secret }]] });
+    const list = setup({ role, reads: 'true', results: [[{ total: 1 }], [{ memberCode: 'BLU-7', ...secret }]] });
     assert.doesNotMatch(JSON.stringify(await list.getAdminMembers()), /amount|private|password|slip|provider/);
+    for (const call of [list.calls[1], s.calls[0]]) assert.match(call.text, /r4_staff_private\.paid_active_expiry\(id, now\(\)\)/);
+    assert.match(s.calls[1].text, /UNION ALL[\s\S]*FROM r4_staff_private\.paid_history WHERE member_id = \?/);
   }
 });
+test('staff transfer history retains canceled and uncanceled sales for both roles with original owner-only amounts', async () => {
+  const transfer = {
+    id: 'staff-transfer:7', status: 'STAFF_TRANSFER', packageName: 'Transfer', timeSlot: '07:00-14:00',
+    createdAt: '2026-11-20T09:00:00Z', paidAt: '2026-11-20T08:00:00Z',
+    membershipStartsAt: '2026-12-01T09:00:00Z', membershipExpiresAt: '2027-01-01T09:00:00Z',
+    amountSatang: 99000, cancelledAt: '2026-11-22T09:00:00Z',
+  };
+  const uncanceled = { ...transfer, id: 'staff-transfer:6', cancelledAt: null };
+  for (const role of ['ADMIN', 'OWNER']) {
+    const s = setup({ role, reads: 'true', results: [[{ id: 7 }], [transfer, uncanceled], [], []] });
+    const { orders } = await s.getAdminMember('BLU-7');
+    assert.deepEqual(JSON.parse(JSON.stringify(orders.rows)), [transfer, uncanceled].map(row => {
+      const { amountSatang, paidAt, ...common } = row;
+      return role === 'OWNER' ? { ...common, amountSatang, paidAt } : common;
+    }));
+    const history = s.calls[1].text;
+    assert.match(history, /SELECT id,[^\n]*"cancelledAt" FROM/);
+    assert.match(history, /NULL::timestamptz AS "cancelledAt"\s+FROM package_payment_orders/);
+    assert.match(history, /starts_at, ends_at, cancelled_at\s+FROM r4_staff_private\.paid_history WHERE member_id = \?\s*\) history ORDER BY "createdAt" DESC, id DESC LIMIT 101/);
+    if (role === 'ADMIN') assert.doesNotMatch(history, /amount_satang|paid_at|occurred_at/);
+    else assert.match(history, /daily_slot, amount_satang, 'STAFF_TRANSFER', recorded_at, occurred_at/);
+  }
+});
+test('default-off admin list and detail read legacy expiry and online orders for both roles', async () => {
+  for (const [role, reads] of [['OWNER', undefined], ['ADMIN', 'TRUE']]) {
+    const expireDate = '2026-12-01';
+    const member = { id: 7, memberCode: 'BLU-7', expireDate };
+    const order = { id: 'online-order', status: 'PAID', amountSatang: 3000, paidAt: '2026-11-20' };
+    const s = setup({ role, reads, results: [[{ total: 1 }], [member], [member], [order], [], []] });
+    assert.equal((await s.getAdminMembers()).members[0].expireDate, expireDate);
+    const detail = await s.getAdminMember('BLU-7', { ordersPage: '2' });
+    assert.equal(detail.member.expireDate, expireDate);
+    assert.equal(detail.orders.rows[0].id, 'online-order');
+    assert.equal(detail.orders.rows[0].membershipStartsAt, null);
+    assert.equal(detail.orders.rows[0].cancelledAt, null);
+    for (const call of s.calls) assert.doesNotMatch(call.text, /r4_staff_private|STAFF_TRANSFER/);
+    for (const call of s.calls.slice(1, 3)) assert.match(call.text, /expire_date AS "expireDate"/);
+    const history = s.calls[3];
+    assert.match(history.text, /FROM package_payment_orders WHERE member_id = \?/);
+    assert.deepEqual(history.values.slice(3), [7, 100]);
+    if (role === 'OWNER') {
+      assert.match(history.text, /amount_satang/);
+      assert.equal(detail.orders.rows[0].amountSatang, order.amountSatang);
+    } else {
+      assert.doesNotMatch(history.text, /amount_satang|paid_at/);
+      assert.ok(!Object.hasOwn(detail.orders.rows[0], 'paidAt'));
+      assert.ok(!Object.hasOwn(detail.orders.rows[0], 'amountSatang'));
+    }
+  }
+});
+
 test('sidebar automatically includes members through the shared permission helper; role mutations remain owner-only', async () => {
   const shell = readFileSync(new URL('../app/admin/AdminShell.tsx', import.meta.url), 'utf8');
   assert.match(shell, /href: "\/admin\/members"/);
@@ -179,11 +244,11 @@ test('missing detail returns null; detail binds member ID and limits history', a
   const missing = setup();
   assert.equal(await missing.getAdminMember('not-found'), null);
   assert.equal(missing.calls.length, 1);
-  const s = setup({ results: [[{ id: 7, memberCode: 'BLU-7', fullName: 'Real member' }], [], [], []] });
+  const s = setup({ reads: 'true', results: [[{ id: 7, memberCode: 'BLU-7', fullName: 'Real member' }], [], [], []] });
   const data = await s.getAdminMember('BLU-7');
   assert.equal(data.member.id, undefined);
-  for (const call of s.calls.slice(1)) {
-    assert.deepEqual(call.values.slice(3), [7, 0]);
+  for (const [index, call] of s.calls.slice(1).entries()) {
+    assert.deepEqual(call.values.slice(3), index === 0 ? [7, 7, 0] : [7, 0]);
     assert.match(call.text, /LIMIT 101 OFFSET/);
   }
 });
@@ -196,9 +261,9 @@ test('history pagination validates untrusted query values without unsafe offsets
 });
 test('each history has independent offsets and strips the lookahead row', async () => {
   const rows = Array.from({ length: 101 }, (_, id) => ({ id }));
-  const s = setup({ results: [[{ id: 7, memberCode: 'BLU-7' }], rows, rows.slice(0, 100), []] });
+  const s = setup({ reads: 'true', results: [[{ id: 7, memberCode: 'BLU-7' }], rows, rows.slice(0, 100), []] });
   const data = await s.getAdminMember('BLU-7', { ordersPage: '2', checkinsPage: '3', couponsPage: '4' });
-  assert.deepEqual(s.calls.slice(1).map(c => c.values.slice(3)), [[7, 100], [7, 200], [7, 300]]);
+  assert.deepEqual(s.calls.slice(1).map(c => c.values.slice(3)), [[7, 7, 100], [7, 200], [7, 300]]);
   assert.equal(data.orders.rows.length, 100);
   assert.equal(data.orders.hasNext, true);
   assert.equal(data.orders.page, 2);
@@ -207,7 +272,8 @@ test('each history has independent offsets and strips the lookahead row', async 
   assert.equal(data.coupons.page, 4);
   assert.deepEqual(data.coupons.rows, []);
   for (const call of s.calls.slice(1)) {
-    assert.match(call.text, /WHERE member_id = .* ORDER BY .* DESC, id DESC LIMIT 101 OFFSET/);
+    assert.match(call.text, /WHERE member_id = \?/);
+    assert.match(call.text, /ORDER BY .* DESC, id DESC LIMIT 101 OFFSET/);
     assert.doesNotMatch(call.text, /SELECT \*|password|verification_payload/i);
   }
 });
@@ -380,6 +446,11 @@ INSERT INTO package_payment_orders VALUES('fixture',99,'{"name":"fixture"}',1234
 test('DB failures propagate instead of replacing real data with mocks or empty success', async () => {
   const s = setup({ fail: true });
   await assert.rejects(s.getAdminMembers(), /database unavailable/);
+  const missing = Object.assign(new Error('R4 object unavailable'), { code: '42883' });
+  const enabled = setup({ reads: 'true', results: [[{ total: 1 }]], beforeRead: ({ index }) => { if (index === 1) throw missing; } });
+  await assert.rejects(enabled.getAdminMembers(), { code: '42883' });
+  assert.equal(enabled.calls.length, 2, 'R4 failure does not retry with legacy SQL');
+  assert.match(enabled.calls[1].text, /r4_staff_private\.paid_active_expiry/);
 });
 test('rendered member detail omits ADMIN money and role controls; OWNER money handles null safely', () => {
   const React = require('react');
@@ -389,21 +460,22 @@ test('rendered member detail omits ADMIN money and role controls; OWNER money ha
   loaded.require = name => {
     if (name === 'next/link') return { __esModule: true, default: ({ children }) => React.createElement('a', null, children) };
     if (name === '@/lib/admin-members-server') return { currentStatus: m => m.status };
+    if (name === './OnlineCancellationControls') return () => React.createElement('button', null, 'ONLINE_CANCEL');
     if (name === '../MemberRoleAction') return { __esModule: true, default: () => React.createElement('button', null, 'ROLE_MUTATION') };
     return require(name);
   };
   loaded._compile(ts.transpileModule(readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, filename.pathname);
   for (const role of ['ADMIN', 'OWNER']) {
     const data = { callerRole: role, member: { memberCode: 'BLU-7', fullName: 'Fixture', phone: 'fixture', status: 'ACTIVE', role: 'MEMBER', points: 0 }, asOf: Date.now(),
-      orders: { rows: [{ id: 'order', packageName: 'Package', amountSatang: 1234500 }, { id: 'null', amountSatang: null }], page: 2, hasNext: true },
+      orders: { rows: [{ id: 'order', status: 'PAID', packageName: 'Package', amountSatang: 1234500 }, { id: 'null', amountSatang: null }], page: 2, hasNext: true },
       checkins: { rows: [], page: 1, hasNext: false }, coupons: { rows: [], page: 1, hasNext: false } };
     // Even a forged callerRole prop must not open columns for an ADMIN payload.
-    const html = renderToStaticMarkup(React.createElement(loaded.exports.default, { data, callerRole: 'OWNER' }));
+    const html = renderToStaticMarkup(React.createElement(loaded.exports.default, { data, callerRole: 'OWNER', onlineCancellationEnabled: true }));
     assert.match(html, /ถัดไป/);
     assert.match(html, /ก่อนหน้า/);
     assert.doesNotMatch(html, /NaN/);
-    if (role === 'ADMIN') assert.doesNotMatch(html, /12,345|>ยอด<|ชำระเมื่อ|ROLE_MUTATION/);
-    else assert.match(html, /12,345|ROLE_MUTATION/);
+    if (role === 'ADMIN') assert.doesNotMatch(html, /12,345|>ยอด<|ชำระเมื่อ|ROLE_MUTATION|ONLINE_CANCEL/);
+    else { assert.match(html, /12,345/); assert.match(html, /ONLINE_CANCEL/); }
   }
 });
 test('owned screens have no mock stores, password/payment mutation, or client-side auth', () => {
@@ -411,4 +483,17 @@ test('owned screens have no mock stores, password/payment mutation, or client-si
     const source = readFileSync(new URL(path, import.meta.url), 'utf8');
     assert.doesNotMatch(source, /localStorage|admin-mock|admin-dashboard-mock|purchaseMockPackage|setAdminMemberPassword|saveAdminMemberProfile|readBenefits|"use client"/);
   }
+});
+
+test('online cancellation is visible as historical PAID to ADMIN without refund money or attestations', async () => {
+  const cancelledAt = '2026-11-25T09:00:00+00:00';
+  const s = setup({ role: 'ADMIN', onlineReads: true, results: [[{ id: 7 }], [{
+    status: 'PAID', cancelledAt, refundSatang: 90000, amountSatang: 90000, reason: 'private',
+  }], [], []] });
+  const { orders } = await s.getAdminMember('BLU-7');
+  assert.equal(orders.rows[0].status, 'PAID');
+  assert.equal(orders.rows[0].cancelledAt, cancelledAt);
+  assert.doesNotMatch(JSON.stringify(orders), /amount|refund|private/);
+  assert.match(s.calls[1].text, /SELECT order_id, cancelled_at FROM r4_online_private\.cancellations/);
+  assert.doesNotMatch(s.calls[1].text, /amount_satang|refund_satang|reason|paid_at/);
 });

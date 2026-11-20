@@ -98,3 +98,16 @@ test('client export uses applied filters and server download, not local/current-
   assert.match(action,/URLSearchParams\(\{ \.\.\.filters \}\)/); assert.match(action,/\/api\/admin\/finance\/export/);
   assert.doesNotMatch(action,/draftFilters|filtered\.map|text\/csv/); assert.doesNotMatch(client,/csvCell|exportCsv|Export CSV/);
 });
+
+test('online refund is one separate expense with an explicit source in finance XLSX', async () => {
+  const income = row(1, { source: 'MEMBERSHIP', amount: 900 });
+  const refund = row(2, { source: 'ONLINE_REFUND', type: 'EXPENSE', category: 'ยกเลิกการสมัคร', amount: 900 });
+  const response = await api(undefined, [income, refund]).get();
+  const xml = unzip(await response.arrayBuffer())['xl/worksheets/sheet1.xml'];
+  assert.equal((xml.match(/ONLINE_REFUND/g) ?? []).length, 1);
+  assert.equal((xml.match(/<v>900<\/v>/g) ?? []).length, 2);
+  assert.match(xml, /MEMBERSHIP/);
+  assert.match(xml, /รายจ่าย/);
+  const chart = types.financeChart([income, refund], 'day', income.date, income.date);
+  assert.deepEqual(chart[0].values, { income: 900, expense: 900, net: 0 });
+});

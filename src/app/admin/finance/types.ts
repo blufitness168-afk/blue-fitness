@@ -4,7 +4,7 @@ export const financeCategories = ["แพ็กเกจ", "ต่อสมา�
 export type FinanceCategory = typeof financeCategories[number];
 export type FinanceType = "INCOME" | "EXPENSE";
 export type EditableFinanceInput = { date: string; type: FinanceType; category: FinanceCategory; amount: number; note: string };
-export type FinanceRecord = EditableFinanceInput & { id: string; source: "MANUAL" | "MEMBERSHIP"; createdAt: string; version: number; memberCode?: string; memberName?: string; reversalOf?: string };
+export type FinanceRecord = EditableFinanceInput & { id: string; source: "MANUAL" | "MEMBERSHIP" | "STAFF_FREE" | "STAFF_FREE_CANCELLATION" | "STAFF_TRANSFER" | "STAFF_TRANSFER_REFUND" | "ONLINE_REFUND"; createdAt: string; version: number; memberCode?: string; memberName?: string; reversalOf?: string };
 export type FinanceAudit = { id: number; actorId: number; action: string; entryId: string; before: unknown; after: unknown; reason: string; createdAt: string };
 export type FinanceData = { records: FinanceRecord[]; audit: FinanceAudit[]; unconfirmedPaidCount?: number };
 

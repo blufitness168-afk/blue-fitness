@@ -1,0 +1,17 @@
+# R5 historical finance import — prepared, not applied
+
+## Owner workflow
+
+1. Open **รายรับ–รายจ่าย → นำเข้ารายรับ–รายจ่ายย้อนหลัง (CSV)** and download the template. Save as UTF-8 CSV (with or without a BOM; comma delimiter; one record per line); `.xlsx` is export-only. Maximum 200 rows / 256 KiB. Header: `source_ref,date,type,category,amount,note`.
+2. Use a stable, globally unique archive row reference, e.g. `ARCHIVE-2024-001`. Keep it unchanged across files, attempts and operators. Use a Gregorian `YYYY-MM-DD` date before today in Asia/Bangkok; decimal baht with 0–2 fractional digits, no grouping separators or zero/negative amounts. Note is required, maximum 500 characters. Quote cells containing commas and escape quotes by doubling them. Use only the listed non-package manual categories (commission/depreciation require the R5 category migration).
+3. Preview shows line errors or the full validated batch. Reconcile against original documents and existing balances before confirming. No preview writes anything. If commit outcome is unknown, retry the same request in the existing screen. After a reload, inspect finance history before trying again; the stable reference still prevents another insert. Corrections use normal audited manual editing/soft cancellation, not a new source reference.
+
+## Duplicate policy and limits
+
+- Package fees, joins, renewals, staff sales/free terms and refunds are not eligible. Never rename them to an “other” category. No order, entitlement, point, or member writes. Storing the owner attestation does not prove source provenance.
+- Global source-reference checks survive soft cancellation. Identical content within a file, exact current/original manually created entries, and date/type/satang overlaps with paid orders or installed R4 staff/refund projections are rejected conservatively. Online compares both paid and confirmed dates in Bangkok, or the amount alone when both dates are missing. False positives require review, not changing the evidence to bypass the check. No fuzzy matching or cross-day identity inference; a disguised lifecycle row with shifted dates/amounts or a future backdated staff write cannot be identified from generic CSV fields alone.
+- Commit runs at Read Committed in one transaction. Short `NOWAIT` locks fence finance-entry and known lifecycle writes while commit revalidates. A lock conflict is retryable; it does not partially import. The same key, actor and canonical payload return the original receipt. A row in the existing finance audit links to the private batch and source reference. Reporting and Excel use the existing `MANUAL` source; batch provenance lives in the audit, not as a new reader category.
+
+## Deployment boundary
+
+Apply only after separately approved schema/ACL rehearsal against the actual app principal and verified backup. Requires October finance/auth/payment schema; compatible with the pending R5 category migration and optional R4 views. No existing RPC or view is replaced. The import RPC is invoker-only, has no PUBLIC grant, and expects the trusted application DB principal to have the required relation/lock privileges; verify default ACLs and direct privileges before enabling `FINANCE_IMPORT_ENABLED=1`. Keep that server flag unset until ready; disable it to stop application imports without deleting entries, receipts or audit. Native tests use a disposable PostgreSQL cluster; the API unit test uses a stub transport, not a browser or live session UAT.

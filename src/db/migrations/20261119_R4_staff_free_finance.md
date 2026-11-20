@@ -1,0 +1,22 @@
+# R4 STAFF_FREE — OWNER finance read (prepared, not deployed)
+
+## Producer and presentation contract
+
+- The pending [foundation](20261119_R4_staff_free_foundation.sql) owns `r4_staff_private.finance_source`: one row per immutable sale, `staff-free:<sale_id>`, `INCOME`, `STAFF_FREE`, numeric zero satang, Bangkok sale date, and recorded timestamp. Keep this contract with any future writer. [Admission](20261119_R4_staff_free_admission.md) is not a sale and does not produce another finance row; its `PAID_ENTRY` response is not payment evidence. A later online settlement also does not remove or replace the original sale fact.
+- The finance migration adds one read-only branch to the existing OWNER RPC. It projects `ต่อสมาชิก` (a known staff continuation, not inferred from online order sequence), source `STAFF_FREE`, version `0`, member code/name via the same lookup as online sales, and `STAFF_FREE · staff-free:<sale_id>` in the existing note. It does not expose the reason, staff actor or request key. The list-price snapshot never becomes revenue. There is no manual mirror, synthetic PAID, check-in-derived revenue, or edit/reversal of a staff row.
+- No app changes: the existing client renders a locked `+0 ฿` row and the existing XLSX keeps its eight columns, with numeric zero in amount and source in note. Sums and chart buckets do not change, but row counts and the export row limit do include staff rows. The existing `FinanceRecord.source` declaration still lists the two old sources; the tested readers pass through the new value and allow edits only for `MANUAL`. Update the declaration before adding any exhaustive source consumer.
+
+## Prerequisites and rollback
+
+1. Hold until explicitly approved. Use the reviewed R2/R3 stack required by staff admission; install foundation then admission, and install the selected finance baseline **before** this migration. The guarded rewrite accepts the reviewed October invoker (Bangkok `paid_at`) or prepared R5 invoker (Bangkok `confirmed_at`, plus `unconfirmedPaidCount`). It fails closed on definition/security drift or reapplication. Reapplying stock R5 *after* this migration would replace the reader and hide staff rows; moving from October+R4 to R5 requires an approved and rehearsed sequence that composes both. Do not infer compatibility with R6/R7 admission.
+2. Review and capture exact installed `pg_proc.prosrc` and `pg_get_functiondef`, owner, ACLs, and the producer view definition/ownership. Keep the current trusted backend-only invoker model. The new migration grants nothing: the trusted application DB principal needs private schema `USAGE` and `SELECT` on the view (plus the existing finance permissions). Do not grant it to PUBLIC or customer/staff DB roles. Review default privileges, role inheritance, RLS and direct SQL access separately; the SQL OWNER session check is not a substitute for protecting the trusted DB credentials.
+3. A failed migration is transactional. To undo an approved application, pause affected traffic and restore the captured finance definition in place, including exact source and settings; verify ACLs. This hides staff rows in finance/export but does not delete the sales, disable admission, or touch existing orders or manual finance entries.
+
+## Verified offline
+
+```sh
+pnpm exec python -B scripts/r4-staff-free-finance-postgres-test.py --bin-dir .local-db/portable-postgres-uat/package/native/bin --psql .local-db/portable-postgres-uat/psql.exe
+pnpm exec node --test src/lib/real-finance-server.test.mjs src/lib/real-finance-r5.test.mjs src/lib/xlsx.test.mjs
+```
+
+Native PostgreSQL 18.4 passed on two fresh synthetic databases with the actual foundation/admission SQL, candidate creation/replay and kiosk admission/replay, unchanged legacy records/audit/totals, blocked ADMIN and direct staff edits, unchanged function identity/ACL, and restore with sale evidence retained. The test-only writer is installed **after** the finance migration solely to create synthetic sales; the migration has no reference to it and there is no deployable staff writer. React static render and the actual export handler/writer consumed the native JSON using test auth/read adapters; this is not browser, office-client, live Next authentication, or production ACL/backup acceptance. Deterministic cross-day online timestamp and nonzero unconfirmed-count cases are in the separate R5 regression; the native staff test uses real synthetic settlements. No production access, deployment, Git, or paid calls.

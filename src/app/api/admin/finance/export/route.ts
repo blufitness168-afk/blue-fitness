@@ -31,10 +31,11 @@ export async function GET(request: Request) {
       if (sort === "AMOUNT_ASC") return a.amount - b.amount || b.date.localeCompare(a.date);
       return b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt);
     });
+    const includeSource = records.some(record => record.source === "ONLINE_REFUND");
     const workbook = createXlsx([
-      ["ลำดับ", "วันที่", "ประเภท", "หมวดหมู่", "รหัสสมาชิก", "สมาชิกที่เกี่ยวข้อง", "จำนวนเงิน", "หมายเหตุ"],
+      ["ลำดับ", "วันที่", "ประเภท", "หมวดหมู่", "รหัสสมาชิก", "สมาชิกที่เกี่ยวข้อง", "จำนวนเงิน", "หมายเหตุ", ...(includeSource ? ["แหล่งที่มา"] : [])],
       ...records.map((record, index) => [index + 1, record.date, record.type === "INCOME" ? "รายรับ" : "รายจ่าย", record.category,
-        record.memberCode ?? "", record.memberName ?? "", record.amount, record.note]),
+        record.memberCode ?? "", record.memberName ?? "", record.amount, record.note, ...(includeSource ? [record.source] : [])]),
     ]);
     return new Response(workbook, { headers: { ...headers,
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

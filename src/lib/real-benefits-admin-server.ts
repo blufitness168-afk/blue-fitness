@@ -8,18 +8,30 @@ import { json, readBody } from "./auth/http";
 
 const id = z.number().int().min(1).max(2147483647);
 const expiry = z.iso.datetime({ offset: true });
+const promoSubtotal = z.number().int().min(0).max(100000000);
+const eligiblePackages = z.array(id).min(1).max(100).refine(ids => new Set(ids).size === ids.length);
 const create = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("COUPON"), title: z.string().trim().min(1).max(120), couponType: z.enum(["FRIEND_PASS", "EXTRA_DAYS"]), quota: z.number().int().min(1).max(100), bonusDays: z.number().int().min(0).max(365), expiresAt: expiry }).strict().refine(p => p.couponType === "EXTRA_DAYS" ? p.quota === 1 && p.bonusDays > 0 : p.bonusDays === 0),
-  z.object({ kind: z.literal("PROMO"), title: z.string().trim().min(1).max(120), code: z.string().trim().toUpperCase().regex(/^[A-Z0-9_-]{3,40}$/), discountType: z.enum(["FIXED", "PERCENT"]), discountValue: z.number().int().min(1).max(100000000), minSatang: z.number().int().min(0).max(100000000), maxDiscountSatang: z.number().int().min(1).max(100000000).nullable(), usageLimit: z.number().int().min(1).max(1000000), expiresAt: expiry }).strict().refine(p => p.discountType !== "PERCENT" || p.discountValue <= 100),
+  z.object({ kind: z.literal("COUPON"), title: z.string().trim().min(1).max(120), couponType: z.enum(["FRIEND_PASS", "EXTRA_DAYS"]), quota: z.number().int().min(1).max(100), bonusDays: z.number().int().min(0).max(365), activationDurationMinutes: z.number().int().min(0).max(2147483647).nullable().optional(), expiresAt: expiry }).strict().refine(p => p.couponType === "EXTRA_DAYS" ? p.quota === 1 && p.bonusDays > 0 : p.bonusDays === 0),
+  z.object({ kind: z.literal("PROMO"), title: z.string().trim().min(1).max(120), code: z.string().trim().toUpperCase().regex(/^[A-Z0-9_-]{3,40}$/), discountType: z.enum(["FIXED", "PERCENT"]), discountValue: z.number().int().min(1).max(100000000), minSatang: promoSubtotal, maxSatang: promoSubtotal.nullable().optional(), eligiblePackageIds: eligiblePackages.nullable().optional(), maxDiscountSatang: z.number().int().min(1).max(100000000).nullable(), usageLimit: z.number().int().min(1).max(1000000), expiresAt: expiry }).strict().refine(p => p.discountType !== "PERCENT" || p.discountValue <= 100).refine(p => p.maxSatang == null || p.maxSatang >= p.minSatang),
 ]);
+const recipientGroup = z.enum(["ALL", "1", "30", "90", "180", "365"]);
+const memberCode = z.string().trim().regex(/^BLU-[0-9]{1,12}$/);
+const grantProof = z.string().regex(/^[a-f0-9]{64}$/);
+const grantPreview = z.object({ definitionId: id, memberCode: z.string().trim().regex(/^(BLU-[0-9]{1,12}|CARD-[0-9]{1,95})$/), recipientGroup }).strict();
+const previewResult = z.object({ definitionId: id, definitionTitle: z.string(), memberCode, fullName: z.string(), recipientGroup, durationDays: z.number().int().min(1).max(3660), packageExpiresAt: expiry, proof: grantProof });
 const payloads = {
   create,
   deactivate: z.object({ definitionId: id }).strict(),
-  grant: z.object({ definitionId: id, memberCode: z.string().trim().min(1).max(50) }).strict(),
+  "grant-preview": grantPreview,
+  grant: z.object({ definitionId: id, memberCode, recipientGroup, proof: grantProof }).strict(),
   cancel: z.object({ assignmentId: id }).strict(),
   consume: z.object({ couponId: id, guestReference: z.string().trim().max(120).default("") }).strict(),
 };
 export function benefitPayload(action: string, body: Record<string, unknown>) {
+  if (action === "grant-preview") {
+    const parsed = grantPreview.safeParse(body);
+    return parsed.success ? parsed.data : null;
+  }
   const schema = payloads[action as keyof typeof payloads];
   if (!schema) return null;
   const { requestKey: ignored, ...input } = body;
@@ -28,14 +40,25 @@ export function benefitPayload(action: string, body: Record<string, unknown>) {
   return parsed.success ? parsed.data : null;
 }
 
-const definitionFields = ["id", "kind", "title", "coupon_type", "quota", "bonus_days", "code", "discount_type", "discount_value", "min_satang", "max_discount_satang", "usage_limit", "expires_at", "active", "created_by", "created_at"];
+const definitionFields = ["id", "kind", "title", "coupon_type", "quota", "bonus_days", "code", "discount_type", "discount_value", "min_satang", "max_discount_satang", "usage_limit", "expires_at", "active", "created_by", "created_at", "requires_activation", "activation_duration_minutes"];
 const assignmentFields = ["id", "definition_id", "member_id", "coupon_id", "cancelled_at", "granted_by", "created_at", "member_code", "full_name", "type", "title", "status", "used_count", "total_quota", "expire_date"];
-const couponFields = ["id", "member_id", "type", "source", "title", "status", "total_quota", "used_count", "bonus_days_value", "created_at", "expire_date", "member_code", "full_name"];
+const couponFields = ["id", "member_id", "type", "source", "title", "status", "total_quota", "used_count", "bonus_days_value", "created_at", "expire_date", "member_code", "full_name", "campaign_expires_at", "activated_at", "activation_status"];
 
 function pickScalars(value: unknown, fields: string[]) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const row = value as Record<string, unknown>;
   return Object.fromEntries(fields.filter(field => Object.hasOwn(row, field) && (row[field] === null || ["string", "number", "boolean"].includes(typeof row[field]))).map(field => [field, row[field]]));
+}
+
+function pickDefinition(value: unknown) {
+  const row = pickScalars(value, definitionFields);
+  if (row.kind === "PROMO" && value && typeof value === "object") {
+    const source = value as Record<string, unknown>;
+    if (source.max_satang === null || promoSubtotal.safeParse(source.max_satang).success) row.max_satang = source.max_satang;
+    const ids = eligiblePackages.nullable().safeParse(source.eligible_package_ids);
+    if (ids.success) row.eligible_package_ids = ids.data;
+  }
+  return row;
 }
 
 function responseForRole(value: unknown, role: string, action: string) {
@@ -44,10 +67,12 @@ function responseForRole(value: unknown, role: string, action: string) {
     const data = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
     const rows = (field: string, fields: string[]) => Array.isArray(data[field]) ? data[field].map(row => pickScalars(row, fields)) : [];
     // Keep the caller's array contract without exposing payment history or opaque audit JSON.
-    return { definitions: rows("definitions", definitionFields), assignments: rows("assignments", assignmentFields), coupons: rows("coupons", couponFields), promoOrders: [], audit: [] };
+    return { definitions: Array.isArray(data.definitions) ? data.definitions.map(pickDefinition) : [], assignments: rows("assignments", assignmentFields), coupons: rows("coupons", couponFields), promoOrders: [], audit: [],
+      ...(data.couponActivationReady === true ? { couponActivationReady: true } : {}),
+      ...(data.grantTargetingReady === true ? { grantTargetingReady: true } : {}) };
   }
+  if (action === "create") return pickDefinition(value);
   const fields: Record<string, string[]> = {
-    create: definitionFields,
     deactivate: ["definitionId", "active"],
     grant: assignmentFields,
     cancel: ["assignmentId", "cancelled"],
@@ -63,7 +88,9 @@ async function execute(action: string, key: string | null, payload: object) {
   const sql = neon(process.env.DATABASE_URL);
   for (let attempt = 0; ; attempt++) {
     try {
-      const rows = await sql`SELECT real_benefits_admin_action(${digest}, ${action}, ${key}::uuid, ${JSON.stringify(payload)}::jsonb) AS result`;
+      const rows = action === "create_r6_promo"
+        ? await sql`SELECT r6_create_scoped_promo(${digest}, ${key}::uuid, ${JSON.stringify(payload)}::jsonb) AS result`
+        : await sql`SELECT real_benefits_admin_action(${digest}, ${action}, ${key}::uuid, ${JSON.stringify(payload)}::jsonb) AS result`;
       return rows[0].result;
     } catch (error) {
       if (attempt >= 2 || !["40001", "40P01"].includes((error as { code?: string }).code ?? "")) throw error;
@@ -80,10 +107,17 @@ export async function benefitsAdminAction(request: Request, action: string) {
     if (!["ADMIN", "OWNER"].includes(member.role)) return json({ error: "ไม่มีสิทธิ์" }, 403);
     if (action === "list") return json({ data: responseForRole(await execute(action, null, {}), member.role, action) });
     const body = await readBody(request);
-    if (!body || !z.uuid().safeParse(body.requestKey).success) return json({ error: "ต้องระบุ JSON และ requestKey UUID" }, 400);
+    if (!body) return json({ error: "ต้องระบุ JSON" }, 400);
     const payload = benefitPayload(action, body);
     if (!payload) return json({ error: "ข้อมูลไม่ถูกต้อง" }, 400);
-    return json({ data: responseForRole(await execute(action, String(body.requestKey).toLowerCase(), payload), member.role, action) });
+    if (action === "grant-preview") {
+      return json({ data: previewResult.parse(await execute("grant_preview", null, payload)) });
+    }
+    if (!z.uuid().safeParse(body.requestKey).success) return json({ error: "ต้องระบุ requestKey UUID" }, 400);
+    const sqlAction = action === "grant" ? "grant_targeted"
+      : action === "create" && (Object.hasOwn(payload, "maxSatang") || Object.hasOwn(payload, "eligiblePackageIds")) ? "create_r6_promo"
+      : action === "create" && Object.hasOwn(payload, "activationDurationMinutes") ? "create_r6_coupon" : action;
+    return json({ data: responseForRole(await execute(sqlAction, String(body.requestKey).toLowerCase(), payload), member.role, action) });
   } catch (error) {
     const code = (error as { code?: string }).code;
     if (code === "42501") return json({ error: "ต้องใช้เซสชันปกติ ADMIN/OWNER" }, 403);

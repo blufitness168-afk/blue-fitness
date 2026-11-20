@@ -11,6 +11,14 @@ import AdminMemberContactEmailForm from "./AdminMemberContactEmailForm";
 import { getMemberContactEmail } from "@/lib/member-contact-email-server";
 import MemberCardSection from "./MemberCardSection";
 import { StaffAvatarSection } from "./StaffAvatarSection";
+import { isStaffFreeEnabled } from "@/lib/staff-free-server";
+import StaffFreeSection from "./StaffFreeSection";
+import StaffFreeCancellationSection from "./StaffFreeCancellationSection";
+import { readStaffFreeCancellationCandidates } from "@/lib/staff-free-cancellation-server";
+import StaffFreeEntitlement from "@/components/StaffFreeEntitlement";
+import { readStaffFreeTerms } from "@/lib/staff-free-display-server";
+import StaffTransferSection from "./StaffTransferSection";
+import { onlineCancellationEnabled } from "@/lib/online-cancellation-rollout-server";
 
 export default async function Page({ params, searchParams }: { params: Promise<{ memberCode: string }>; searchParams: Promise<MemberHistoryInput> }) {
   const caller = await requireAdminPage("/admin/members");
@@ -25,12 +33,19 @@ export default async function Page({ params, searchParams }: { params: Promise<{
     || (data.callerRole === "OWNER" && ["MEMBER", "ADMIN"].includes(m.role));
   // Migration/guard failures must not appear as an empty, editable contact.
   const canEditTimeOverride = canEdit && m.role === "MEMBER";
-  const [contact, timeOverride] = await Promise.all([
+  const canUseStaffTransfer = canEditTimeOverride && m.status === "ACTIVE"
+    && caller.role === data.callerRole;
+  const isOwner = caller.role === "OWNER";
+  const [contact, timeOverride, staffFreeTerms, cancellationCandidates] = await Promise.all([
     canEdit ? getMemberContactEmail(m.memberCode).catch(() => null) : null,
     canEditTimeOverride ? getMemberTimeOverride(m.memberCode).catch(() => null) : null,
+    m.role === "MEMBER" ? readStaffFreeTerms(m.memberCode) : [],
+    caller.role === "OWNER" && data.callerRole === "OWNER" && m.role === "MEMBER" && m.status === "ACTIVE" && isStaffFreeEnabled()
+      ? readStaffFreeCancellationCandidates(m.memberCode) : [],
   ]);
   return <>
-    <Client data={data} callerRole={caller.role} />
+    <Client data={data} callerRole={caller.role} onlineCancellationEnabled={isOwner && data.callerRole === "OWNER" && onlineCancellationEnabled()} staffFreeEntitlement={staffFreeTerms.length > 0
+      ? <StaffFreeEntitlement terms={staffFreeTerms} /> : undefined} />
     {canEdit && (contact
       ? <AdminMemberContactEmailForm key={`contact:${m.memberCode}:${contact.version}`} memberCode={m.memberCode} contact={contact} />
       : <p role="status" className="mt-6">อีเมลติดต่อยังไม่พร้อมใช้งาน ไม่สามารถอ่านหรือแก้ไขได้ กรุณาติดต่อผู้ดูแล</p>)}
@@ -38,6 +53,12 @@ export default async function Page({ params, searchParams }: { params: Promise<{
     {canEditTimeOverride && (timeOverride
       ? <AdminMemberTimeOverrideForm memberCode={m.memberCode} state={timeOverride} />
       : <p role="status" className="mt-6">ช่วงเวลาเข้าใช้เฉพาะสมาชิกยังไม่พร้อมใช้งาน ไม่สามารถอ่านหรือแก้ไขได้</p>)}
+    {canEditTimeOverride && isStaffFreeEnabled() && <StaffFreeSection key={m.memberCode} memberCode={m.memberCode} />}
+    {cancellationCandidates.length > 0 && <StaffFreeCancellationSection key={`cancel:${m.memberCode}`} memberCode={m.memberCode} candidates={cancellationCandidates} />}
+    {canUseStaffTransfer && process.env.ENABLE_STAFF_PAID_TRANSFER === "true"
+      && <StaffTransferSection key={`transfer:${m.memberCode}`} memberCode={m.memberCode} mode="transfer" canBackdate={isOwner} />}
+    {canUseStaffTransfer && isOwner && process.env.ENABLE_STAFF_PAID_CANCELLATION === "true"
+      && <StaffTransferSection key={`transfer-cancel:${m.memberCode}`} memberCode={m.memberCode} mode="cancellation" />}
     {canEdit && <MemberCardSection key={`card:${m.memberCode}`} memberCode={m.memberCode} />}
     {canEdit && caller.memberCode !== m.memberCode && <StaffAvatarSection key={`avatar:${m.memberCode}`} memberCode={m.memberCode} />}
     {isAdminPasswordResetEnabled() && canEdit && caller.memberCode !== m.memberCode && m.status !== "SUSPENDED" && <AdminMemberPasswordForm key={`password:${m.memberCode}`} memberCode={m.memberCode} />}

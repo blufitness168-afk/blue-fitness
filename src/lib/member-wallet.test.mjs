@@ -16,16 +16,17 @@ function load(relative, dependencies) {
   return exports.default;
 }
 const coupon = { id: 27, title: 'เข้าฟรี 1 ครั้ง', status: 'AVAILABLE', totalQuota: 1, usedCount: 0, expired: false, expiresAt: '2026-11-21T12:31:44.662Z' };
-function page(member, coupons) {
-  const reads = [];
+function page(member, coupons, staffFreeTerms = []) {
+  const reads = [], displayReads = [];
   const Wallet = () => null;
   const component = load('../app/member/page.tsx', {
     'next/navigation': { redirect: path => { throw Error(`redirect:${path}`); } },
     '@/lib/auth/server': { getCurrentMember: async () => member },
     '@/lib/benefits-server': { readWelcomeCoupons: async id => { reads.push(id); return coupons; } },
+    '@/lib/staff-free-display-server': { readStaffFreeTerms: async (...args) => { displayReads.push(args); return staffFreeTerms; } },
     './AccountClient': { default: Wallet },
   });
-  return { component, reads, Wallet };
+  return { component, reads, displayReads, Wallet };
 }
 const member = { id: 2, memberCode: 'BLU-2', fullName: 'TEST', phone: '0890000000', avatarUrl: null, role: 'OWNER', birthDay: null, birthMonth: null, createdAt: new Date('2026-10-22T12:31:44.662Z'), status: 'PENDING' };
 
@@ -37,17 +38,27 @@ test('member root page reads genuine welcome coupons for the authenticated membe
   assert.equal(tree.props.welcomeCoupons[0], coupon);
   assert.equal(tree.props.identity.memberCode, 'BLU-2');
   assert.equal(tree.props.welcomeCoupons[0].usedCount, 0);
+  assert.deepEqual(app.displayReads, []);
 });
 test('unauthenticated wallet redirects without reading or creating coupons', async () => {
   const app = page(null, [coupon]);
   await assert.rejects(app.component(), /redirect:\/member\/login/);
   assert.deepEqual(app.reads, []);
+  assert.deepEqual(app.displayReads, []);
 });
 test('another authenticated member gets their own empty list, never fallback welcome grants', async () => {
   const app = page({ ...member, id: 3, memberCode: 'BLU-3' }, []);
   const tree = await app.component();
   assert.deepEqual(app.reads, [3]);
   assert.deepEqual(tree.props.welcomeCoupons, []);
+});
+test('member page passes scoped staff terms without accepting a target or altering coupons', async () => {
+  const terms = [{ status: 'SCHEDULED' }];
+  const app = page({ ...member, role: 'MEMBER' }, [coupon], terms);
+  const tree = await app.component({ searchParams: Promise.resolve({ memberCode: 'BLU-3' }) });
+  assert.deepEqual(app.displayReads, [[]]);
+  assert.equal(tree.props.staffFreeTerms, terms);
+  assert.equal(tree.props.welcomeCoupons[0], coupon);
 });
 test('welcome UI displays real available, used and expired coupons with the correct redemption controls', () => {
   const Welcome = load('../app/member/benefits/WelcomeCoupons.tsx', { 'next/navigation': { useRouter: () => ({ refresh() {} }) } });
