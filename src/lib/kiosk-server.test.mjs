@@ -64,12 +64,15 @@ test('paired station forwards raw normalized identity, explicit direction and or
  assert.deepEqual(calls[0].values.slice(1),[process.env.KIOSK_STATION_ID||'LOCAL_FRONT_DESK',body.requestKey,'CARD-002','OUT']);
  await a.run(request({code:'BLU-2',requestKey:crypto.randomUUID()}),'scan');
  assert.equal(a.calls.at(-1).values.at(-1),'IN');
+ const autoRes = await a.run(request({code:' card-002 ',direction:'AUTO',requestKey:crypto.randomUUID()}),'scan');
+ assert.equal(autoRes.status,200);
+ assert.equal(a.calls.at(-1).values.at(-1),'AUTO');
 });
 test('entry-only mode and failed paired statements never downgrade a directional request',async()=>{
  const kiosk={member:{role:'ADMIN'},session:{expiresAt:'2099-01-01'}};
  const body={code:'BLU-2',requestKey:crypto.randomUUID()};
  assert.equal((await load({kiosk}).run(request({}),'status')).body.outSupported,false);
- for(const direction of ['IN','OUT',null,'out']) {
+ for(const direction of ['IN','OUT','AUTO',null,'out']) {
   const a=load({kiosk});
   assert.equal((await a.run(request({...body,direction}),'scan')).status,direction===null||direction==='out'?400:503);
   assert.ok(a.calls.every(x=>x.text.startsWith('SELECT to_regprocedure')));
@@ -80,12 +83,11 @@ test('entry-only mode and failed paired statements never downgrade a directional
   assert.equal(a.calls.length,2);assert.match(a.calls[1].text,/public\.r7_kiosk_scan/);
  }
 });
-test('kiosk UI enables explicit direction only by capability and retries the frozen scan',()=>{
+test('kiosk UI auto-detects IN/OUT on a paired station without toggle buttons or browser sound',()=>{
  const ui=readFileSync(new URL('../app/kiosk/KioskClient.tsx',import.meta.url),'utf8');
- assert.match(ui,/useState<Direction>\("IN"\)/);
- assert.match(ui,/outSupported && <div role="group"/);
- assert.match(ui,/aria-pressed=\{direction === mode\}\s+disabled=\{working \|\| !!pending \|\| exit\}/);
- assert.match(ui,/crypto\.randomUUID\(\), \.\.\.\(outSupported \? \{ direction \} : \{\}\)/);
+ assert.match(ui,/direction:\s*"AUTO"/);
+ assert.match(ui,/crypto\.randomUUID\(\), \.\.\.\(outSupported \? \{ direction: "AUTO" \} : \{\}\)/);
+ assert.doesNotMatch(ui,/role="group"|เสียงยืนยัน|AudioContext|useState<Direction>/);
  assert.match(ui,/setPending\(payload\)/);
  assert.match(ui,/void scan\(pending\)/);
 });

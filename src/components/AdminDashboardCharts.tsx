@@ -11,6 +11,7 @@ export interface ChartDatum {
 
 interface ChartProps {
   title: string;
+  subtitle?: string;
   data: ChartDatum[];
   series: ChartSeries[];
   type: "line" | "bar";
@@ -38,6 +39,7 @@ function chartRange(data: ChartDatum[], series: ChartSeries[]) {
 
 export default function AdminDashboardChart({
   title,
+  subtitle,
   data,
   series,
   type,
@@ -48,16 +50,18 @@ export default function AdminDashboardChart({
   const plotHeight = HEIGHT - PADDING.top - PADDING.bottom;
   const y = (value: number) => PADDING.top + ((maximum - value) / (maximum - minimum)) * plotHeight;
   const x = (index: number) =>
-    PADDING.left + (data.length === 1 ? plotWidth / 2 : (index / (data.length - 1)) * plotWidth);
+    PADDING.left + (data.length <= 1 ? plotWidth / 2 : (index / (data.length - 1)) * plotWidth);
   const ticks = Array.from({ length: 5 }, (_, index) => maximum - (index * (maximum - minimum)) / 4);
   const zeroY = y(0);
   const labelEvery = Math.max(1, Math.ceil(data.length / 10));
   const groupWidth = plotWidth / Math.max(data.length, 1);
-  const barWidth = Math.min(22, (groupWidth * 0.72) / Math.max(series.length, 1));
+  const maxBar = data.length <= 4 ? 48 : 22;
+  const barWidth = Math.min(maxBar, (groupWidth * 0.72) / Math.max(series.length, 1));
 
   return (
     <section className="rounded-2xl border border-blu-sky/40 bg-white p-4 shadow-sm sm:p-5">
       <h3 className="text-sm font-black text-blu-dark">{title}</h3>
+      {subtitle && <p className="mt-1 text-xs text-blu-steel">{subtitle}</p>}
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
         {series.map((item) => (
           <span key={item.key} className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-blu-steel">
@@ -78,39 +82,47 @@ export default function AdminDashboardChart({
           ))}
           {minimum < 0 && <line x1={PADDING.left} x2={WIDTH - PADDING.right} y1={zeroY} y2={zeroY} stroke="#86b6c6" strokeWidth="1.5" />}
 
-          {type === "line" && series.map((item) => {
-            const points = data.map((datum, index) => `${x(index)},${y(datum.values[item.key] ?? 0)}`).join(" ");
-            return (
-              <g key={item.key}>
-                <polyline points={points} fill="none" stroke={item.color} strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
-                {data.map((datum, index) => (
-                  <circle key={`${item.key}-${datum.label}`} cx={x(index)} cy={y(datum.values[item.key] ?? 0)} r="3.5" fill="white" stroke={item.color} strokeWidth="2">
-                    <title>{`${item.label}: ${valueFormatter(datum.values[item.key] ?? 0)}`}</title>
-                  </circle>
-                ))}
-              </g>
-            );
-          })}
-
-          {type === "bar" && data.flatMap((datum, datumIndex) =>
-            series.map((item, seriesIndex) => {
-              const value = datum.values[item.key] ?? 0;
-              const barX = PADDING.left + datumIndex * groupWidth + (groupWidth - barWidth * series.length) / 2 + seriesIndex * barWidth;
-              const top = value >= 0 ? y(value) : zeroY;
-              const height = Math.max(1, Math.abs(y(value) - zeroY));
-              return (
-                <rect key={`${datum.label}-${item.key}`} x={barX} y={top} width={Math.max(barWidth - 2, 2)} height={height} rx="3" fill={item.color} opacity="0.9">
-                  <title>{`${datum.label} · ${item.label}: ${valueFormatter(value)}`}</title>
-                </rect>
-              );
-            }),
-          )}
-
-          {data.map((datum, index) => index % labelEvery === 0 || index === data.length - 1 ? (
-            <text key={datum.label} x={type === "bar" ? PADDING.left + index * groupWidth + groupWidth / 2 : x(index)} y={HEIGHT - 16} textAnchor="middle" fontSize="10" fill="#5c93aa">
-              {datum.label}
+          {data.length === 0 ? (
+            <text x={WIDTH / 2} y={HEIGHT / 2} textAnchor="middle" fontSize="14" fill="#5c93aa">
+              ไม่มีข้อมูลในช่วงที่เลือก
             </text>
-          ) : null)}
+          ) : (
+            <>
+              {type === "line" && series.map((item) => {
+                const points = data.map((datum, index) => `${x(index)},${y(datum.values[item.key] ?? 0)}`).join(" ");
+                return (
+                  <g key={item.key}>
+                    <polyline points={points} fill="none" stroke={item.color} strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+                    {data.map((datum, index) => (
+                      <circle key={`${item.key}-${datum.label}`} cx={x(index)} cy={y(datum.values[item.key] ?? 0)} r="3.5" fill="white" stroke={item.color} strokeWidth="2">
+                        <title>{`${datum.label} · ${item.label}: ${valueFormatter(datum.values[item.key] ?? 0)}`}</title>
+                      </circle>
+                    ))}
+                  </g>
+                );
+              })}
+
+              {type === "bar" && data.flatMap((datum, datumIndex) =>
+                series.map((item, seriesIndex) => {
+                  const value = datum.values[item.key] ?? 0;
+                  const barX = PADDING.left + datumIndex * groupWidth + (groupWidth - barWidth * series.length) / 2 + seriesIndex * barWidth;
+                  const top = value >= 0 ? y(value) : zeroY;
+                  const height = Math.max(1, Math.abs(y(value) - zeroY));
+                  return (
+                    <rect key={`${datum.label}-${item.key}`} x={barX} y={top} width={Math.max(barWidth - 2, 2)} height={height} rx="3" fill={item.color} opacity="0.9">
+                      <title>{`${datum.label} · ${item.label}: ${valueFormatter(value)}`}</title>
+                    </rect>
+                  );
+                }),
+              )}
+
+              {data.map((datum, index) => index % labelEvery === 0 || index === data.length - 1 ? (
+                <text key={datum.label} x={type === "bar" ? PADDING.left + index * groupWidth + groupWidth / 2 : x(index)} y={HEIGHT - 16} textAnchor="middle" fontSize="10" fill="#5c93aa">
+                  {datum.label}
+                </text>
+              ) : null)}
+            </>
+          )}
         </svg>
       </div>
     </section>

@@ -2,11 +2,21 @@ import "server-only";
 import { neon } from "@neondatabase/serverless";
 import { createHash } from "node:crypto";
 import { cookies } from "next/headers";
-import { SESSION_COOKIE } from "./auth/server";
+import { getCurrentMember, SESSION_COOKIE } from "./auth/server";
 import { requireAdminPage } from "./admin-permissions-server";
 import { onlineCancellationReads } from "./online-cancellation-rollout-server";
 import { staffPaidReadsEnabled } from "./staff-paid-rollout-server";
 import { packageCatalogDailySlot } from "./package-catalog";
+import { readRealFinance } from "./real-finance-server";
+import { XLSX_MAX_ROWS, XlsxLimitError } from "./xlsx";
+import {
+  computeDashboardFinanceSummary,
+  computeDashboardMembershipMetrics,
+  resolveDashboardPeriod,
+  type DashboardMemberInput,
+  type DashboardPeriodInput,
+  type DashboardTermInput,
+} from "./admin-dashboard-metrics";
 
 export interface MemberRow {
   memberCode: string; fullName: string; nickname: string | null; phone: string;
@@ -31,11 +41,7 @@ export interface MemberDetail extends MemberRow {
   birthDay: number | null; birthMonth: number | null;
   emergencyName: string | null; emergencyPhone: string | null; emergencyRelation: string | null;
 }
-// Bind each read to the same persisted role and normal session as the page guard.
-async function memberReader(path = "/admin/members") {
-  const caller = await requireAdminPage(path);
-  const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  if (!token || !/^[a-f0-9]{64}$/.test(token) || !["ADMIN", "OWNER"].includes(caller.role)) throw new Error("Forbidden");
+function createAuthorizedSql(caller: { id: number; role: string }, token: string) {
   const digest = createHash("sha256").update(token).digest("hex");
   const database = client();
   const sql = (parts: TemplateStringsArray, ...values: unknown[]) => {
@@ -48,7 +54,28 @@ async function memberReader(path = "/admin/members") {
     strings[strings.length - 1] += ") AS result";
     return database(Object.assign(strings, { raw: strings.slice() }) as unknown as TemplateStringsArray, digest, caller.id, caller.role, ...values);
   };
-  return { sql, fragment: database, callerRole: caller.role };
+  return { sql, fragment: database };
+}
+
+type AuthorizedReader = ReturnType<typeof createAuthorizedSql>;
+
+// Bind each read to the same persisted role and normal session as the page guard.
+async function memberReader(path = "/admin/members") {
+  const caller = await requireAdminPage(path);
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (!token || !/^[a-f0-9]{64}$/.test(token) || !["ADMIN", "OWNER"].includes(caller.role)) throw new Error("Forbidden");
+  const { sql, fragment } = createAuthorizedSql(caller, token);
+  return { sql, fragment, callerRole: caller.role };
+}
+
+async function authorizedMemberSession() {
+  const caller = await getCurrentMember();
+  if (!caller || caller.status === "SUSPENDED") return { status: 401 as const, error: "กรุณาเข้าสู่ระบบ" };
+  if (!["ADMIN", "OWNER"].includes(caller.role)) return { status: 403 as const, error: "ไม่มีสิทธิ์เข้าถึง" };
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (!token || !/^[a-f0-9]{64}$/.test(token)) return { status: 401 as const, error: "กรุณาเข้าสู่ระบบ" };
+  const { sql, fragment } = createAuthorizedSql(caller, token);
+  return { status: 200 as const, sql, fragment, callerRole: caller.role };
 }
 function memberProfile(row: Record<string, unknown>): MemberRow {
   return { memberCode: row.memberCode, fullName: row.fullName, nickname: row.nickname, phone: row.phone,
@@ -109,13 +136,17 @@ function memberListFilters(input: MemberListInput) {
   return { filters, invalid };
 }
 
-export async function getAdminMembers(input: MemberListInput = {}) {
-  const { sql, fragment, callerRole } = await memberReader();
-  const asOf = Date.now();
-  const { filters, invalid } = memberListFilters(input);
+async function buildMemberListQueryParts(
+  sql: AuthorizedReader["sql"],
+  fragment: AuthorizedReader["fragment"],
+  filters: MemberListFilters,
+  invalid: boolean,
+  asOf: number,
+  includeReport: boolean,
+) {
   const { q, name, code, phone, gender, from, to, month, reportMonth, packageLabel, slot, currentDuration, currentSlot } = filters;
   const current = !!(currentDuration || currentSlot);
-  const currentReport = !!reportMonth && reportMonth === monthRange(undefined, new Date(asOf)).month;
+  const currentReport = includeReport && !!reportMonth && reportMonth === monthRange(undefined, new Date(asOf)).month;
   const instant = new Date(asOf).toISOString();
   let termJoin = fragment``;
   let currentUnavailable = false;
@@ -213,6 +244,15 @@ export async function getAdminMembers(input: MemberListInput = {}) {
     ${month ? fragment`AND created_at >= (${monthStart}::date::timestamp AT TIME ZONE 'Asia/Bangkok')
       AND created_at < ((${monthStart}::date + interval '1 month') AT TIME ZONE 'Asia/Bangkok')` : fragment``}
     ${purchase} ${invalid || currentUnavailable ? fragment`AND FALSE` : fragment``}`;
+  return { termJoin, currentJoin, currentUnavailable, nearExpiryAvailable, expiry, where, instant };
+}
+
+export async function getAdminMembers(input: MemberListInput = {}) {
+  const { sql, fragment, callerRole } = await memberReader();
+  const asOf = Date.now();
+  const { filters, invalid } = memberListFilters(input);
+  const { termJoin, currentJoin, currentUnavailable, nearExpiryAvailable, expiry, where, instant } =
+    await buildMemberListQueryParts(sql, fragment, filters, invalid, asOf, true);
   const [count] = await sql`WITH monthly AS (
     SELECT to_char(created_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM') AS month, count(*)::int AS total
     FROM members ${currentJoin} WHERE ${where} GROUP BY 1
@@ -232,12 +272,64 @@ export async function getAdminMembers(input: MemberListInput = {}) {
     WHERE ${where}
     ORDER BY created_at DESC, id DESC LIMIT 50 OFFSET ${(page - 1) * 50}`;
   const monthly = (count.monthly as { month: string; total: number }[] | undefined ?? []).map(({ month, total }) => ({ month, total }));
-  const lifecycle = reportMonth && !invalid ? {
-    month: reportMonth,
+  const lifecycle = filters.reportMonth && !invalid ? {
+    month: filters.reportMonth,
     nearExpiry: nearExpiryAvailable ? Number(count.nearExpiry) : null,
     nearExpiryAsOf: nearExpiryAvailable ? instant : null,
   } : null;
   return { members: rows.map(memberProfile), callerRole, total, page, pages, filters, invalid, currentUnavailable, monthly, lifecycle, asOf };
+}
+
+export async function getAdminMembersForExport(input: MemberListInput = {}) {
+  const auth = await authorizedMemberSession();
+  if (auth.status !== 200) return auth;
+  const asOf = Date.now();
+  const { filters, invalid } = memberListFilters(input);
+  if (invalid) return { status: 400 as const, error: "ตัวกรองไม่ถูกต้อง" };
+  let parts;
+  try {
+    parts = await buildMemberListQueryParts(auth.sql, auth.fragment, filters, invalid, asOf, false);
+  } catch (error) {
+    if (error instanceof Error && error.message === "Forbidden") {
+      return { status: 403 as const, error: "เซสชันหมดอายุหรือไม่มีสิทธิ์" };
+    }
+    throw error;
+  }
+  if (parts.currentUnavailable) {
+    return { status: 422 as const, error: "ยังตรวจสอบแพ็กเกจที่มีสิทธิ์ปัจจุบันไม่ได้" };
+  }
+  const [result] = await auth.sql`SELECT true AS "authOk",
+    coalesce((
+      SELECT json_agg(row_data ORDER BY row_data."createdAt" DESC, row_data."rowId" DESC)
+      FROM (
+        SELECT members.id AS "rowId", member_code AS "memberCode", full_name AS "fullName",
+          gender::text AS gender, phone, created_at AS "createdAt", role::text AS role, status::text AS status,
+          ${parts.expiry} AS "expireDate"
+        FROM members ${parts.currentJoin}
+        WHERE ${parts.where}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ${XLSX_MAX_ROWS + 1}
+      ) row_data
+    ), '[]'::json) AS rows`;
+  if (!result) return { status: 403 as const, error: "เซสชันหมดอายุหรือไม่มีสิทธิ์" };
+  const rawRows = (result.rows as Record<string, unknown>[] | undefined) ?? [];
+  if (rawRows.length > XLSX_MAX_ROWS) {
+    throw new XlsxLimitError("เกิน 10,000 รายการ กรุณาลดช่วงตัวกรอง");
+  }
+  return {
+    status: 200 as const,
+    asOf,
+    rows: rawRows.map((row) => ({
+      memberCode: String(row.memberCode),
+      fullName: String(row.fullName),
+      gender: String(row.gender ?? ""),
+      phone: String(row.phone ?? ""),
+      createdAt: String(row.createdAt),
+      role: String(row.role),
+      status: String(row.status),
+      expireDate: row.expireDate == null ? null : String(row.expireDate),
+    })),
+  };
 }
 export type MemberHistoryInput = { ordersPage?: string | string[]; checkinsPage?: string | string[]; couponsPage?: string | string[] };
 export function historyPage(input?: string | string[]) {
@@ -335,44 +427,133 @@ export async function getAdminMember(memberCode: string, input: MemberHistoryInp
     coupons: historyResult(coupons.map((row): CouponRow => ({ id: row.id, title: row.title, type: row.type, status: row.status,
       totalQuota: row.totalQuota, usedCount: row.usedCount, expireDate: row.expireDate, lastRecordedUsedAt: row.lastRecordedUsedAt ?? null })), pages.coupons), asOf: Date.now() };
 }
-export async function getAdminDashboard(monthInput?: string) {
-  const { sql, callerRole } = await memberReader("/admin");
-  const range = monthRange(monthInput);
-  const [summary, sales, visits, expiring] = await Promise.all([
-    callerRole === "OWNER" ? sql`SELECT
-      (SELECT count(*)::int FROM members) AS "totalMembers",
-      (SELECT count(*)::int FROM members WHERE status = 'ACTIVE' AND expire_date > now()) AS "activeMembers",
-      (SELECT count(*)::int FROM members WHERE created_at >= ${range.start}::timestamptz AND created_at < ${range.end}::timestamptz) AS "newMembers",
-      (SELECT count(*)::int FROM checkins WHERE checkin_time >= ${range.start}::timestamptz AND checkin_time < ${range.end}::timestamptz) AS "checkins",
-      (SELECT count(*)::int FROM package_payment_orders WHERE status = 'PAID' AND paid_at >= ${range.start}::timestamptz AND paid_at < ${range.end}::timestamptz) AS "paidOrders",
-      (SELECT coalesce(sum(amount_satang), 0)::text FROM package_payment_orders WHERE status = 'PAID' AND paid_at >= ${range.start}::timestamptz AND paid_at < ${range.end}::timestamptz) AS "paidSatang"`
-      : sql`SELECT
-        (SELECT count(*)::int FROM members) AS "totalMembers",
-        (SELECT count(*)::int FROM members WHERE status = 'ACTIVE' AND expire_date > now()) AS "activeMembers",
-        (SELECT count(*)::int FROM members WHERE created_at >= ${range.start}::timestamptz AND created_at < ${range.end}::timestamptz) AS "newMembers",
-        (SELECT count(*)::int FROM checkins WHERE checkin_time >= ${range.start}::timestamptz AND checkin_time < ${range.end}::timestamptz) AS "checkins"`,
-    callerRole === "OWNER" ? sql`SELECT o.id, m.member_code AS "memberCode", m.full_name AS "fullName", o.package_snapshot->>'name' AS "packageName",
-      o.amount_satang AS "amountSatang", o.paid_at AS "paidAt" FROM package_payment_orders o JOIN members m ON m.id = o.member_id
-      WHERE o.status = 'PAID' AND o.paid_at >= ${range.start}::timestamptz AND o.paid_at < ${range.end}::timestamptz ORDER BY o.paid_at DESC, o.id DESC LIMIT 10` : Promise.resolve([]),
-    sql`SELECT c.id, m.member_code AS "memberCode", m.full_name AS "fullName", c.checkin_time AS "checkinTime"
-      FROM checkins c JOIN members m ON m.id = c.member_id
-      WHERE c.checkin_time >= ${range.start}::timestamptz AND c.checkin_time < ${range.end}::timestamptz ORDER BY c.checkin_time DESC, c.id DESC LIMIT 10`,
-    sql`SELECT member_code AS "memberCode", full_name AS "fullName", expire_date AS "expireDate" FROM members
-      WHERE status = 'ACTIVE' AND expire_date > now() AND expire_date <= now() + interval '7 days' ORDER BY expire_date, id LIMIT 10`,
+export async function getAdminDashboard(input?: DashboardPeriodInput, now = new Date()) {
+  const { sql, fragment, callerRole } = await memberReader("/admin");
+  const period = resolveDashboardPeriod(input, now);
+  const [meta] = await sql`SELECT
+    (SELECT count(*)::int FROM checkins WHERE checkin_time >= ${period.start}::timestamptz AND checkin_time < ${period.end}::timestamptz) AS "checkins",
+    to_regclass('r4_online_private.cancellations') IS NOT NULL AS "hasOnlineCancel",
+    to_regclass('r4_staff_private.free_sales') IS NOT NULL AS "hasStaffSales",
+    to_regclass('r4_staff_private.free_sale_cancellations') IS NOT NULL AS "hasStaffFreeCancel",
+    to_regclass('r4_staff_private.paid_transfer_cancellations') IS NOT NULL AS "hasStaffPaidCancel"`;
+  if (!meta) throw new Error("Forbidden");
+
+  const hasOnlineCancel = Boolean(meta.hasOnlineCancel);
+  const hasStaffSales = Boolean(meta.hasStaffSales);
+  const hasStaffFreeCancel = Boolean(meta.hasStaffFreeCancel);
+  const hasStaffPaidCancel = Boolean(meta.hasStaffPaidCancel);
+
+  const staffCancelJoins = hasStaffSales
+    ? fragment`${hasStaffFreeCancel ? fragment`LEFT JOIN r4_staff_private.free_sale_cancellations fc ON fc.sale_id = s.sale_id` : fragment``}
+      ${hasStaffPaidCancel ? fragment`LEFT JOIN r4_staff_private.paid_transfer_cancellations pc ON pc.sale_id = s.sale_id` : fragment``}`
+    : fragment``;
+  const staffCancelledAtExpr = hasStaffFreeCancel && hasStaffPaidCancel
+    ? fragment`COALESCE(fc.cancelled_at, pc.cancelled_at)`
+    : hasStaffFreeCancel
+      ? fragment`fc.cancelled_at`
+      : hasStaffPaidCancel
+        ? fragment`pc.cancelled_at`
+        : fragment`NULL::timestamptz`;
+
+  const [[membersRow], [termsRow], [visitsRow], financeData] = await Promise.all([
+    sql`SELECT true AS "authOk",
+      coalesce((
+        SELECT json_agg(json_build_object(
+          'id', m.id,
+          'memberCode', m.member_code,
+          'fullName', m.full_name,
+          'status', m.status::text,
+          'expireDate', m.expire_date
+        ) ORDER BY m.id)
+        FROM members m
+      ), '[]'::json) AS rows`,
+    sql`SELECT true AS "authOk",
+      coalesce((
+        SELECT json_agg(t)
+        FROM (
+          SELECT
+            'online:' || o.id::text AS "termId",
+            o.member_id AS "memberId",
+            COALESCE(o.confirmed_at, o.created_at) AS "purchasedAt",
+            o.membership_expires_at AS "expiresAt",
+            ${hasOnlineCancel ? fragment`oc.cancelled_at` : fragment`NULL::timestamptz`} AS "cancelledAt",
+            'ONLINE_PAID'::text AS "sourceKind"
+          FROM package_payment_orders o
+          ${hasOnlineCancel ? fragment`LEFT JOIN r4_online_private.cancellations oc ON oc.order_id = o.id` : fragment``}
+          WHERE o.status = 'PAID' AND o.membership_expires_at IS NOT NULL
+          ${hasStaffSales ? fragment`UNION ALL
+          SELECT
+            'staff:' || s.sale_id::text AS "termId",
+            s.member_id AS "memberId",
+            COALESCE(s.occurred_at, s.recorded_at) AS "purchasedAt",
+            s.ends_at AS "expiresAt",
+            ${staffCancelledAtExpr} AS "cancelledAt",
+            s.method::text AS "sourceKind"
+          FROM r4_staff_private.free_sales s
+          ${staffCancelJoins}` : fragment``}
+        ) t
+      ), '[]'::json) AS rows`,
+    sql`SELECT true AS "authOk",
+      coalesce((
+        SELECT json_agg(v ORDER BY v."checkinTime" DESC, v.id DESC)
+        FROM (
+          SELECT c.id, m.member_code AS "memberCode", m.full_name AS "fullName", c.checkin_time AS "checkinTime"
+          FROM checkins c JOIN members m ON m.id = c.member_id
+          WHERE c.checkin_time >= ${period.start}::timestamptz AND c.checkin_time < ${period.end}::timestamptz
+          ORDER BY c.checkin_time DESC, c.id DESC LIMIT 10
+        ) v
+      ), '[]'::json) AS rows`,
+    callerRole === "OWNER" ? readRealFinance() : Promise.resolve(null),
   ]);
-  if (!summary[0]) throw new Error("Forbidden");
-  const row = summary[0];
+
+  if (!membersRow || !termsRow || !visitsRow) throw new Error("Forbidden");
+
+  const memberInputs = ((membersRow.rows as Record<string, unknown>[] | undefined) ?? []).map((row): DashboardMemberInput => ({
+    id: Number(row.id),
+    memberCode: String(row.memberCode),
+    fullName: String(row.fullName),
+    status: String(row.status),
+    expireDate: row.expireDate == null ? null : String(row.expireDate),
+  }));
+  const termInputs = ((termsRow.rows as Record<string, unknown>[] | undefined) ?? []).map((row): DashboardTermInput => ({
+    termId: String(row.termId),
+    memberId: Number(row.memberId),
+    purchasedAt: String(row.purchasedAt),
+    expiresAt: String(row.expiresAt),
+    cancelledAt: row.cancelledAt == null ? null : String(row.cancelledAt),
+    sourceKind: String(row.sourceKind),
+  }));
+  const visits = ((visitsRow.rows as Record<string, unknown>[] | undefined) ?? []).map((row) => ({
+    id: Number(row.id),
+    memberCode: String(row.memberCode),
+    fullName: String(row.fullName),
+    checkinTime: String(row.checkinTime),
+  }));
+
+  const { summary: membershipSummary, statusChart, activityChart, expiring } = computeDashboardMembershipMetrics(
+    memberInputs,
+    termInputs,
+    period,
+  );
+
   const common = {
-    month: range.month,
-    summary: { totalMembers: Number(row.totalMembers), activeMembers: Number(row.activeMembers),
-      newMembers: Number(row.newMembers), checkins: Number(row.checkins) },
-    visits: visits.map(row => ({ id: Number(row.id), memberCode: String(row.memberCode), fullName: String(row.fullName), checkinTime: String(row.checkinTime) })),
-    expiring: expiring.map(row => ({ memberCode: String(row.memberCode), fullName: String(row.fullName), expireDate: String(row.expireDate) })),
+    month: period.month,
+    period,
+    summary: {
+      ...membershipSummary,
+      checkins: Number(meta.checkins),
+      totalAccounts: memberInputs.length,
+    },
+    statusChart,
+    activityChart,
+    visits,
+    expiring,
   };
-  if (callerRole !== "OWNER") return { ...common, callerRole: "ADMIN" as const };
-  return { ...common, callerRole: "OWNER" as const,
-    summary: { ...common.summary, paidOrders: Number(row.paidOrders), paidSatang: String(row.paidSatang) },
-    sales: sales.map(row => ({ id: String(row.id), memberCode: String(row.memberCode), fullName: String(row.fullName),
-      packageName: row.packageName == null ? null : String(row.packageName), amountSatang: Number(row.amountSatang), paidAt: String(row.paidAt) })),
+
+  if (callerRole !== "OWNER" || !financeData) return { ...common, callerRole: "ADMIN" as const };
+  return {
+    ...common,
+    callerRole: "OWNER" as const,
+    finance: computeDashboardFinanceSummary(financeData, period),
   };
 }

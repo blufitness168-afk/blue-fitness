@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { currentPackageDurations, currentStatus, memberListGenders, type getAdminMembers } from "@/lib/admin-members-server";
 import MemberRoleAction from "./MemberRoleAction";
+import MembersExportButton from "./MembersExportButton";
 
 export default function MembersClient({
   data,
@@ -15,7 +16,10 @@ export default function MembersClient({
   const href = (page: number) => `/admin/members?${new URLSearchParams([...params, ["page", String(page)]])}`;
   const fieldClass = "mt-1 block w-full rounded-xl border p-3";
   return <div className="space-y-6">
-    <h1 className="text-2xl font-black text-blu-dark">สมาชิก</h1>
+    <header className="flex flex-wrap items-center justify-between gap-4">
+      <h1 className="text-2xl font-black text-blu-dark">สมาชิก</h1>
+      <MembersExportButton queryString={params.toString()} />
+    </header>
     <form key={params.toString()} action="/admin/members" method="get" className="space-y-4 rounded-2xl border bg-white p-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {([

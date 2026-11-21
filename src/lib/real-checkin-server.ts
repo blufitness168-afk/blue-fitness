@@ -5,6 +5,143 @@ import { neon } from "@neondatabase/serverless";
 import { getCurrentMember, SESSION_COOKIE } from "./auth/server";
 import { json, readBody } from "./auth/http";
 
+function parseCheckinHistoryFilters(rawQuery: unknown, rawFrom: unknown, rawTo: unknown) {
+  if (typeof rawQuery !== "string" || rawQuery.length > 100) {
+    return { error: "คำค้นไม่ถูกต้อง" as const };
+  }
+  // Require an explicit offset; datetime-local clients send Bangkok +07:00.
+  const dateFilter = (value: unknown) =>
+    value === undefined || value === ""
+      ? null
+      : typeof value === "string" &&
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
+          Number.isFinite(Date.parse(value))
+        ? value
+        : false;
+  const from = dateFilter(rawFrom);
+  const to = dateFilter(rawTo);
+  if (from === false || to === false || (from && to && Date.parse(from) >= Date.parse(to))) {
+    return { error: "ช่วงเวลาไม่ถูกต้อง" as const };
+  }
+  const pattern = `%${rawQuery.trim().replace(/[\\%_]/g, "\\$&")}%`;
+  return { error: null, pattern, from, to };
+}
+
+export interface CheckinExportRecord {
+  id: number;
+  memberCode: string;
+  fullName: string;
+  checkedAt: string;
+  scannerType: string;
+  pointsAwarded: number;
+  notes: string | null;
+  exitedAt: string | null;
+  durationSeconds: number | string | null;
+  snapshot: {
+    reason?: string;
+    usedTimeSlot?: string | null;
+    package?: { name?: string } | null;
+    serviceType?: string;
+  } | null;
+}
+
+const CHECKIN_EXPORT_MAX_ROWS = 10_000;
+
+export async function readCheckinHistoryForExport(request: Request) {
+  try {
+    const member = await getCurrentMember();
+    if (!member || member.status === "SUSPENDED") {
+      return { status: 401 as const, error: "กรุณาเข้าสู่ระบบ" };
+    }
+    if (!["ADMIN", "OWNER"].includes(member.role)) {
+      return { status: 403 as const, error: "ต้องใช้เซสชันพนักงานปกติ" };
+    }
+    const token = (await cookies()).get(SESSION_COOKIE)?.value;
+    if (!token || !/^[a-f0-9]{64}$/.test(token)) {
+      return { status: 401 as const, error: "กรุณาเข้าสู่ระบบใหม่" };
+    }
+    if (request.url.length > 2048) {
+      return { status: 400 as const, error: "ตัวกรองไม่ถูกต้อง" };
+    }
+    const params = new URL(request.url).searchParams;
+    const allowed = ["query", "from", "to"];
+    if (
+      [...params.keys()].some(
+        (key) => !allowed.includes(key) || params.getAll(key).length !== 1,
+      )
+    ) {
+      return { status: 400 as const, error: "ตัวกรองไม่ถูกต้อง" };
+    }
+
+    const parsed = parseCheckinHistoryFilters(
+      params.get("query") ?? "",
+      params.get("from") ?? "",
+      params.get("to") ?? "",
+    );
+    if (parsed.error) {
+      return { status: 400 as const, error: parsed.error };
+    }
+
+    if (!process.env.DATABASE_URL) throw Error("Database unavailable");
+    const sql = neon(process.env.DATABASE_URL);
+    const session = createHash("sha256").update(token).digest("hex");
+
+    const capability = await sql`SELECT to_regclass('public.r7_visits') IS NOT NULL AS visits`;
+    if (typeof capability[0]?.visits !== "boolean") throw Error("Unknown admission capability");
+
+    const rows = capability[0].visits
+      ? await sql`WITH auth AS (
+          SELECT 1 FROM auth_sessions s JOIN members staff ON staff.id=s.member_id
+          WHERE s.token_hash=${session} AND s.mode='NORMAL' AND s.revoked_at IS NULL
+            AND s.expires_at>clock_timestamp() AND staff.role IN ('ADMIN','OWNER') AND staff.status<>'SUSPENDED'
+        ), filtered AS (
+          SELECT c.id, m.member_code AS "memberCode", m.full_name AS "fullName",
+            coalesce(v.entered_at,c.checkin_time) AS "checkedAt", c.scanner_type AS "scannerType",
+            c.points_awarded AS "pointsAwarded", c.notes, v.exited_at AS "exitedAt", v.snapshot,
+            CASE WHEN v.exited_at IS NOT NULL THEN extract(epoch FROM v.exited_at-v.entered_at) END AS "durationSeconds"
+          FROM checkins c JOIN members m ON m.id=c.member_id LEFT JOIN r7_visits v ON v.checkin_id=c.id
+          WHERE EXISTS (SELECT 1 FROM auth)
+          AND (m.member_code ILIKE ${parsed.pattern} OR m.full_name ILIKE ${parsed.pattern})
+          AND (${parsed.from}::timestamptz IS NULL OR coalesce(v.entered_at,c.checkin_time)>=${parsed.from}::timestamptz)
+          AND (${parsed.to}::timestamptz IS NULL OR coalesce(v.entered_at,c.checkin_time)<${parsed.to}::timestamptz)
+        ) SELECT EXISTS (SELECT 1 FROM auth) AS "authOk",
+          coalesce((SELECT jsonb_agg(r ORDER BY r."checkedAt" DESC,r.id DESC)
+            FROM (SELECT * FROM filtered ORDER BY "checkedAt" DESC,id DESC LIMIT ${CHECKIN_EXPORT_MAX_ROWS + 1}) r),'[]'::jsonb) AS records`
+      : await sql`WITH auth AS (
+          SELECT 1 FROM auth_sessions s JOIN members staff ON staff.id=s.member_id
+          WHERE s.token_hash=${session} AND s.mode='NORMAL' AND s.revoked_at IS NULL
+            AND s.expires_at>clock_timestamp() AND staff.role IN ('ADMIN','OWNER') AND staff.status<>'SUSPENDED'
+        ), filtered AS (
+          SELECT c.id, m.member_code AS "memberCode", m.full_name AS "fullName",
+            c.checkin_time AS "checkedAt", c.scanner_type AS "scannerType",
+            c.points_awarded AS "pointsAwarded", c.notes,
+            NULL::timestamptz AS "exitedAt", NULL::jsonb AS snapshot, NULL::numeric AS "durationSeconds"
+          FROM checkins c JOIN members m ON m.id=c.member_id
+          WHERE EXISTS (SELECT 1 FROM auth)
+          AND (m.member_code ILIKE ${parsed.pattern} OR m.full_name ILIKE ${parsed.pattern})
+          AND (${parsed.from}::timestamptz IS NULL OR c.checkin_time>=${parsed.from}::timestamptz)
+          AND (${parsed.to}::timestamptz IS NULL OR c.checkin_time<${parsed.to}::timestamptz)
+        ) SELECT EXISTS (SELECT 1 FROM auth) AS "authOk",
+          coalesce((SELECT jsonb_agg(r ORDER BY r."checkedAt" DESC,r.id DESC)
+            FROM (SELECT * FROM filtered ORDER BY "checkedAt" DESC,id DESC LIMIT ${CHECKIN_EXPORT_MAX_ROWS + 1}) r),'[]'::jsonb) AS records`;
+
+    if (!rows[0]?.authOk) {
+      return { status: 403 as const, error: "เซสชันหมดอายุหรือไม่มีสิทธิ์" };
+    }
+    const records = (rows[0].records as CheckinExportRecord[] | undefined) ?? [];
+    if (records.length > CHECKIN_EXPORT_MAX_ROWS) {
+      return { status: 413 as const, error: "เกิน 10,000 รายการ กรุณาลดช่วงตัวกรอง" };
+    }
+    return { status: 200 as const, records };
+  } catch (error) {
+    const databaseError = error as { code?: string };
+    if (databaseError.code === "42501") {
+      return { status: 403 as const, error: "เซสชันหมดอายุหรือไม่มีสิทธิ์" };
+    }
+    return { status: 503 as const, error: "ส่งออกไม่สำเร็จ กรุณาลองใหม่" };
+  }
+}
+
 export async function realCheckinAction(request: Request, action: string) {
   const body = await readBody(request);
   if (!body) return json({ error: "ข้อมูลไม่ถูกต้อง" }, 400);
@@ -52,11 +189,9 @@ export async function realCheckinAction(request: Request, action: string) {
     }
     const page = body.page === undefined ? 1 : Number(body.page);
     if (!Number.isSafeInteger(page) || page < 1 || page > 100000) return json({ error: "หน้าไม่ถูกต้อง" }, 400);
-    // Require an explicit offset; datetime-local clients send Bangkok +07:00.
-    const dateFilter = (value: unknown) => value === undefined || value === "" ? null :
-      typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value)) ? value : false;
-    const from = dateFilter(body.from), to = dateFilter(body.to);
-    if (from === false || to === false || (from && to && Date.parse(from) >= Date.parse(to))) return json({ error: "ช่วงเวลาไม่ถูกต้อง" }, 400);
+    const parsed = parseCheckinHistoryFilters(body.query, body.from, body.to);
+    if (parsed.error) return json({ error: parsed.error }, 400);
+    const { from, to } = parsed;
     const capability = await sql`SELECT to_regclass('public.r7_visits') IS NOT NULL AS visits,
       to_regprocedure('public.r7_visit_action(text,text,uuid,text,text)') IS NOT NULL AS "outSupported",
       to_regprocedure('public.r7_manual_visit(text,uuid,jsonb)') IS NOT NULL AS "manualSupported",

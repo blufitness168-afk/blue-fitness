@@ -56,7 +56,7 @@ export async function kioskAction(request: Request, action: string) {
     if (action === "scan") {
       if (typeof body.code !== "string" || !/^(?:BLU-\d{1,12}|CARD-[0-9]{1,95})$/i.test(body.code.trim()) || typeof body.requestKey !== "string" || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(body.requestKey)) return json({ error: "รหัสสแกนไม่ถูกต้อง" }, 400);
       const direction = body.direction;
-      if (direction !== undefined && direction !== "IN" && direction !== "OUT") return json({ error: "เลือกเข้า หรือ ออก" }, 400);
+      if (direction !== undefined && direction !== "IN" && direction !== "OUT" && direction !== "AUTO") return json({ error: "เลือกเข้า หรือ ออก" }, 400);
       if (await pairedVisits(sql)) {
         try {
           const rows = await sql`SELECT public.r7_kiosk_scan(${await digest()},${station()},${body.requestKey}::uuid,${body.code.trim().toUpperCase()},${direction ?? "IN"}) AS result`;

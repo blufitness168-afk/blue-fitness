@@ -12,10 +12,11 @@ const rolloutSource = ts.transpileModule(readFileSync(new URL('./staff-paid-roll
   compilerOptions: { module: ts.ModuleKind.CommonJS },
 }).outputText;
 
-function setup({ allowed = true, role = 'OWNER', results = [], fail = false, state = {}, beforeRead, reads, onlineReads = false, historySources = {} } = {}) {
+function setup({ allowed = true, role = 'OWNER', results = [], fail = false, state = {}, beforeRead, reads, onlineReads = false, historySources = {}, financeData = { records: [], audit: [], unconfirmedPaidCount: 0 } } = {}) {
   const rollout = {};
   runInNewContext(rolloutSource, { exports: rollout, require: () => ({}), process: { env: { ENABLE_STAFF_PAID_READS: reads } } });
   const calls = [], guards = [], historyProbes = [];
+  let financeReads = 0;
   const token = 'a'.repeat(64), digest = createHash('sha256').update(token).digest('hex');
   const member = { id: 99, role: allowed ? role : 'MEMBER', status: 'ACTIVE', passwordHash: 'never-serialize' };
   const session = { tokenHash: digest, revokedAt: null, expiresAt: new Date(Date.now() + 60000), mode: 'NORMAL' };
@@ -28,6 +29,8 @@ function setup({ allowed = true, role = 'OWNER', results = [], fail = false, sta
   const cache = new Map();
   const mocks = {
     'server-only': {}, './staff-paid-rollout-server': rollout, './online-cancellation-rollout-server': { onlineCancellationReads: async () => onlineReads },
+    './real-finance-server': { readRealFinance: async () => { financeReads++; return financeData; } },
+    '@/components/AdminDashboardCharts': {},
     'next/headers': { cookies: async () => ({ get: () => state.cookie === null ? undefined : ({ value: state.cookie ?? token }) }) },
     'next/navigation': { redirect: path => { throw new Error(`redirect:${path}`); } },
     '@/db': { db }, '@/db/schema': schema,
@@ -62,7 +65,8 @@ function setup({ allowed = true, role = 'OWNER', results = [], fail = false, sta
       if (name === './auth/http') return { json: (body, status = 200) => Response.json(body, { status }), readBody: async request => request.json() };
       if (name === '../app/admin/finance/types' || name === '@/app/admin/finance/types') return load('../app/admin/finance/types.ts');
       if (name === '@/lib/real-finance-server') return load('./real-finance-server.ts');
-      if (name === '@/lib/xlsx') return load('./xlsx.ts');
+      if (name === '@/lib/xlsx' || name === './xlsx') return load('./xlsx.ts');
+      if (name === './admin-dashboard-metrics') return load('./admin-dashboard-metrics.ts');
       if (name === './admin-permissions') return load('./admin-permissions.ts');
       if (name === './package-catalog') return load('./package-catalog.ts');
       if (name === './admin-permissions-server') {
@@ -76,7 +80,7 @@ function setup({ allowed = true, role = 'OWNER', results = [], fail = false, sta
     return loaded.exports;
   }
   process.env.DATABASE_URL = 'mock-only';
-  return { ...load('./admin-members-server.ts'), calls, guards, historyProbes, load };
+  return { ...load('./admin-members-server.ts'), calls, guards, historyProbes, financeReads: () => financeReads, load };
 }
 test('all data loaders guard their existing route before DB access', async () => {
   for (const [name, args] of [['getAdminMembers', []], ['getAdminMember', ['BLU-1']], ['getAdminDashboard', []]]) {
@@ -479,6 +483,7 @@ test('rendered member list keeps all filters on paging links and role changes re
   loaded.require = name => {
     if (name === 'next/link') return { __esModule: true, default: function Link({ href, children }) { return React.createElement('a', { href }, children); } };
     if (name === './MemberRoleAction') return { __esModule: true, default: function RoleAction() { return React.createElement('button', null, 'ROLE_MUTATION'); } };
+    if (name === './MembersExportButton') return { __esModule: true, default: function MembersExportButton() { return React.createElement('button', null, 'EXPORT_XLSX'); } };
     if (name === '@/lib/admin-members-server') return s;
     return require(name);
   };
@@ -631,15 +636,36 @@ test('detail page forwards awaited query parameters and all histories provide se
   assert.match(view, /history.hasNext/);
   assert.match(view, /history.page > 1/);
 });
-test('dashboard uses PAID orders and paid_at, real checkins and current membership, no fictional finance', async () => {
-  const s = setup({ results: [[{ paidSatang: '0', paidOrders: 0 }], [], [], []] });
-  const data = await s.getAdminDashboard('2026-10');
-  assert.equal(data.summary.paidSatang, '0');
-  assert.deepEqual(data.sales, []);
-  assert.match(s.calls[0].text, /status = 'PAID' AND paid_at >= .* AND paid_at </);
+test('dashboard uses R9 period metrics, non-financial member/term SQL, real checkins and owner real finance', async () => {
+  const s = setup({
+    results: [
+      [{ checkins: 4, hasOnlineCancel: false, hasStaffSales: false, hasStaffFreeCancel: false, hasStaffPaidCancel: false }],
+      [{ authOk: true, rows: [{ id: 1, memberCode: 'BLU-1', fullName: 'Fixture', status: 'ACTIVE', expireDate: '2026-11-10T00:00:00Z' }] }],
+      [{ authOk: true, rows: [{ termId: 'online:1', memberId: 1, purchasedAt: '2026-10-10T10:00:00+07:00', expiresAt: '2026-11-10T10:00:00+07:00', cancelledAt: null, sourceKind: 'ONLINE_PAID' }] }],
+      [{ authOk: true, rows: [] }],
+    ],
+    financeData: {
+      records: [
+        { id: '1', date: '2026-10-10', type: 'INCOME', category: 'แพ็กเกจ', amount: 123.45, note: 'Online', source: 'MEMBERSHIP', createdAt: '2026-10-10T00:00:00Z', version: 0, memberCode: 'BLU-1', memberName: 'Fixture' },
+        { id: '2', date: '2026-10-12', type: 'EXPENSE', category: 'เงินเดือน', amount: 23.45, note: 'Pay', source: 'MANUAL', createdAt: '2026-10-12T00:00:00Z', version: 1 },
+      ],
+      audit: [{ secret: 'DO_NOT_EXPOSE' }],
+      unconfirmedPaidCount: 0,
+    },
+  });
+  const data = await s.getAdminDashboard('2026-10', new Date('2026-11-21T08:00:00Z'));
+  assert.equal(data.callerRole, 'OWNER');
+  assert.equal(s.financeReads(), 1);
+  assert.equal(data.summary.totalPurchasedMembers, 1);
+  assert.equal(data.summary.newInPeriod, 1);
+  assert.equal(data.summary.checkins, 4);
+  assert.deepEqual(data.finance.period, { income: 123.45, expense: 23.45, net: 100 });
+  assert.equal(data.finance.monthlyChart.length, 12);
+  assert.equal(data.finance.dailyChart.length, 31);
+  assert.doesNotMatch(JSON.stringify(data), /DO_NOT_EXPOSE/);
   assert.match(s.calls[0].text, /count\(\*\)::int FROM checkins/);
-  assert.match(s.calls[0].text, /expire_date > now\(\)/);
-  assert.doesNotMatch(s.calls.map(c => c.text).join(''), /expense|net_profit|INSERT|UPDATE|DELETE/i);
+  assert.match(s.calls[2].text, /package_payment_orders/);
+  assert.doesNotMatch(s.calls.map(c => c.text).join(''), /amount_satang|paid_at|refund_satang|INSERT|UPDATE|DELETE/i);
 });
 test('direct finance URLs and API/export deny ADMIN/MEMBER and invalid persisted sessions before finance SQL', async () => {
   for (const options of [
@@ -666,14 +692,24 @@ test('direct finance URLs and API/export deny ADMIN/MEMBER and invalid persisted
 });
 test('dashboard ADMIN skips all financial SQL and allowlists every payload level', async () => {
   const secret = { paidSatang: '987654', paidOrders: 42, amountSatang: 987654, paidAt: 'secret', provider: 'secret', tokenHash: 'secret' };
-  const s = setup({ role: 'ADMIN', results: [[{ totalMembers: 3, activeMembers: 2, newMembers: 1, checkins: 4, ...secret }], [{ id: 1, memberCode: 'BLU-1', fullName: 'fixture', checkinTime: '2026-10-01', ...secret }], [{ memberCode: 'BLU-1', fullName: 'fixture', expireDate: '2026-10-02', ...secret }]] });
-  const data = await s.getAdminDashboard('2026-10');
+  const s = setup({
+    role: 'ADMIN',
+    financeData: { records: [{ id: '1', date: '2026-10-01', type: 'INCOME', category: 'แพ็กเกจ', amount: 9876.54, note: 'secret', source: 'MEMBERSHIP', createdAt: '2026-10-01', version: 0 }], audit: [] },
+    results: [
+      [{ checkins: 4, hasOnlineCancel: false, hasStaffSales: false, hasStaffFreeCancel: false, hasStaffPaidCancel: false, ...secret }],
+      [{ authOk: true, rows: [{ id: 1, memberCode: 'BLU-1', fullName: 'fixture', status: 'ACTIVE', expireDate: '2026-10-02', ...secret }] }],
+      [{ authOk: true, rows: [{ termId: 't1', memberId: 1, purchasedAt: '2026-10-01T00:00:00Z', expiresAt: '2026-10-15T00:00:00Z', cancelledAt: null, sourceKind: 'ONLINE_PAID', ...secret }] }],
+      [{ authOk: true, rows: [{ id: 1, memberCode: 'BLU-1', fullName: 'fixture', checkinTime: '2026-10-01', ...secret }] }],
+    ],
+  });
+  const data = await s.getAdminDashboard('2026-10', new Date('2026-11-21T08:00:00Z'));
   assert.equal(data.callerRole, 'ADMIN');
-  assert.deepEqual(Object.keys(data.summary).sort(), ['activeMembers', 'checkins', 'newMembers', 'totalMembers']);
+  assert.equal(s.financeReads(), 0);
+  assert.equal(Object.hasOwn(data, 'finance'), false);
   assert.equal(Object.hasOwn(data, 'sales'), false);
-  assert.doesNotMatch(JSON.stringify(data), /paidSatang|paidOrders|amountSatang|paidAt|provider|tokenHash|987654/);
-  assert.equal(s.calls.length, 3);
-  assert.doesNotMatch(s.calls.map(c => c.text).join(''), /package_payment_orders|amount_satang|paid_at|paidOrders|paidSatang/);
+  assert.doesNotMatch(JSON.stringify(data), /paidSatang|paidOrders|amountSatang|paidAt|provider|tokenHash|987654|9876\.54/);
+  assert.equal(s.calls.length, 4);
+  assert.doesNotMatch(s.calls.map(c => c.text).join(''), /amount_satang|paid_at|refund_satang|finance_entries|real_finance_action/);
   assert.deepEqual(s.guards, ['/admin']);
 });
 test('dashboard fails closed when persisted authorization changes after page guard', async () => {
@@ -685,30 +721,71 @@ test('dashboard fails closed when persisted authorization changes after page gua
     ({ member }) => { member.role = 'MEMBER'; },
     ({ member }) => { member.role = 'ADMIN'; },
   ]) {
-    const s = setup({ results: [[{ paidOrders: 1 }]], beforeRead: change });
+    const s = setup({ results: [[{ checkins: 1 }]], beforeRead: change });
     await assert.rejects(s.getAdminDashboard(), /Forbidden/);
   }
+  const midFlight = setup({
+    results: [[{ checkins: 1 }], [{ authOk: true, rows: [] }], [{ authOk: true, rows: [] }], [{ authOk: true, rows: [] }]],
+    beforeRead: ({ index, session }) => { if (index === 1) session.revokedAt = new Date(); },
+  });
+  await assert.rejects(midFlight.getAdminDashboard(), /Forbidden/);
 });
-test('rendered dashboard ADMIN has no sales/counts/money; OWNER retains existing finance', async () => {
+test('rendered dashboard ADMIN has no finance/money; OWNER renders R9 charts and finance', async () => {
   const React = require('react');
   const { renderToStaticMarkup } = require('react-dom/server');
+  const chartsFile = new URL('../components/AdminDashboardCharts.tsx', import.meta.url);
+  const chartsMod = new Module(chartsFile.pathname);
+  chartsMod.require = require;
+  chartsMod._compile(ts.transpileModule(readFileSync(chartsFile, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
+  }).outputText, chartsFile.pathname);
   const filename = new URL('../app/admin/DashboardClient.tsx', import.meta.url), loaded = new Module(filename.pathname);
-  loaded.require = name => name === 'next/link' ? { __esModule: true, default: ({ children, href }) => React.createElement('a', { href }, children) } : require(name);
+  loaded.require = name => {
+    if (name === 'next/link') return { __esModule: true, default: ({ children, href }) => React.createElement('a', { href }, children) };
+    if (name === '@/components/AdminDashboardCharts') return chartsMod.exports;
+    return require(name);
+  };
   loaded._compile(ts.transpileModule(readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, filename.pathname);
   for (const role of ['ADMIN', 'OWNER']) {
-    const s = setup({ role, results: [[{ totalMembers: 3, activeMembers: 2, newMembers: 1, checkins: 4, paidOrders: 1, paidSatang: '12345' }], [], [], []] });
-    const data = await s.getAdminDashboard('2026-10');
+    const s = setup({
+      role,
+      results: [
+        [{ checkins: 4, hasOnlineCancel: false, hasStaffSales: false, hasStaffFreeCancel: false, hasStaffPaidCancel: false }],
+        [{ authOk: true, rows: [] }],
+        [{ authOk: true, rows: [] }],
+        [{ authOk: true, rows: [] }],
+      ],
+      financeData: {
+        records: [{ id: 'f1', date: '2026-10-05', type: 'INCOME', category: 'แพ็กเกจ', amount: 123.45, note: 'test', source: 'MEMBERSHIP', createdAt: '2026-10-05T00:00:00Z', version: 0 }],
+        audit: [],
+        unconfirmedPaidCount: 0,
+      },
+    });
+    const data = await s.getAdminDashboard('2026-10', new Date('2026-11-21T08:00:00Z'));
     const html = renderToStaticMarkup(React.createElement(loaded.exports.default, { data }));
-    assert.match(html, /R9/);
-    assert.match(html, /บัญชีสมัครทั้งหมด/);
-    if (role === 'ADMIN') assert.doesNotMatch(html, /PAID|ยอดชำระ|วันที่ชำระ|การชำระแพ็กเกจ|฿|123\.45/);
-    else assert.match(html, /123\.45/);
+    assert.match(html, /สมาชิกทั้งหมดที่เคยซื้อ/);
+    assert.match(html, /สถานะสมาชิก ณ วันที่รายงาน/);
+    assert.match(html, /ความเคลื่อนไหวสมาชิก/);
+    if (role === 'ADMIN') assert.doesNotMatch(html, /฿|รายรับ|รายจ่าย|สุทธิ|ภาพรวมการเงิน|123\.45|PAID/);
+    else {
+      assert.match(html, /ภาพรวมการเงิน/);
+      assert.match(html, /123\.45 ฿/);
+      assert.match(html, /รายรับ \/ รายจ่าย \/ สุทธิ รายเดือน/);
+    }
   }
 });
 test('native PostgreSQL executes actual dashboard statements and denies stale persisted sessions', { skip: process.env.R2_NATIVE_POSTGRES !== '1' }, async () => {
   const queries = [];
   for (const role of ['ADMIN', 'OWNER']) {
-    const s = setup({ role, results: [[{ totalMembers: 1, activeMembers: 1, newMembers: 1, checkins: 1, paidOrders: 1, paidSatang: '12345' }], [], [], []] });
+    const s = setup({
+      role,
+      results: [
+        [{ checkins: 1, hasOnlineCancel: false, hasStaffSales: false, hasStaffFreeCancel: false, hasStaffPaidCancel: false }],
+        [{ authOk: true, rows: [] }],
+        [{ authOk: true, rows: [] }],
+        [{ authOk: true, rows: [] }],
+      ],
+    });
     await s.getAdminDashboard('2026-10');
     queries.push({ role, calls: s.calls });
   }
@@ -742,10 +819,10 @@ with tempfile.TemporaryDirectory(prefix='blu-r2-dashboard-') as tmp:
   sql('''CREATE TABLE members(id int, member_code text, full_name text, role text, status text, expire_date timestamptz, created_at timestamptz);
 CREATE TABLE auth_sessions(member_id int, token_hash text, revoked_at timestamptz, expires_at timestamptz, mode text);
 CREATE TABLE checkins(id int, member_id int, checkin_time timestamptz);
-CREATE TABLE package_payment_orders(id text, member_id int, package_snapshot jsonb, amount_satang int, status text, paid_at timestamptz);
+CREATE TABLE package_payment_orders(id text, member_id int, package_snapshot jsonb, amount_satang int, status text, created_at timestamptz, confirmed_at timestamptz, paid_at timestamptz, membership_expires_at timestamptz);
 INSERT INTO members VALUES(99,'FIXTURE','fixture','OWNER','ACTIVE',now()+interval '1 day','2026-10-01');
 INSERT INTO checkins VALUES(1,99,'2026-10-01');
-INSERT INTO package_payment_orders VALUES('fixture',99,'{"name":"fixture"}',12345,'PAID','2026-10-01');''')
+INSERT INTO package_payment_orders VALUES('fixture',99,'{"name":"fixture"}',12345,'PAID','2026-10-01','2026-10-01','2026-10-01','2026-11-01');''')
   def literal(value): return "'"+str(value).replace("'","''")+"'"
   count=0
   for group in queries:

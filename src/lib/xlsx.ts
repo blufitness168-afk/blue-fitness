@@ -44,9 +44,21 @@ function zip(files: Record<string, string>): Uint8Array<ArrayBuffer> {
   return new Uint8Array(Buffer.concat([...local, directory, end]));
 }
 
+function sanitizeSheetName(name: string) {
+  const cleaned = name
+    .replace(/[\u0000-\u001f\[\]:*?/\\]/g, "")
+    .trim()
+    .slice(0, 31);
+  return cleaned || "Sheet1";
+}
+
 /** Text is always inlineStr, never a formula, hyperlink or external relationship. */
-export function createXlsx(rows: (string | number)[][]): Uint8Array<ArrayBuffer> {
+export function createXlsx(rows: (string | number)[][], sheetName = "Finance"): Uint8Array<ArrayBuffer> {
   if (rows.length > XLSX_MAX_ROWS + 1) throw new XlsxLimitError("เกิน 10,000 รายการ กรุณาลดช่วงตัวกรอง");
+  const safeSheetName = xml(sanitizeSheetName(sheetName));
+  const maxCols = Math.max(1, ...rows.map((row) => row.length));
+  if (maxCols > 26) throw new XlsxLimitError("Too many columns");
+  const lastCol = String.fromCharCode(64 + maxCols);
   let size = 0;
   const sheetRows = rows.map((row, index) => {
     if (row.length > 26) throw new XlsxLimitError("Too many columns");
@@ -68,8 +80,8 @@ export function createXlsx(rows: (string | number)[][]): Uint8Array<ArrayBuffer>
   return zip({
     "[Content_Types].xml": '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>',
     "_rels/.rels": '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
-    "xl/workbook.xml": `<workbook xmlns="${ns}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Finance" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+    "xl/workbook.xml": `<workbook xmlns="${ns}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${safeSheetName}" sheetId="1" r:id="rId1"/></sheets></workbook>`,
     "xl/_rels/workbook.xml.rels": '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
-    "xl/worksheets/sheet1.xml": `<worksheet xmlns="${ns}"><dimension ref="A1:H${Math.max(rows.length, 1)}"/><sheetData>${sheetRows}</sheetData></worksheet>`,
+    "xl/worksheets/sheet1.xml": `<worksheet xmlns="${ns}"><dimension ref="A1:${lastCol}${Math.max(rows.length, 1)}"/><sheetData>${sheetRows}</sheetData></worksheet>`,
   });
 }

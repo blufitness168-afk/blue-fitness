@@ -1,12 +1,12 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { User } from "lucide-react";
 import PasswordInput from "@/components/PasswordInput";
 
 type Result = { ok?: boolean; reason?: string; error?: string; member?: { name: string; photo: string | null } };
-type Direction = "IN" | "OUT";
-type Scan = { code: string; requestKey: string; direction?: Direction };
+type Scan = { code: string; requestKey: string; direction?: "AUTO" };
 const messages: Record<string, string> = {
-  EXIT: "บันทึกออกแล้ว • ขอบคุณที่ใช้บริการ", ALREADY_IN: "มีรายการเข้าอยู่แล้ว กรุณาเลือกออกเมื่อต้องการเช็กเอาต์",
+  EXIT: "บันทึกออกแล้ว • ขอบคุณที่ใช้บริการ", ALREADY_IN: "มีรายการเข้าอยู่แล้ว กรุณาติดต่อพนักงาน",
   NO_OPEN_VISIT: "ไม่พบรายการเข้าที่ยังเปิดอยู่ กรุณาติดต่อพนักงาน",
   PAID_ENTRY: "เข้าใช้บริการได้ • ยินดีต้อนรับ", FREE_ENTRY: "เข้าใช้บริการได้ • ใช้คูปองฟรี 1 ครั้งแล้ว",
   BOUNCE: "รับการสแกนนี้แล้ว กรุณารอสักครู่", NOT_FOUND: "ไม่พบสมาชิก กรุณาติดต่อพนักงาน",
@@ -21,12 +21,10 @@ export default function KioskClient({ expiresAt }: { expiresAt: string }) {
   const [result, setResult] = useState<Result | null>(null);
   const [pending, setPending] = useState<Scan | null>(null);
   const [outSupported, setOutSupported] = useState<boolean | null>(null);
-  const [direction, setDirection] = useState<Direction>("IN");
   const [working, setWorking] = useState(false);
   const [exit, setExit] = useState(false);
   const [password, setPassword] = useState("");
   const [expired, setExpired] = useState(false);
-  const [sound, setSound] = useState(false);
   useEffect(() => {
     const timer = setInterval(() => { if (Date.now() >= Date.parse(expiresAt)) { setExpired(true); setResult(null); } }, 1000);
     const controller = new AbortController();
@@ -60,12 +58,6 @@ export default function KioskClient({ expiresAt }: { expiresAt: string }) {
       if (response.status === 401) { setExpired(true); setPending(null); }
       else if (response.status < 500) { setPending(null); last.current.set(payload.code, Date.now()); }
       setResult(data);
-      if (sound && data.ok) {
-        try {
-        const audio = new AudioContext(); const oscillator = audio.createOscillator(); const gain = audio.createGain();
-        gain.gain.value = 0.08; oscillator.connect(gain); gain.connect(audio.destination); oscillator.start(); oscillator.stop(audio.currentTime + 0.15); oscillator.onended = () => { void audio.close(); };
-        } catch { /* Audio is optional; never turn a confirmed visit into a network retry. */ }
-      }
     } catch { setResult({ error: "เครือข่ายขัดข้อง กด ‘ลองคำขอเดิม’ เพื่อยืนยันผล ห้ามสแกนใหม่" }); }
     finally { busy.current = false; setWorking(false); }
   }
@@ -79,34 +71,52 @@ export default function KioskClient({ expiresAt }: { expiresAt: string }) {
     } catch { setResult({ error: "เชื่อมต่อไม่ได้ กรุณาลองอีกครั้ง" }); }
     finally { setPassword(""); busy.current = false; setWorking(false); }
   }
+  const statusBg = result?.ok
+    ? result.reason === "EXIT"
+      ? "bg-sky-900"
+      : "bg-green-900"
+    : result?.reason === "BOUNCE"
+      ? "bg-amber-900"
+      : result
+        ? "bg-red-900"
+        : "bg-slate-800";
+  const photoBorder = result?.ok
+    ? result.reason === "EXIT"
+      ? "border-sky-400"
+      : "border-emerald-400"
+    : result?.reason === "BOUNCE"
+      ? "border-amber-400"
+      : result
+        ? "border-rose-400"
+        : "border-slate-700";
   return <main className="min-h-screen bg-slate-950 text-white p-8 text-center" onClick={() => { if (!exit) input.current?.focus(); }}>
-    <h1 className="text-4xl font-bold">BLU FITNESS • {outSupported && direction === "OUT" ? "เช็กเอาต์" : "เช็กอินเข้า"}</h1>
-    <p className="my-4">{outSupported === null ? "กำลังตรวจสอบสถานี…" : outSupported ? "เลือกเข้า หรือ ออก ก่อนสแกน • ไม่เพิ่มแต้ม" : "สถานีเข้าเท่านั้น • ไม่เช็กเอาต์ • ไม่เพิ่มแต้ม"}</p>
+    <h1 className="text-4xl font-bold">BLU FITNESS • {outSupported ? "จุดสแกนเข้า–ออก" : "เช็กอินเข้า"}</h1>
+    <p className="my-4">{outSupported === null ? "กำลังตรวจสอบสถานี…" : outSupported ? "สแกน QR สมาชิกหรือบัตร เพื่อบันทึกเข้า–ออกอัตโนมัติ • ไม่ต้องกดปุ่ม" : "สถานีเข้าเท่านั้น • ไม่เช็กเอาต์ • ไม่เพิ่มแต้ม"}</p>
     {expired ? <section role="alert" className="my-12 text-3xl">เซสชันสิ้นสุด กรุณาให้พนักงาน <a className="underline" href="/member/login">เข้าสู่ระบบใหม่</a></section> : <>
-      {outSupported && <div role="group" aria-label="ประเภทการสแกน" className="flex justify-center gap-3">
-        {(["IN", "OUT"] as const).map(mode => <button key={mode} type="button" aria-pressed={direction === mode}
-          disabled={working || !!pending || exit} className={`border rounded-xl px-8 py-3 ${direction === mode ? "bg-white text-slate-950" : ""}`}
-          onClick={() => { if (busy.current || pending || exit) return; setDirection(mode); setCode(""); setResult(null); }}>
-          {mode === "IN" ? "เข้า" : "ออก"}
-        </button>)}
-      </div>}
+      <div className={`mx-auto my-5 h-44 w-44 sm:h-52 sm:w-52 rounded-2xl border-2 ${photoBorder} bg-slate-900 overflow-hidden flex flex-col items-center justify-center`}>
+        {result?.member?.photo ? (
+          // Kiosk uses the stored profile image directly, without a public image proxy.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={result.member.photo} alt="รูปสมาชิก" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex flex-col items-center justify-center gap-2 px-3 text-slate-400">
+            <User className={`h-14 w-14 ${result?.member ? "opacity-75" : "opacity-40"}`} />
+            <span className="text-sm font-medium">{result?.member ? "ไม่มีรูปสมาชิก" : "รูปสมาชิก"}</span>
+          </div>
+        )}
+      </div>
       <form className="mx-auto max-w-lg" onSubmit={event => {
         event.preventDefault(); const normalized = code.trim().toUpperCase();
         if (busy.current || pending || exit || outSupported === null || !normalized) return;
         setCode(""); if (Date.now() - (last.current.get(normalized) ?? 0) < 3000) return;
-        void scan({ code: normalized, requestKey: crypto.randomUUID(), ...(outSupported ? { direction } : {}) });
+        void scan({ code: normalized, requestKey: crypto.randomUUID(), ...(outSupported ? { direction: "AUTO" } : {}) });
       }}>
         <label htmlFor="scanner" className="block text-2xl my-6">{working ? "กำลังตรวจสอบ…" : pending ? "รอยืนยันคำขอเดิม" : "พร้อมสแกน QR สมาชิกหรือบัตร"}</label>
         <input ref={input} id="scanner" value={code} onChange={e => setCode(e.target.value.slice(0, 100))} autoFocus autoComplete="off" disabled={working || !!pending || exit || outSupported === null} className="w-full rounded-xl bg-white text-black p-5 text-2xl" onBlur={() => { if (!exit) setTimeout(() => input.current?.focus(), 100); }} />
         <p className="my-3">ตั้งเครื่อง USB Keyboard Wedge ให้ส่ง Enter ท้ายรหัส</p>
       </form>
-      <section aria-live="polite" role="status" className={`my-8 p-8 rounded-xl text-3xl ${result?.ok ? "bg-green-900" : result ? "bg-red-900" : "bg-slate-800"}`}>
-        {result?.member && <p className="mb-4">{result.member.name}</p>}
-        {result?.member?.photo && (
-          // Kiosk uses the stored profile image directly, without a public image proxy.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={result.member.photo} alt="รูปสมาชิก" className="mx-auto h-32 w-32 rounded-xl object-cover mb-4" />
-        )}
+      <section aria-live="polite" role="status" className={`my-8 p-8 rounded-xl text-3xl ${statusBg}`}>
+        {result?.member && <p className="mb-3 font-bold">{result.member.name}</p>}
         {result ? result.error || messages[result.reason || ""] || "กรุณาติดต่อพนักงาน" : "ยินดีต้อนรับ กรุณาสแกน"}
       </section>
       {pending && <button disabled={working} onClick={() => void scan(pending)} className="p-4 border rounded-xl">ลองคำขอเดิม</button>}
@@ -118,7 +128,6 @@ export default function KioskClient({ expiresAt }: { expiresAt: string }) {
     </>}
     <footer className="mt-8 text-sm text-slate-300">
       <button className="underline m-3" onClick={() => { void document.documentElement.requestFullscreen().catch(() => {}); }}>เต็มหน้าจอ</button>
-      <label><input type="checkbox" checked={sound} onChange={e => setSound(e.target.checked)} /> เสียงยืนยัน</label>
       <p>เต็มหน้าจอเป็นเพียงโหมดเบราว์เซอร์ ไม่สามารถป้องกันการออกสู่ระบบปฏิบัติการได้</p>
     </footer>
   </main>;
