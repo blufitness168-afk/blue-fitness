@@ -24,7 +24,10 @@ function setup({ authenticated = true, masked = false, timeout = false, failFina
       }
       return state.order.status === 'REJECTED' && state.order.rejection_reason === 'CUSTOMER_CANCELLED' ? [{ ...state.order }] : [];
     }
-    if (text.includes('create_catalog_package_payment_order')) {
+    if (text.includes('r6_checkout_coupon_options')) return [{ coupons: state.couponOptions ?? [] }];
+    if (text.includes('real_benefits_admin_action')) return [{ result: { id: 17, campaign_code: 'POINTS17', privateField: 'hidden' } }];
+    if (text.includes('create_catalog_package_payment_order') || text.includes('r6_create_checkout_coupon_order')) {
+          if (state.couponError) throw Object.assign(Error('Private database detail'), { code: state.couponError });
           if (state.staleCatalog) throw Error('Stale catalog version');
           if (state.staffTerm) throw Object.assign(Error('Private database detail'), { code: 'P4F01' });
           return [state.order];
@@ -144,6 +147,51 @@ test('order creation sends catalog identity and normalized promo only; response 
   assert.equal(app.calls.length, 0);
   assert.equal(app.state.benefits, 0);
 });
+test('checkout coupon is rollout-gated, mutually exclusive, and sent as an ID to a dedicated SQL entry point', async () => {
+  const app = setup();
+  const requestKey = randomUUID();
+  const create = fields => app.createOrder(new Request('https://local/api/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageId: 2, catalogVersion: 7, requestKey, ...fields }) }));
+  assert.equal((await create({ checkoutCouponId: 7 })).status, 503);
+  app.env.R6_CHECKOUT_COUPONS_ENABLED = 'true';
+  assert.equal((await create({ checkoutCouponId: 7, promoCode: 'PROMO' })).status, 400);
+  assert.equal((await create({ checkoutCouponId: '7' })).status, 400);
+  assert.equal((await create({ checkoutCouponId: 7, checkoutValue: 100 })).status, 400);
+  assert.equal(app.queries.length, 0);
+  Object.assign(app.state.order, { points_earned: 75, checkout_coupon_points: 30, checkout_coupon_snapshot: { kind: 'POINTS', title: 'Bonus', definitionId: 7 } });
+  const response = await create({ checkoutCouponId: 7 });
+  assert.equal(response.status, 201);
+  assert.match(app.queries[0].text, /r6_create_checkout_coupon_order/);
+  assert.deepEqual(JSON.parse(app.queries[0].values[4]), { package: { id: 2, catalogVersion: 7 }, promo: null, checkoutCouponId: 7 });
+  const { order } = await response.json();
+  assert.deepEqual(order.checkoutCoupon, { kind: 'POINTS', title: 'Bonus', points: 30 });
+  assert.equal(order.pointsEarned, 75);
+  app.state.couponError = '42883';
+  assert.equal((await create({ checkoutCouponId: 7 })).status, 409);
+  assert.ok(app.queries.every(query => !query.text.includes('create_catalog_package_payment_order')));
+  assert.equal(app.calls.length, 0);
+});
+
+test('staff checkout campaign API validates roles, units and key before DB and projects only campaign identity', async () => {
+  const body = { requestKey: randomUUID(), title: 'Extra points', campaignCode: 'points17', campaignKind: 'POINTS', description: 'Synthetic', usesPerCoupon: 1, perMember: 1, total: 3, activationDurationMinutes: null, expiresAt: '2099-01-01T00:00:00Z', checkoutUnit: 'POINTS', checkoutValue: 15, checkoutCap: 10 };
+  const request = fields => new Request('https://local/api/admin/benefits/create-checkout-campaign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, ...fields }) });
+  const member = setup();
+  member.env.R6_CHECKOUT_COUPONS_ENABLED = 'true';
+  assert.equal((await member.load('./r6-checkout-campaign-server').createCheckoutCampaign(request())).status, 403);
+  assert.equal(member.queries.length, 0);
+  const admin = setup({ role: 'ADMIN' });
+  const create = admin.load('./r6-checkout-campaign-server').createCheckoutCampaign;
+  assert.equal((await create(request())).status, 503);
+  admin.env.R6_CHECKOUT_COUPONS_ENABLED = 'true';
+  assert.equal((await create(request({ checkoutUnit: 'PERCENT' }))).status, 400);
+  assert.equal(admin.queries.length, 0);
+  const response = await create(request());
+  assert.equal(response.status, 201);
+  assert.deepEqual(await response.json(), { data: { id: 17, code: 'POINTS17' } });
+  assert.equal(admin.queries[0].values[1], body.requestKey);
+  assert.equal(JSON.parse(admin.queries[0].values[2]).bonusDays, 0);
+  assert.equal(admin.calls.length, 0);
+});
+
 test('missing catalog version rejects before SQL and stale catalog returns actionable 409', async () => {
   const app = setup();
   const request = body => new Request('https://local/api/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

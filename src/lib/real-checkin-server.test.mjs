@@ -7,7 +7,7 @@ const require=createRequire(import.meta.url);
 function load({normal=null,kiosk=null,password=null,rows=[],capability={visits:true,outSupported:true},error=null}={}) {
  const calls=[]; const filename=new URL('./real-checkin-server.ts',import.meta.url).pathname;
  const compiled=ts.transpileModule(readFileSync(new URL('./real-checkin-server.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- const sql=async (parts,...values)=>{const text=parts.join('?');calls.push({text,values});if(error)throw error;if(text.includes('to_regclass'))return capability===null?[]:[capability];return rows;};
+ const sql=async (parts,...values)=>{const text=parts.join('?');calls.push({text,values});if(error)throw error;if(text.includes('to_regclass'))return capability===null?[]:[capability];if(text.includes('AS supported'))return capability===null?[]:[{supported:capability.manualStaffSupported}];return rows;};
  const loaded=new Module(filename);loaded.filename=filename;
  loaded.require=name=>{
   if(name==='server-only') return {};
@@ -84,4 +84,42 @@ test('migration preserves entitlement body and changes only frontdesk authorizat
  const prepared=readFileSync(new URL('../db/migrations/20261024_real_frontdesk.sql',import.meta.url),'utf8');
  const expected=original.slice(original.indexOf('CREATE OR REPLACE FUNCTION kiosk_checkin')).replaceAll('kiosk_checkin','real_frontdesk_checkin').replace("s.mode<>'KIOSK' OR s.device_id IS DISTINCT FROM p_station","s.mode<>'NORMAL'").replace('Kiosk required','Normal admin session required').replace('KIOSK ENTRY_ONLY','FRONTDESK ENTRY_ONLY');
  assert.equal(prepared.slice(prepared.indexOf('CREATE OR REPLACE FUNCTION')),expected);
+});
+
+const manualInput = {
+ code:'BLU-4', inAt:'2020-01-01T09:00+07:00', outAt:'2020-01-01T10:00+07:00',
+ orderId:null, usedTimeSlot:null, serviceType:'Gym', reason:'Paper log', note:null,
+};
+test('manual staff visit is OWNER-only, mutually exclusive and forwards the exact sale and original request key',async()=>{
+ const staffSaleId=crypto.randomUUID(), requestKey=crypto.randomUUID();
+ const body={...manualInput,staffSaleId,requestKey};
+ for(const normal of [{role:'ADMIN'},{role:'MEMBER'},null]) {
+  const a=load({normal});assert.equal((await a.run(request(body),'manual')).status,403);assert.equal(a.calls.length,0);
+ }
+ for(const extra of [{orderId:crypto.randomUUID()},{staffSaleId:1},{staffSaleId:' '}]) {
+  const a=load({normal:{role:'OWNER'}});assert.equal((await a.run(request({...body,...extra}),'manual')).status,400);assert.equal(a.calls.length,0);
+ }
+ const a=load({normal:{role:'OWNER'},capability:{manualStaffSupported:true},rows:[{result:{ok:false,reason:'PACKAGE_UNVERIFIED'}}]});
+ assert.deepEqual((await a.run(request(body),'manual')).body,{ok:false,reason:'PACKAGE_UNVERIFIED'});
+ assert.equal(a.calls.length,2);assert.match(a.calls[1].text,/public.r7_manual_visit/);
+ assert.equal(a.calls[1].values[1],requestKey);
+ assert.deepEqual(JSON.parse(a.calls[1].values[2]),{...manualInput,staffSaleId});
+});
+test('standalone manual visits keep the original payload; missing staff support never downgrades',async()=>{
+ const body={...manualInput,requestKey:crypto.randomUUID()};
+ const options={normal:{role:'OWNER'},capability:{visits:true,outSupported:true,manualSupported:true,manualStaffSupported:false},rows:[{result:{ok:true}}]};
+ const a=load(options);
+ assert.equal((await a.run(request({...body,staffSaleId:null}),'manual')).body.ok,true);
+ assert.deepEqual(JSON.parse(a.calls[0].values[2]),manualInput);
+ const unsupported=load(options);
+ const response=await unsupported.run(request({...body,staffSaleId:crypto.randomUUID()}),'manual');
+ assert.equal(response.status,422);assert.equal(response.body.reason,'MANUAL_STAFF_UNSUPPORTED');assert.equal(unsupported.calls.length,1);
+ const unknown=load({...options,capability:null});
+ assert.equal((await unknown.run(request({...body,staffSaleId:crypto.randomUUID()}),'manual')).status,503);assert.equal(unknown.calls.length,1);
+ for(const role of ['OWNER','ADMIN']) for(const enabled of [true,false]) {
+  const a=load({...options,normal:{role},capability:{...options.capability,manualStaffSupported:enabled}});
+  const {body}=await a.run(request({query:''}),'history');
+  assert.equal(body.manualSupported,role==='OWNER'?true:undefined);
+  assert.equal(body.manualStaffSupported,role==='OWNER'&&enabled?true:undefined);
+ }
 });

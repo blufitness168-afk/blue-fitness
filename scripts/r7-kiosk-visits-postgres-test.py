@@ -180,6 +180,8 @@ def exercise(query):
       SELECT true; ROLLBACK;""") == 't'
     print('PASS: legacy replay, kiosk auth, QR/CARD pairing, cross-channel and duplicate races, snapshots (paid/supplement/override/welcome), rollback, no points', flush=True)
     apply('20261201_R7_manual_visits')
+    deny((base.MIGRATIONS / '20261203_R7_manual_staff_visits.sql').read_text(encoding='utf-8'), 'P0001')
+    assert scalar("SELECT to_regprocedure('r7_manual_staff_source(integer,timestamptz,uuid)') IS NULL;") == 't'
     test_manual(query, scalar, read, deny, race)
 
 

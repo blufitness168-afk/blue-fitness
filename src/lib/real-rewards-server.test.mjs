@@ -48,6 +48,9 @@ test('history rejects malformed filters, conflicting scans and attempts to overr
   for (const bad of [{ status: 'all' }, { packageDays: 0 }, { packageDays: '30' }, { packageDays: 3661 }, { beforeId: '10' }, { beforeId: -1 }, { beforeId: 2147483648 }, { limit: 1000 }, { memberId: 12 }, { memberName: 'A\u0000B' }, { memberName: 'x'.repeat(121) }, { scan: 'https://example.test/BLU-1' }, { scan: 'BLU-RW-2-DEMO01' }, { scan: 'CARD-abc' }, { scan: 'BLU-2', memberCode: 'BLU-1' }]) {
     assert.equal((await api.rewardsAction(request(bad), 'admin-history')).status, 400, JSON.stringify(bad));
   }
+  for (const rewardTitle of [42, null, ['Title'], 'A\u0000B', 'x'.repeat(121)]) {
+    assert.equal((await api.rewardsAction(request({ rewardTitle }), 'admin-history')).status, 400);
+  }
   assert.equal((await api.rewardsAction(request({}, 'GET'), 'admin-history')).status, 405);
   assert.equal(api.calls.length, 0);
 });
@@ -278,7 +281,7 @@ test('R8 history SQL: baseline pagination, scans, purchase evidence, privacy and
       INSERT INTO redemptions(member_id,reward_id,points_spent,status,redeemed_at)
         SELECT 2,1,20,'PENDING','2026-10-01Z' FROM generate_series(1,51);
       INSERT INTO redemptions(member_id,reward_id,points_spent,status,redeemed_at,completed_at,reward_code,reward_title,completed_by)
-        VALUES (1,1,20,'COMPLETED','2026-10-01Z','2026-10-02Z','${rewardCode}','Snapshot title',3);
+        VALUES (1,1,20,'COMPLETED','2026-10-01Z','2026-10-02Z','${rewardCode}','Snapshot title 100%',3);
     `);
     await db.query("INSERT INTO auth_sessions VALUES (3,$1,'NORMAL',NULL,now()+interval '1 day')", [digest]);
     const page = await history();
@@ -294,7 +297,11 @@ test('R8 history SQL: baseline pagination, scans, purchase evidence, privacy and
     assert.deepEqual(ids(filtered), [52]);
     assert.deepEqual(ids(await history({ status: 'ALL', memberName: '100%' })), [52]);
     assert.deepEqual(ids(await history({ status: 'ALL', memberName: "' OR 1=1 --" })), []);
-    assert.equal(filtered.redemptions[0].rewardTitle, 'Snapshot title');
+    assert.equal(filtered.redemptions[0].rewardTitle, 'Snapshot title 100%');
+    assert.deepEqual(ids(await history({ status: 'ALL', rewardTitle: '  TITLE 100%  ', memberCode: 'BLU-1' })), [52]);
+    assert.deepEqual(ids(await history({ status: 'COMPLETED', rewardTitle: 'Current title' })), [], 'renamed catalog does not change snapshotted history');
+    assert.deepEqual(ids(await history({ status: 'PENDING', rewardTitle: 'Current title', beforeId: 2 })), [1], 'legacy title fallback works with the cursor');
+    assert.deepEqual(ids(await history({ status: 'ALL', rewardTitle: "' OR 1=1 --" })), []);
     assert.deepEqual(Object.keys(filtered.redemptions[0]).sort(), ['id','rewardId','rewardTitle','rewardCode','pointsSpent','status','redeemedAt','completedAt','memberCode','memberName'].sort());
     assert.deepEqual(Object.keys(filtered.rewards[0]).sort(), ['id','title','description','imageUrl','pointCost','stock','isActive'].sort());
     for (const filters of [{ scan: ' bLu-1 ' }, { rewardCode }, { scan: `blu-rw-${rewardCode.toUpperCase()}` }, { scan: rewardCode }]) {

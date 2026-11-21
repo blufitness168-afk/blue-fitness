@@ -275,7 +275,8 @@ test('member list filters compose across count, Bangkok month summary and rows w
 test('malformed structured member filters fail closed; unfiltered list needs no order read', async () => {
   for (const input of [{ from: '2026-02-29' }, { to: '2026-04-31' }, { month: '2026-13' },
     { from: '2026-12-31', to: '2026-12-01' }, { gender: 'OWNER' }, { gender: ['MALE', 'FEMALE'] },
-    { slot: '14:00-07:00' }, { packageLabel: ['first', 'second'] }]) {
+    { slot: '14:00-07:00' }, { packageLabel: ['first', 'second'] }, { currentSlot: '23:00-01:00' },
+    { currentDuration: '030' }, { currentDuration: ['1', '30'] }]) {
     const s = setup({ results: [[{ total: 0 }], []] });
     const data = await s.getAdminMembers(input);
     assert.equal(data.invalid, true);
@@ -290,14 +291,189 @@ test('malformed structured member filters fail closed; unfiltered list needs no 
   assert.ok(s.calls.every(({ text }) => !text.includes('package_payment_orders')));
 });
 
+test('current package filter with missing or partial authority does not fall back to purchases', async () => {
+  for (const sources of [{ term_contract: 'absent', standalone: false },
+    { term_contract: 'absent', standalone: true, staff_schema: true, staff_sales: true },
+    { term_contract: 'absent', standalone: true, online_active: false, online_cancellations: true },
+    { term_contract: 'unsupported', standalone: true }]) {
+    const s = setup({ results: [[sources], [{ total: 0 }], []] });
+    const data = await s.getAdminMembers({ currentDuration: '30' });
+    assert.equal(data.currentUnavailable, true);
+    assert.equal(data.total, 0);
+    assert.ok(s.calls.slice(1).every(({ text }) => text.includes('AND FALSE') && !text.includes('package_payment_orders')));
+  }
+  const revoked = setup({ beforeRead: ({ session }) => { session.revokedAt = new Date(); } });
+  await assert.rejects(revoked.getAdminMembers({ currentDuration: '30' }), /Forbidden/);
+});
+
+test('lifecycle report never substitutes account aggregates for missing entitlement evidence', async () => {
+  const today = setup().monthRange().month;
+  for (const [reportMonth, hasProbe] of [[today, true], ['2001-01', false], ['9998-01', false]]) {
+    const s = setup({ results: [...(hasProbe ? [[{ term_contract: 'standalone', standalone: true }]] : []), [{ total: 17 }], []] });
+    const report = await s.getAdminMembers({ reportMonth });
+    assert.deepEqual(report.lifecycle, { month: reportMonth, nearExpiry: null, nearExpiryAsOf: null });
+    assert.equal(report.total, 17);
+    assert.equal(s.calls.length, hasProbe ? 3 : 2);
+    assert.ok(s.calls.slice(-2).every(call => !call.text.includes('time_supplement_main')));
+  }
+  for (const reportMonth of ['2026-13', ['2026-11', '2026-12']]) {
+    const s = setup({ results: [[{ total: 0 }], []] });
+    const report = await s.getAdminMembers({ reportMonth });
+    assert.equal(report.invalid, true);
+    assert.equal(report.lifecycle, null);
+  }
+});
+
+test('current package filter selects the standalone or combined authority on synthetic PostgreSQL fixtures', async () => {
+  const { PGlite } = createRequire(new URL('../../.local-db/payment-sql-tests/package.json', import.meta.url))('@electric-sql/pglite');
+  const db = new PGlite();
+  const migration = (file, start, end) => {
+    const sql = readFileSync(new URL(`../db/migrations/${file}`, import.meta.url), 'utf8');
+    return sql.slice(sql.indexOf(start), sql.indexOf(end, sql.indexOf(start)));
+  };
+  const input = { currentDuration: '30', currentSlot: '07:00-14:00' };
+  const missing = setup({ role: 'ADMIN', results: [[{ term_contract: 'absent', standalone: false }], [{ total: 0 }], []] });
+  await missing.getAdminMembers(input);
+  const query = async ({ query, values }) => (await db.query(query, values)).rows;
+  const probe = async () => (await query(missing.calls[0]))[0];
+  async function plan(filter = input) {
+    const s = setup({ role: 'ADMIN', results: [[await probe()], [{ total: 2 }], []] });
+    await s.getAdminMembers(filter);
+    if (!filter.reportMonth) assert.deepEqual(s.calls[1].values, s.calls[2].values.slice(0, -1), 'summary and rows share filter and clock');
+    return s.calls.slice(1);
+  }
+  try {
+    await db.exec(`
+      CREATE TABLE members(id int PRIMARY KEY, member_code text, full_name text, nickname text, phone text,
+        gender text, role text, status text, expire_date timestamptz, created_at timestamptz, points int);
+      CREATE TABLE auth_sessions(member_id int, token_hash text, revoked_at timestamptz, expires_at timestamptz, mode text);
+      CREATE TABLE package_payment_orders(id uuid PRIMARY KEY, member_id int, package_snapshot jsonb, status text,
+        created_at timestamptz, confirmed_at timestamptz, paid_at timestamptz, membership_expires_at timestamptz, trans_ref text);
+      CREATE TABLE package_payment_point_ledger(order_id uuid, member_id int);
+      CREATE TABLE payment_transfer_refs(trans_ref text, source text);
+      INSERT INTO members VALUES (99,'STAFF','Fixture',NULL,'08','OTHER','ADMIN','ACTIVE',NULL,now(),0);
+      INSERT INTO auth_sessions VALUES (99,'${missing.calls[0].values[0]}',NULL,now()+interval '1 day','NORMAL');`);
+    assert.equal((await probe()).standalone, false);
+    await db.exec(migration('20261118_r3_package_catalog.sql', 'CREATE FUNCTION package_catalog_daily_slot_valid(', '-- Constraint names'));
+    const proof = migration('20261119_r3_member_time_override.sql', 'CREATE FUNCTION r3_override_current_order(', 'CREATE FUNCTION r3_override_slot(');
+    await db.exec(proof);
+    await db.exec(`
+      INSERT INTO members SELECT id,'BLU-'||id,'Current test',NULL,'09','OTHER','MEMBER',
+        CASE WHEN id=3 THEN 'SUSPENDED' ELSE 'ACTIVE' END, NULL, '2026-12-10',0 FROM generate_series(1,12) id;
+      INSERT INTO package_payment_orders SELECT md5(id::text)::uuid,id,jsonb_build_object('id',5,'label','Monthly',
+        'durationDays', CASE WHEN id=10 THEN '"30"'::jsonb ELSE '30'::jsonb END,
+        'timeSlot',CASE WHEN id=9 THEN '15:00-21:00' ELSE '07:00-14:00' END), 'PAID', t-interval '1 hour',t,t,t+interval '720 hours',id::text
+        FROM generate_series(1,12) id CROSS JOIN LATERAL (
+          SELECT now() - CASE WHEN id IN (2,6,7,8,12) THEN interval '31 days' WHEN id=11 THEN interval '-1 day' ELSE interval '1 day' END t) clock;
+      UPDATE members m SET expire_date=o.membership_expires_at FROM package_payment_orders o WHERE o.member_id=m.id;
+      INSERT INTO package_payment_point_ledger SELECT id,member_id FROM package_payment_orders;
+      INSERT INTO payment_transfer_refs SELECT trans_ref,'PACKAGE_ORDER:'||id FROM package_payment_orders;
+      INSERT INTO package_payment_orders SELECT md5('pending')::uuid,4,package_snapshot,'PENDING',now(),NULL,NULL,NULL,NULL FROM package_payment_orders WHERE member_id=4;
+      INSERT INTO package_payment_orders SELECT md5('ambiguous')::uuid,5,package_snapshot,'PAID',created_at,confirmed_at,paid_at,membership_expires_at,NULL FROM package_payment_orders WHERE member_id=5;`);
+    const memberCodes = rows => rows.map(row => row.memberCode).sort();
+    assert.equal((await probe()).term_contract, 'absent');
+    assert.deepEqual(memberCodes(await query((await plan())[1])), ['BLU-1']);
+    await db.exec(migration('20261118_R6_time_supplement.sql', 'CREATE FUNCTION time_supplement_main(', 'CREATE FUNCTION time_supplement_window_end('));
+    assert.equal((await probe()).term_contract, 'standalone');
+    const standalonePage = (await plan())[1];
+    assert.doesNotMatch(standalonePage.text, /time_supplement_main/);
+    assert.deepEqual(memberCodes(await query(standalonePage)), ['BLU-1']);
+    await db.exec('DROP FUNCTION public.time_supplement_main(integer,timestamptz)');
+    await db.exec(`ALTER TABLE package_payment_orders ADD COLUMN amount_satang integer DEFAULT 99000;
+      CREATE SCHEMA r4_staff_private; CREATE SCHEMA r4_online_private;
+      CREATE TABLE r4_staff_private.free_sales(sale_id uuid, member_id int, member_code text, predecessor_order_id uuid,
+        package_id int, method text, duration_days int, daily_slot text, starts_at timestamptz, ends_at timestamptz, recorded_at timestamptz);
+      CREATE TABLE r4_staff_private.free_sale_cancellations(sale_id uuid);
+      CREATE TABLE r4_staff_private.paid_transfer_cancellations(sale_id uuid);
+      CREATE TABLE r4_online_private.cancellations(order_id uuid);`);
+    assert.equal((await probe()).online_active, false);
+    await db.exec(migration('20261125_R4_online_cancellation.sql', 'CREATE VIEW r4_online_private.active_paid_orders', 'CREATE VIEW r4_online_private.point_reversals'));
+    await db.exec(proof.replace('CREATE FUNCTION', 'CREATE OR REPLACE FUNCTION').replace('FROM package_payment_orders x', 'FROM r4_online_private.active_paid_orders x'));
+    const admission = migration('20261119_R4_staff_free_admission.sql', 'CREATE FUNCTION r4_staff_private.admission_term(', 'REVOKE ALL ON FUNCTION');
+    // Apply the same narrow substitutions as the R4 cancellation and transfer migrations to this extracted function.
+    await db.exec(admission.replace("source_kind:='STAFF_FREE'", 'source_kind:=f.method')
+      .replaceAll('s.starts_at<=p_at AND s.ends_at>p_at', `s.starts_at<=p_at AND s.ends_at>p_at
+        AND NOT EXISTS (SELECT FROM r4_staff_private.free_sale_cancellations c WHERE c.sale_id=s.sale_id)
+        AND NOT EXISTS (SELECT FROM r4_staff_private.paid_transfer_cancellations c WHERE c.sale_id=s.sale_id)`)
+      .replace('FROM public.package_payment_orders x', 'FROM r4_online_private.active_paid_orders x'));
+    await db.exec(`INSERT INTO r4_staff_private.free_sales
+      SELECT md5('sale'||m.id)::uuid,m.id,m.member_code,o.id,5,CASE WHEN m.id=6 THEN 'STAFF_FREE' ELSE 'STAFF_TRANSFER' END,
+        30,'07:00-14:00',m.expire_date,m.expire_date+interval '720 hours',m.expire_date-interval '1 day'
+      FROM members m JOIN package_payment_orders o ON o.member_id=m.id WHERE m.id IN (6,7,8,11,12);
+      INSERT INTO r4_staff_private.free_sales SELECT md5('overlap')::uuid,member_id,member_code,predecessor_order_id,
+        package_id,method,90,'15:00-21:00',starts_at,ends_at,recorded_at FROM r4_staff_private.free_sales WHERE member_id=8;
+      INSERT INTO r4_staff_private.paid_transfer_cancellations VALUES (md5('sale12')::uuid);
+      INSERT INTO r4_online_private.cancellations SELECT id FROM package_payment_orders WHERE member_id=1;`);
+    const [summary, page] = await plan();
+    assert.deepEqual(await query(summary), [{ total: 2, monthly: [{ month: '2026-12', total: 2 }] }]);
+    const rows = await query(page);
+    assert.deepEqual(memberCodes(rows), ['BLU-6', 'BLU-7']);
+    assert.ok(rows.every(row => row.expireDate > new Date()), 'staff term supplies its own expiry');
+    assert.deepEqual(memberCodes(await query((await plan({ ...input, packageLabel: 'Monthly' }))[1])), ['BLU-6', 'BLU-7']);
+    assert.deepEqual(memberCodes(await query((await plan({ ...input, currentSlot: '15:00-21:00' }))[1])), ['BLU-9']);
+    await db.exec(`ALTER TABLE r4_staff_private.free_sales ADD COLUMN package_name text, ADD COLUMN catalog_version integer;
+      CREATE TABLE r4_online_private.settlement_before(order_id uuid, member_id int, expiry_before timestamptz, status_before text);
+      CREATE TABLE r4_online_private.settlement_effects(order_id uuid, confirmed_at timestamptz, expiry_after timestamptz, amount_satang integer);
+      INSERT INTO members SELECT id,'BLU-'||id,'Renewal test',NULL,'09','OTHER','MEMBER','ACTIVE',
+        now()+interval '720 hours'+offset_days*interval '24 hours','2026-12-10',0 FROM (VALUES (13,-1),(14,1)) fixtures(id,offset_days);
+      INSERT INTO package_payment_orders(id,member_id,package_snapshot,status,created_at,confirmed_at,paid_at,membership_expires_at)
+      SELECT md5(m.id||':'||step)::uuid,m.id,'{"durationDays":30,"timeSlot":"07:00-14:00"}', 'PAID',
+        now()-(40-step*30)*interval '24 hours',now()-(40-step*30)*interval '24 hours',now()-(40-step*30)*interval '24 hours',
+        m.expire_date-(1-step)*interval '720 hours' FROM members m CROSS JOIN generate_series(0,1) step WHERE m.id IN (13,14);
+      INSERT INTO r4_online_private.settlement_before
+        SELECT id,member_id,membership_expires_at-interval '720 hours','ACTIVE' FROM package_payment_orders WHERE member_id IN (13,14);
+      INSERT INTO r4_online_private.settlement_effects
+        SELECT id,confirmed_at,membership_expires_at,amount_satang FROM package_payment_orders WHERE member_id IN (13,14);`);
+    await db.exec(migration('20261202_R347_admission_compatibility.sql', 'CREATE FUNCTION r347_staff_package(', 'CREATE FUNCTION time_supplement_main('));
+    await db.exec(migration('20261205_R36_current_term_targeting.sql', 'CREATE OR REPLACE FUNCTION time_supplement_main(', 'DO $patch$'));
+    assert.equal((await probe()).term_contract, 'combined');
+    const [combinedSummary, combinedPage] = await plan();
+    assert.match(combinedPage.text, /public\.time_supplement_main/);
+    assert.doesNotMatch(combinedPage.text, /r3_override_current_order|admission_term/);
+    assert.deepEqual(await query(combinedSummary), [{ total: 3, monthly: [{ month: '2026-12', total: 3 }] }]);
+    assert.deepEqual(memberCodes(await query(combinedPage)), ['BLU-13', 'BLU-6', 'BLU-7']);
+    const reportMonth = missing.monthRange().month;
+    const [lifecycle, ordinaryPage] = await plan({ reportMonth });
+    assert.doesNotMatch(ordinaryPage.text, /time_supplement_main/, 'the report does not filter the list');
+    assert.equal((await query(lifecycle))[0].nearExpiry, 4);
+    const [filteredLifecycle] = await plan({ reportMonth, ...input });
+    assert.equal((await query(filteredLifecycle))[0].nearExpiry, 3);
+    const [, legacyMatch] = await plan({ ...input, currentSlot: '15:00-21:00' });
+    assert.deepEqual(memberCodes(await query(legacyMatch)), ['BLU-9']);
+    await db.exec(`CREATE OR REPLACE FUNCTION time_supplement_main(p_member integer,p_at timestamptz)
+      RETURNS TABLE (order_id uuid, sale_id uuid, package_snapshot jsonb, main_end timestamptz)
+      LANGUAGE sql STABLE AS $$
+        SELECT md5(n::text)::uuid,NULL::uuid,jsonb_build_object('durationDays',30,'timeSlot',
+          CASE WHEN n=1 THEN '07:00-14:00' ELSE '15:00-21:00' END),p_at+interval '1 day'
+        FROM generate_series(1,2) n WHERE p_member=6
+        UNION ALL SELECT md5(p_member::text)::uuid,NULL::uuid,'{"durationDays":30,"timeSlot":"09:00-16:00"}'::jsonb,
+          p_at + CASE p_member WHEN 7 THEN interval '720 hours' WHEN 8 THEN interval '720 hours 1 second' ELSE interval '0' END
+        WHERE p_member IN (7,8,10)
+      $$;`);
+    assert.deepEqual(await query(combinedPage), [], 'multiple candidates are ambiguous even when only one matches the selected slot');
+    assert.deepEqual(await query(legacyMatch), [], 'empty combined result does not fall back to a valid standalone term');
+    assert.equal((await query(lifecycle))[0].nearExpiry, 1, 'exactly 30 days qualifies; expiry now, over 30 days and ambiguous terms do not');
+    await db.exec('UPDATE auth_sessions SET revoked_at=now()');
+    assert.deepEqual(await query(lifecycle), []);
+    await db.exec('UPDATE auth_sessions SET revoked_at=NULL');
+    await db.exec(`DROP FUNCTION time_supplement_main(integer,timestamptz);
+      CREATE FUNCTION time_supplement_main(integer,timestamptz) RETURNS TABLE (package_snapshot jsonb, main_end timestamptz)
+      LANGUAGE sql AS $$ SELECT '{}'::jsonb, now() $$;`);
+    assert.equal((await probe()).term_contract, 'unsupported');
+    await db.exec('UPDATE auth_sessions SET revoked_at=now()');
+    for (const call of [missing.calls[0], summary, page]) assert.deepEqual(await query(call), []);
+  } finally { await db.close(); }
+});
+
 test('rendered member list keeps all filters on paging links and role changes remain OWNER-only', async () => {
   const React = require('react');
   const { renderToStaticMarkup } = require('react-dom/server');
-  const s = setup({ role: 'ADMIN', results: [[{ total: 101, monthly: [{ month: '2026-12', total: 101 }] }], [{
+  const s = setup({ role: 'ADMIN', results: [[{ term_contract: 'absent', standalone: true }], [{ total: 101, monthly: [{ month: '2026-12', total: 101 }] }], [{
     memberCode: 'BLU-1', fullName: 'Fixture', phone: '099', status: 'ACTIVE', role: 'MEMBER',
   }]] });
   const data = await s.getAdminMembers({ q: 'a&b', name: 'นามสกุล', code: 'BLU', phone: '099', gender: 'OTHER',
-    from: '2026-12-01', to: '2026-12-31', month: '2026-12', packageLabel: '1 เดือน', slot: '07:00-14:00', page: '2' });
+    from: '2026-12-01', to: '2026-12-31', month: '2026-12', packageLabel: '1 เดือน', slot: '07:00-14:00',
+    currentDuration: '30', currentSlot: '15:00-21:00', reportMonth: '2001-01', page: '2' });
   const filename = new URL('../app/admin/members/MembersClient.tsx', import.meta.url);
   const loaded = new Module(filename.pathname);
   loaded.require = name => {
@@ -313,6 +489,10 @@ test('rendered member list keeps all filters on paging links and role changes re
   assert.doesNotMatch(html, /name="page"|ROLE_MUTATION/);
   assert.match(html, /href="\/admin\/members">ล้างตัวกรอง/);
   assert.match(html, /2026-12: 101/);
+  assert.match(html, /สรุปวงจรสมาชิก · 2001-01/);
+  assert.equal(html.match(/ข้อมูลไม่พอ<\/dd>/g)?.length, 3);
+  assert.match(html, /ไม่พร้อม<\/dd>/);
+  assert.match(render({ ...data, lifecycle: { month: '2026-12', nearExpiry: 0, nearExpiryAsOf: '2026-12-01T00:00:00Z' } }), /0 คน<\/dd>/);
   const links = [...html.matchAll(/href="(\/admin\/members\?[^"]+)"/g)];
   assert.deepEqual(links.map(([, link]) => Object.fromEntries(new URL(link.replaceAll('&amp;', '&'), 'https://example.invalid').searchParams)),
     [{ ...data.filters, page: '1' }, { ...data.filters, page: '3' }]);
@@ -360,7 +540,8 @@ test('detail history SQL works before and after optional sources are installed',
        (15,8,'another member','FRIEND_PASS','USED',1,1,'2026-11-01',NULL,NULL);`);
     const legacy = await plan({});
     assert.deepEqual((await read(legacy.probe)).rows, [{ visits: false, consumptions: false, supplements: false }]);
-    assert.deepEqual((await read(legacy.checkins)).rows.map(r => [r.id, r.packageName, r.usedTimeSlot]), [[5, null, null], [3, null, null], [2, null, null], [1, null, null]]);
+    const visitFields = r => [r.id, r.exitedAt?.toISOString() ?? null, r.packageName, r.usedTimeSlot];
+    assert.deepEqual((await read(legacy.checkins)).rows.map(visitFields), [[5, null, null, null], [3, null, null, null], [2, null, null, null], [1, null, null, null]]);
     assert.ok((await read(legacy.coupons)).rows.every(r => r.lastRecordedUsedAt === null));
 
     await db.exec(`CREATE TABLE benefit_consumptions(coupon_id int, member_id int, created_at timestamptz);
@@ -370,18 +551,22 @@ test('detail history SQL works before and after optional sources are installed',
     assert.deepEqual(await times(preR7.coupons), [[14, null], [13, null], [12, null], [11, null], [10, '2026-11-20T12:00:00.000Z']]);
     assert.doesNotMatch(preR7.checkins.text + preR7.coupons.text, /r7_visits|time_supplement_activations/);
 
-    await db.exec(`CREATE TABLE public.r7_visits(checkin_id int UNIQUE, member_id int, entered_at timestamptz, snapshot jsonb);
+    await db.exec(`CREATE TABLE public.r7_visits(checkin_id int UNIQUE, member_id int, entered_at timestamptz, exited_at timestamptz, snapshot jsonb);
       INSERT INTO r7_visits VALUES
-       (1,7,'2026-11-20T01:00:00Z','{"package":{"name":"Historical package","amount":999},"mainTimeSlot":"07:00-14:00","usedTimeSlot":"07:00-22:00"}'),
-       (2,7,'2026-11-20T02:00:00Z','{"reason":"FREE_ENTRY","welcomeCouponId":11,"usedTimeSlot":"07:00-22:00"}'),
-       (3,7,'2026-11-20T03:00:00Z','{"package":{"name":5},"mainTimeSlot":"07:00-22:00","usedTimeSlot":null}'),
-       (5,8,'2026-11-20T05:00:00Z','{"reason":"FREE_ENTRY","welcomeCouponId":11,"usedTimeSlot":"other member"}');
+       (1,7,'2026-11-20T01:00:00Z','2026-11-20T01:30:00Z','{"package":{"name":"Historical package","amount":999},"mainTimeSlot":"07:00-14:00","usedTimeSlot":"07:00-22:00"}'),
+       (2,7,'2026-11-20T02:00:00Z',NULL,'{"reason":"FREE_ENTRY","welcomeCouponId":11,"usedTimeSlot":"07:00-22:00"}'),
+       (3,7,'2026-11-20T03:00:00Z','2026-11-20T04:00:00Z','{"package":{"name":5},"mainTimeSlot":"07:00-22:00","usedTimeSlot":null}'),
+       (5,8,'2026-11-20T05:00:00Z','2026-11-20T06:00:00Z','{"reason":"FREE_ENTRY","welcomeCouponId":11,"usedTimeSlot":"other member"}');
       CREATE TABLE public.time_supplement_activations(coupon_id int PRIMARY KEY, member_id int, activated_at timestamptz);
       INSERT INTO time_supplement_activations VALUES (12,7,'2026-11-20T00:00:00Z');`);
     const installed = await plan((await read(legacy.probe)).rows[0]);
     const visits = (await read(installed.checkins)).rows;
-    assert.deepEqual(visits.map(r => [r.id, r.packageName, r.usedTimeSlot]), [[5, null, null], [3, null, null], [2, null, '07:00-22:00'], [1, 'Historical package', '07:00-22:00']]);
-    assert.deepEqual(Object.keys(visits[3]), ['id', 'checkinTime', 'scannerType', 'packageName', 'usedTimeSlot']);
+    assert.deepEqual(visits.map(visitFields), [[5, null, null, null], [3, '2026-11-20T04:00:00.000Z', null, null],
+      [2, null, null, '07:00-22:00'], [1, '2026-11-20T01:30:00.000Z', 'Historical package', '07:00-22:00']]);
+    assert.deepEqual(Object.keys(visits[3]), ['id', 'checkinTime', 'scannerType', 'exitedAt', 'packageName', 'usedTimeSlot']);
+    const checkins = visits.map(row => ({ ...row, exitedAt: row.exitedAt?.toISOString() ?? null }));
+    const app = setup({ role: 'ADMIN', historySources: { visits: true }, results: [[{ id: 7 }], [], checkins, []] });
+    assert.deepEqual((await app.getAdminMember('BLU-7')).checkins.rows, checkins);
     assert.deepEqual(await times(installed.coupons), [[14, null], [13, null], [12, '2026-11-20T00:00:00.000Z'], [11, '2026-11-20T02:00:00.000Z'], [10, '2026-11-20T12:00:00.000Z']]);
   } finally {
     await db.close();

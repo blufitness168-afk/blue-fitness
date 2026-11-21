@@ -10,7 +10,10 @@ import { z } from "zod";
 import { onlineCancellationReads } from "./online-cancellation-rollout-server";
 
 const uuid = z.string().uuid();
-const createInput = z.object({ packageId: z.number().int().positive(), promoCode: z.string().max(40).default(""), requestKey: uuid, catalogVersion: z.number().int().positive() }).strict();
+const checkoutCouponsEnabled = () => process.env.R6_CHECKOUT_COUPONS_ENABLED === "true";
+const createInput = z.object({ packageId: z.number().int().positive(), promoCode: z.string().trim().max(40).default(""),
+  checkoutCouponId: z.number().int().positive().max(2147483647).optional(), requestKey: uuid, catalogVersion: z.number().int().positive() }).strict()
+  .refine(input => !input.promoCode || input.checkoutCouponId === undefined);
 const sqlClient = () => {
   if (!process.env.DATABASE_URL) throw Error("Database unavailable");
   return neon(process.env.DATABASE_URL);
@@ -21,6 +24,8 @@ export type PaymentOrder = {
   created_at: string; expires_at: string; upload_deadline: string; status: "PENDING" | "PAID" | "REJECTED"; paid_at: string | null;
     rejection_reason: string | null; confirmed_at: string | null;
   membership_expires_at: string | null; points_earned: number;
+  checkout_coupon_snapshot?: { title: string; kind: "DISCOUNT" | "POINTS" } | null;
+  checkout_coupon_points?: number;
 };
 
 function receiverConfig(): Receiver {
@@ -39,6 +44,8 @@ export function publicOrder(order: PaymentOrder) {
     createdAt: order.created_at, expiresAt: order.expires_at, uploadDeadline: order.upload_deadline, status: order.status, paidAt: order.paid_at,
         confirmedAt: order.confirmed_at, rejectionReason: order.rejection_reason, readiness: paymentReadiness(process.env),
     membershipExpiresAt: order.membership_expires_at, pointsEarned: order.points_earned,
+    checkoutCoupon: order.checkout_coupon_snapshot ? { title: order.checkout_coupon_snapshot.title,
+      kind: order.checkout_coupon_snapshot.kind, points: order.checkout_coupon_points ?? 0 } : null,
     qrPayload: paymentReadiness(process.env).transfersEnabled && order.status === "PENDING" && Date.parse(order.expires_at) > Date.now() ? generatePromptPayPayload(order.receiver_snapshot.promptpay, order.amount_satang / 100) : null };
 }
 
@@ -72,16 +79,26 @@ export async function createOrder(request: Request) {
     if (request.headers.get("content-type")?.split(";")[0] !== "application/json") return json({ error: "ข้อมูลไม่ถูกต้อง" }, 400);
     const parsed = createInput.safeParse(JSON.parse((await boundedBody(request, 4096)).toString("utf8")));
     if (!parsed.success) return json({ error: "ข้อมูลคำสั่งซื้อไม่ถูกต้อง" }, 400);
+    if (parsed.data.checkoutCouponId !== undefined && !checkoutCouponsEnabled()) {
+      return json({ error: "ระบบยังไม่เปิดใช้คูปองสำหรับคำสั่งซื้อ" }, 503);
+    }
     // Database locks the catalog version and constructs the authoritative price/benefits.
-    const quote = { package: { id: parsed.data.packageId, catalogVersion: parsed.data.catalogVersion }, promo: parsed.data.promoCode.trim() ? { code: parsed.data.promoCode.trim().toUpperCase() } : null };
+    const quote = { package: { id: parsed.data.packageId, catalogVersion: parsed.data.catalogVersion },
+      promo: parsed.data.promoCode ? { code: parsed.data.promoCode.toUpperCase() } : null,
+      checkoutCouponId: parsed.data.checkoutCouponId };
     const readiness = paymentReadiness(process.env);
     if (!readiness.transfersEnabled) return json({ error: readiness.blocker, readiness }, 503);
     const receiver = receiverConfig();
     const sql = sqlClient();
-    const rows = await sql`SELECT * FROM create_catalog_package_payment_order(${randomUUID()}::uuid, ${auth.member.id}, ${auth.digest}, ${parsed.data.requestKey}::uuid, ${JSON.stringify(quote)}::jsonb, ${JSON.stringify(receiver)}::jsonb)`;
+    const id = randomUUID();
+    const rows = quote.checkoutCouponId === undefined
+      ? await sql`SELECT * FROM create_catalog_package_payment_order(${id}::uuid, ${auth.member.id}, ${auth.digest}, ${parsed.data.requestKey}::uuid, ${JSON.stringify(quote)}::jsonb, ${JSON.stringify(receiver)}::jsonb)`
+      : await sql`SELECT * FROM r6_create_checkout_coupon_order(${id}::uuid, ${auth.member.id}, ${auth.digest}, ${parsed.data.requestKey}::uuid, ${JSON.stringify(quote)}::jsonb, ${JSON.stringify(receiver)}::jsonb)`;
     return json({ order: publicOrder(rows[0] as PaymentOrder) }, 201);
   } catch (error) {
     if ((error as { code?: string } | null)?.code === "P4F01") return json({ code: "STAFF_TERM_PURCHASE_BLOCKED", error: "ยังซื้อแพ็กเกจเพิ่มออนไลน์ไม่ได้ เนื่องจากมีสิทธิ์ต่ออายุจากเจ้าหน้าที่ กรุณาติดต่อเจ้าหน้าที่" }, 409);
+    if ((error as { code?: string } | null)?.code === "P6C01") return json({ error: "คูปองนี้หมดอายุ ถูกจองไว้ หรือใช้ไม่ได้แล้ว" }, 409);
+    if ((error as { code?: string } | null)?.code === "P6C02") return json({ error: "ใช้คูปองกับแพ็กเกจนี้ไม่ได้ ยอดโอนหลังหักส่วนลดต้องมากกว่า 0 บาท" }, 409);
     if ((error as { message?: string }).message === "Stale catalog version") return json({ code: "PACKAGE_CATALOG_CHANGED", error: "แพ็กเกจมีการเปลี่ยนราคา/สิทธิ์แล้ว กรุณาปิดหน้าต่างและโหลดแพ็กเกจใหม่ก่อนยืนยัน" }, 409);
     return json({ error: "สร้างคำสั่งซื้อไม่ได้ กรุณาโหลดรายการค้างก่อน (อาจมีรายการค้าง/โควตาเต็ม/ระบบยังไม่พร้อม)" }, 409);
   }
@@ -172,13 +189,16 @@ export async function paymentAccount() {
     ownerRecheckAvailable = attempts[0]?.state === "REJECTED" && attempts[0]?.rejection_reason === "PROVIDER_VALIDATION_FAILED" && attempts[0]?.provider_calls === 1 && !audits[0];
     ownerRecheckPrepared = !!audits[0] && attempts[0]?.state === "UNKNOWN" && attempts[0]?.provider_calls === 1;
   }
+  const [couponOptions] = checkoutCouponsEnabled() && !pending
+    ? await sql`SELECT public.r6_checkout_coupon_options(${auth.member.id}, ${auth.digest}) AS coupons` : [];
   const status = snapshot ? snapshot.status : auth.member.status;
   const expiry = snapshot ? (snapshot.expire_date == null ? null : new Date(snapshot.expire_date)) : auth.member.expireDate;
   return { memberCode: auth.member.memberCode, status: status === "ACTIVE" && (!expiry || expiry.getTime() <= Date.now()) ? "EXPIRED" : status, expiresAt: expiry?.toISOString() ?? null,
     points: snapshot ? snapshot.points : auth.member.points, package: snapshot ? snapshot.package : paid[0]?.package_snapshot ?? null,
     purchases: paid.map(o => ({ ...publicOrder(o), ...(o.cancelled_at ? { cancelledAt: o.cancelled_at, refundSatang: o.refund_satang } : {}) })),
     readiness: paymentReadiness(process.env),
-    pendingOrder: pending ? publicOrder(pending as PaymentOrder) : null, ownerRecheckAvailable, ownerRecheckPrepared };
+    pendingOrder: pending ? publicOrder(pending as PaymentOrder) : null, ownerRecheckAvailable, ownerRecheckPrepared,
+    checkoutCoupons: couponOptions?.coupons ?? [] };
 }
 export async function getPaymentAccount() {
   try { return json(await paymentAccount()); }

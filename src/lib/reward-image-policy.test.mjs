@@ -85,16 +85,21 @@ test('admin scanner uses read-only history, retains scan across pages and resets
   const button = label => render().find(node => node.type === 'button' && node.props.children === label);
   try {
     await render().find(node => node.type === 'scanner').props.onScan('CARD-0007');
-    assert.deepEqual(calls[0], { status: 'ALL', memberCode: '', memberName: '', rewardCode: '', scan: 'CARD-0007', beforeId: null });
+    assert.deepEqual(calls[0], { status: 'ALL', memberCode: '', memberName: '', rewardTitle: '', rewardCode: '', scan: 'CARD-0007', beforeId: null });
     button('ถัดไป').props.onClick(); await settle();
     assert.deepEqual(calls[1], { ...calls[0], beforeId: 42 });
     assert.equal(button('ถัดไป').props.disabled, true);
     button('ก่อนหน้า').props.onClick(); await settle();
     assert.deepEqual(calls[2], calls[0]);
+    render().find(node => node.type === 'input' && node.props.name === 'rewardTitle').props.onChange({ target: { value: 'Reward 100%' } });
     const form = render().find(node => node.type === 'form' && node.props.className === 'space-y-2');
     form.props.onSubmit({ preventDefault() {} }); await settle();
-    assert.deepEqual(calls[3], { status: 'ALL', memberCode: '', memberName: '', rewardCode: '', beforeId: null });
-    assert.equal(calls.length, 4);
+    assert.deepEqual(calls[3], { status: 'ALL', memberCode: '', memberName: '', rewardTitle: 'Reward 100%', rewardCode: '', beforeId: null });
+    button('ถัดไป').props.onClick(); await settle();
+    assert.deepEqual(calls[4], { ...calls[3], beforeId: 42 });
+    button('ล้างตัวกรอง').props.onClick(); await settle();
+    assert.deepEqual(calls[5], { ...calls[3], status: 'PENDING', rewardTitle: '' });
+    assert.equal(calls.length, 6);
   } finally { globalThis.fetch = previous; }
 });
 

@@ -235,7 +235,7 @@ export default function FinancePage({ initialData }: { initialData: FinanceData 
         </div>
       </section>
 
-      <p className="text-xs text-blu-steel">รายได้ออนไลน์อิง confirmed_at ตามเวลาไทย · กราฟเป็นยอดต่อช่วง ไม่ใช่ยอดสะสม · สมัครใหม่/ต่อสมาชิก/ยกเลิกยังไม่จัดหมวดอัตโนมัติเมื่อไม่มี provenance และไม่อนุญาตกรอกซ้ำยอดแพ็กเกจ</p>
+      <p className="text-xs text-blu-steel">รายได้ออนไลน์อิง confirmed_at ตามเวลาไทย · กราฟเป็นยอดต่อช่วง ไม่ใช่ยอดสะสม · ยอดออนไลน์ที่หลักฐานไม่พอจะแสดงเป็น “แพ็กเกจ” ไม่เดาว่าเป็นการสมัครใหม่หรือต่อสมาชิก และไม่อนุญาตกรอกซ้ำยอดแพ็กเกจ</p>
       {unconfirmedPaidCount > 0 && <p role="alert" className="text-xs text-amber-700">มี PAID {unconfirmedPaidCount} รายการไม่มี confirmed_at จึงยังไม่รวมรายงาน ห้ามใช้ paid_at ทดแทนโดยเดา</p>}
       <SummarySection title="ยอดสะสมทั้งหมด" cards={cards} />
       <SummarySection title="ตามตัวกรองปัจจุบัน" cards={filteredCards} />

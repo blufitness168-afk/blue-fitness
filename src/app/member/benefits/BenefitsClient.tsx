@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import WelcomeCoupons from "./WelcomeCoupons";
+import R6CouponHistory from "@/components/R6CouponHistory";
+import R6PromoHistory from "@/components/R6PromoHistory";
 import type { WelcomeCoupon } from "@/lib/benefits-server";
 import type { MemberWallet } from "@/lib/real-member-wallet-server";
 
@@ -52,9 +54,13 @@ export default function BenefitsWallet({ identity, welcomeCoupons }: { identity:
     <WelcomeCoupons coupons={welcomeCoupons} />
     {error && <p role="alert" className="text-rose-700">{error}</p>}
     {feedback && <p role={feedback.ok ? "status" : "alert"} className={feedback.ok ? "" : "text-rose-700"}>{feedback.text}</p>}
-    <button className="underline" disabled={activating !== null} onClick={() => { setFeedback(null); reload(); }}>โหลดคูปองใหม่</button>
+    <button className="underline" disabled={activating !== null} onClick={() => { setFeedback(null); reload(); }}>โหลดสิทธิ์ใหม่</button>
+        <R6PromoHistory refresh={refresh} />
     {!wallet && !error && <p role="status">กำลังโหลดสิทธิ์จากฐานข้อมูล...</p>}
-    <p className="text-sm">คูปองพาเพื่อนและเพิ่มวันให้ติดต่อพนักงานยืนยันใช้สิทธิ์ พร้อมแจ้งรหัสสมาชิก ไม่ถือว่าการเปิดหน้านี้เป็นการใช้คูปอง</p>
+    <p className="text-sm">คูปองนอกเหนือจากสิทธิ์เข้าฟรีใช้ผ่านพนักงานที่จุดบริการ พร้อมแจ้งรหัสสมาชิก ไม่ถือว่าการเปิดหน้านี้เป็นการใช้คูปอง</p>
+    <R6CouponHistory refresh={refresh} actions={row => row.status === "PENDING_ACTIVATION" &&
+      <button type="button" className="rounded border px-3 py-2 font-bold disabled:opacity-50" disabled={activating !== null} onClick={() => void activate(row.id)}>{activating === row.id ? "กำลังเปิดใช้…" : "เปิดใช้คูปอง"}</button>
+    } fallback={<>
     {wallet?.coupons.filter(coupon => coupon.source !== "WELCOME_REGISTRATION").map(coupon => <article key={coupon.id} className="space-y-2 rounded-2xl border bg-white p-5">
       <h2 className="font-bold">{coupon.title}</h2>
       <p>คูปอง #{coupon.id} · ใช้แล้ว {coupon.usedCount}/{coupon.totalQuota}</p>
@@ -68,5 +74,6 @@ export default function BenefitsWallet({ identity, welcomeCoupons }: { identity:
       {coupon.status === "PENDING_ACTIVATION" && <button className="rounded border px-3 py-2 font-bold disabled:opacity-50" disabled={activating !== null} onClick={() => void activate(coupon.id)}>{activating === coupon.id ? "กำลังเปิดใช้…" : "เปิดใช้คูปอง"}</button>}
     </article>)}
     {wallet && !wallet.coupons.some(coupon => coupon.source !== "WELCOME_REGISTRATION") && <p>ยังไม่มีคูปองเพิ่มเติมในฐานข้อมูล</p>}
+    </>} />
   </main>;
 }

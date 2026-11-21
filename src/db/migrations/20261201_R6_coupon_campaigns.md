@@ -1,0 +1,12 @@
+# R6 coupon campaigns and history — prepare only
+
+Requires the reviewed `20261129_R6_staff_grant_targeting.sql` and its prerequisites (including coupon activation). Append this migration; do not rerun old migrations over it. It checks the installed benefits function body and patches it in place, retaining its invoker ACL. No historical coupons, grants or receipts are rewritten.
+
+- Campaign codes are unique within coupon campaigns and are not checkout codes. Gift/freebie/other are named, staff-fulfilled entitlements, not inventory, checkout or membership extensions. Only explicitly linked campaign `CUSTOM` coupons can be consumed by the benefits action; time-supplement/kiosk flows are unchanged. Friend pass and extra days retain their existing effects.
+- One preview/confirmation issues one coupon. The definition lock serializes the total, the recipient lock serializes eligibility, and the preview binds the previous issuance count. Lifetime leaf quotas count cancelled/expired leaves too; uses per leaf are separate. Deactivation stops new grants without voiding issued coupons. Activation uses the existing blank/0/minutes rule.
+- Admin and member history use stable ID cursors (50 per page). Grant package filters use the duration captured at issuance, not the current catalog. Older grants with unknown duration remain visible unfiltered. Member history is ownership-bound. Use times come from recorded benefits consumption; older or kiosk coupons with no receipt here do not get fabricated timestamps.
+- Before rollout, check the application DB role can execute `public.r6_coupon_history(text,boolean,integer,text,text,text,integer)` with the existing invoker reads of `auth_sessions`, `members`, `coupons`, `benefit_assignments`, `benefit_definitions`, and `benefit_consumptions`. Grant execute only to the trusted runtime role; `PUBLIC` is revoked. Verify ADMIN/OWNER and member sessions on an isolated stack before rollout. Do not restore pre-campaign functions over issued campaign data; prefer a forward fix.
+
+Native test: `python -B scripts/r6-coupon-campaign-postgres-test.py --bin-dir <postgres-bin> [--psql <client>]`. It creates a disposable, authenticated loopback PostgreSQL cluster and does not use app credentials.
+
+Residual: coupon discount settlement/point awards and their value/unit/cap policy; extended promo definition/recipient rules; eligibility for supported-but-not-yet-proven renewals and staff histories; browser/physical scanner UAT and rollout. This is not full R6 acceptance.

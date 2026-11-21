@@ -74,7 +74,8 @@ test('separate guarded read; unavailable migration never returns null-success or
 test('UI separate contact-only form preserves existing page components and guarded load',()=>{
  const page=read('../app/admin/members/[memberCode]/page.tsx');
  for(const name of ['AdminMemberProfileForm','AdminMemberPasswordForm','AdminMemberContactEmailForm','getMemberContactEmail'])assert.match(page,new RegExp(name));
- assert.match(page,/canEdit \? await getMemberContactEmail/);assert.match(page,/contact.version/);
+ assert.match(page,/await requireAdminPage\("\/admin\/members"\)[\s\S]*canEdit\s*\?\s*(?:await\s+)?getMemberContactEmail\(m\.memberCode\)\.catch\(\(\) => null\)\s*:\s*null/);
+ assert.match(page,/\{canEdit && \(contact/);assert.match(page,/contact\.version/);
  const form=read('../app/admin/members/[memberCode]/AdminMemberContactEmailForm.tsx');
  assert.match(form,/body: pending.current/);assert.match(form,/crypto.randomUUID/);assert.match(form,/router.refresh/);
  assert.match(form,/fieldset disabled=\{locked\}/);assert.doesNotMatch(form,/localStorage|sessionStorage|console\.|name="password"|name="phone"/);

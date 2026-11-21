@@ -14,8 +14,15 @@ type Order = {
   amountSatang: number; subtotalSatang: number; discountSatang: number; expiresAt: string; uploadDeadline: string;
   readiness: { transfersEnabled: boolean; blocker: string | null }; rejectionReason: string | null;
   status: "PENDING" | "PAID" | "REJECTED"; qrPayload: string | null; membershipExpiresAt: string | null; pointsEarned: number;
+  checkoutCoupon?: { title: string; kind: "DISCOUNT" | "POINTS"; points: number } | null;
 };
+type CheckoutCoupon = { id: number; title: string; code: string; unit: "PERCENT" | "SATANG" | "POINTS"; value: number; cap: number | null };
 const money = (amount: number) => (amount / 100).toLocaleString("th-TH", { minimumFractionDigits: 2 });
+function couponLabel(coupon: CheckoutCoupon) {
+  const value = coupon.unit === "PERCENT" ? `${coupon.value}%` : coupon.unit === "POINTS" ? `+${coupon.value} แต้ม` : `฿${money(coupon.value)}`;
+  const cap = coupon.cap === null ? "" : coupon.unit === "POINTS" ? ` สูงสุด ${coupon.cap} แต้ม` : ` สูงสุด ฿${money(coupon.cap)}`;
+  return `${coupon.title} (${coupon.code}) · ${value}${cap}`;
+}
 const date = (value: string) => new Date(value).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" });
 export default function PaymentModal({ pkg, isOpen, onClose }: { pkg: PaymentPackage | null; isOpen: boolean; onClose: () => void }) {
   if (!isOpen || !pkg) return null;
@@ -25,6 +32,8 @@ function PaymentForm({ pkg, onClose }: { pkg: PaymentPackage; onClose: () => voi
   const router = useRouter();
   const [order, setOrder] = useState<Order | null>(null);
   const [promoCode, setPromoCode] = useState("");
+  const [checkoutCoupons, setCheckoutCoupons] = useState<CheckoutCoupon[]>([]);
+  const [couponId, setCouponId] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -84,6 +93,7 @@ function PaymentForm({ pkg, onClose }: { pkg: PaymentPackage; onClose: () => voi
       const body = await response.json();
       if (!response.ok) throw Error(body.error ?? "กรุณาเข้าสู่ระบบ");
       if (active && body.readiness) setReadiness(body.readiness);
+      if (active) setCheckoutCoupons(body.checkoutCoupons ?? []);
       if (active) {
         setOwnerRecheckAvailable(body.ownerRecheckAvailable === true);
         setOwnerRecheckPrepared(body.ownerRecheckPrepared === true);
@@ -114,14 +124,14 @@ function PaymentForm({ pkg, onClose }: { pkg: PaymentPackage; onClose: () => voi
   }
   async function create() {
     requestKey.current ??= crypto.randomUUID();
-    const response = await fetch("/api/payments/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ packageId: pkg.id, catalogVersion: pkg.catalogVersion ?? pkg.version, promoCode, requestKey: requestKey.current }) });
+    const response = await fetch("/api/payments/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ packageId: pkg.id, catalogVersion: pkg.catalogVersion ?? pkg.version, promoCode, checkoutCouponId: couponId ? Number(couponId) : undefined, requestKey: requestKey.current }) });
     const body = await response.json();
     if (body.readiness) setReadiness(body.readiness);
     if (!response.ok) throw Error(body.error ?? "สร้างคำสั่งซื้อไม่ได้");
     acceptOrder(body.order);
   }
   function resetOrder() {
-    setOrder(null); setFile(null); setPromoCode(""); requestKey.current = null;
+    setOrder(null); setFile(null); setPromoCode(""); setCouponId(""); requestKey.current = null;
     setOwnerRecheckAvailable(false); setOwnerRecheckPrepared(false);
     setNotice("ยกเลิกรายการแล้ว สามารถสร้างคำสั่งซื้อใหม่หรือปิดเพื่อเลือกแพ็กเกจอื่นได้");
   }
@@ -131,12 +141,21 @@ function PaymentForm({ pkg, onClose }: { pkg: PaymentPackage; onClose: () => voi
     const body = await response.json();
     if (!response.ok) throw Error(body.error ?? "ยกเลิกไม่ได้ กรุณาโหลดสถานะล่าสุดก่อนเริ่มใหม่");
     resetOrder();
+    setCheckoutCoupons([]);
+    const account = await fetch("/api/member/payment-account", { cache: "no-store" });
+    if (account.ok) setCheckoutCoupons((await account.json()).checkoutCoupons ?? []);
   }
   async function refresh() {
     const response = await fetch(order ? `/api/payments/orders/${order.id}` : "/api/member/payment-account", { cache: "no-store" });
     const body = await response.json();
     if (!response.ok) throw Error(body.error ?? "อ่านสถานะไม่ได้");
     const next = body.order ?? body.pendingOrder;
+    if (body.checkoutCoupons) {
+      setCheckoutCoupons(body.checkoutCoupons);
+      if (couponId && !body.checkoutCoupons.some((coupon: CheckoutCoupon) => String(coupon.id) === couponId)) {
+        setCouponId(""); requestKey.current = null;
+      }
+    }
     setOwnerRecheckAvailable(body.ownerRecheckAvailable === true);
     setOwnerRecheckPrepared(body.ownerRecheckPrepared === true);
     if (next?.status === "REJECTED" && next.rejectionReason === "CUSTOMER_CANCELLED") resetOrder();
@@ -181,9 +200,20 @@ function PaymentForm({ pkg, onClose }: { pkg: PaymentPackage; onClose: () => voi
       </div>
       {!loaded && <p>กำลังโหลดรายการค้าง...</p>}
       {order?.status === "PAID" ? <section className="space-y-3 text-center"><CheckCircle2 className="mx-auto text-emerald-600" size={48} /><h3 className="font-bold">ชำระสำเร็จและบันทึกสมาชิกจริงแล้ว</h3><p>หมดอายุ {order.membershipExpiresAt ? date(order.membershipExpiresAt) : "—"}</p><p>ได้รับ {order.pointsEarned} แต้ม</p><Link href="/member" className={button} onClick={onClose}>ดูบัญชีสมาชิก</Link></section> : order?.status === "REJECTED" ? <section role="alert" className="rounded-xl bg-rose-50 p-3 text-sm">รายการถูกปิดโดยไม่เพิ่มสิทธิ์ ({order.rejectionReason}) หากโอนแล้วติดต่อเจ้าของเรื่องยอดโอน ห้ามโอนซ้ำ</section> : <>
-        {!order && <><label className="block text-sm">โค้ดส่วนลด (ถ้ามี)<input value={promoCode} maxLength={40} disabled={busy} onChange={e => { setPromoCode(e.target.value); requestKey.current = null; }} className="mt-1 w-full rounded-xl border p-3" /></label><p className="text-xs">ราคาและโควตาส่วนลดตรวจโดยเซิร์ฟเวอร์ สิทธิ์ทดลองในเบราว์เซอร์ใช้ลดเงินจริงไม่ได้</p><button className={`${button} w-full`} disabled={busy || !loaded || !transfersEnabled} onClick={() => void run(create)}>สร้างคำสั่งซื้อ / แสดงยอดจริง</button></>}
+        {!order && <>
+          <label className="block text-sm">โค้ดส่วนลด (ถ้ามี)<input value={promoCode} maxLength={40} disabled={busy || !!couponId} onChange={e => { setPromoCode(e.target.value); requestKey.current = null; }} className="mt-1 w-full rounded-xl border p-3" /></label>
+          {checkoutCoupons.length > 0 && <label className="block text-sm">คูปองจากกระเป๋าที่เปิดใช้แล้ว
+            <select value={couponId} disabled={busy || !!promoCode.trim()} onChange={e => { setCouponId(e.target.value); requestKey.current = null; }} className="mt-1 w-full rounded-xl border p-3">
+              <option value="">ไม่ใช้คูปอง</option>
+              {checkoutCoupons.map(coupon => <option key={coupon.id} value={coupon.id}>{couponLabel(coupon)}</option>)}
+            </select>
+          </label>}
+          <p className="text-xs">ใช้โค้ดส่วนลดหรือคูปองได้อย่างใดอย่างหนึ่ง ราคาและสิทธิ์ตรวจโดยเซิร์ฟเวอร์</p>
+          <button className={`${button} w-full`} disabled={busy || !loaded || !transfersEnabled} onClick={() => void run(create)}>สร้างคำสั่งซื้อ / แสดงยอดจริง</button>
+        </>}
         {order && <>
           <p className="text-sm">ราคา ฿{money(order.subtotalSatang)} • ลด ฿{money(order.discountSatang)}</p><p className="text-2xl font-black">ยอดโอน ฿{money(order.amountSatang)}</p>
+          {order.checkoutCoupon && <p className="text-sm">คูปอง: {order.checkoutCoupon.title}{order.checkoutCoupon.kind === "POINTS" ? ` (+${order.checkoutCoupon.points} แต้มเมื่อชำระสำเร็จ)` : ""}</p>}
           <p className="text-sm">ยืนยันชำระสำเร็จจะได้รับ {order.pointsEarned} แต้ม{(order.package.bonusPoints ?? 0) > 0 ? ` (รวมโบนัสแพ็กเกจ ${order.package.bonusPoints} แต้ม)` : ""}</p>
           {transfersEnabled && <p className="text-sm">{order.receiver.name}<br />PromptPay {order.receiver.promptpay}<br />บัญชี {order.receiver.bankAccount} • ธนาคาร {{ "002": "กรุงเทพ", "004": "กสิกรไทย" }[order.receiver.bankCode] ?? order.receiver.bankCode}</p>}
           <p className="text-xs">คำสั่งซื้อ {order.id}<br />โอนภายใน {date(order.expiresAt)} (15 นาที)<br />อัปโหลดสลิปได้ถึง {date(order.uploadDeadline)} (เพิ่ม 30 นาที เฉพาะโอนทันเวลา)</p>

@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
-function load(member = { id: 1, role: 'ADMIN', status: 'ACTIVE' }, failures = [], result = {}) {
+function load(member = { id: 1, role: 'ADMIN', status: 'ACTIVE' }, failures = [], result = {}, checkoutInstalled = false) {
  const calls = [];
  const filename = new URL('./real-benefits-admin-server.ts', import.meta.url).pathname;
  const source = ts.transpileModule(read('./real-benefits-admin-server.ts'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -17,7 +17,7 @@ function load(member = { id: 1, role: 'ADMIN', status: 'ACTIVE' }, failures = []
   if (name === './auth/server') return { SESSION_COOKIE: 'blu_session', getCurrentMember: async () => member };
   if (name === 'next/headers') return { cookies: async () => ({ get: () => ({ value: 'a'.repeat(64) }) }) };
   if (name === './auth/http') return { json: (body, status = 200) => ({ body, status }), readBody: async request => request.json() };
-  if (name === '@neondatabase/serverless') return { neon: () => async (parts, ...values) => { calls.push({ text: parts.join('?'), values }); const code = failures.shift(); if (code) throw Object.assign(Error('test'), { code }); return [{ result }]; } };
+  if (name === '@neondatabase/serverless') return { neon: () => async (parts, ...values) => { calls.push({ text: parts.join('?'), values }); const code = failures.shift(); if (code) throw Object.assign(Error('test'), { code }); return [{ result, checkout_installed: checkoutInstalled }]; } };
   return require(name);
  };
  mod._compile(source, filename);
@@ -27,7 +27,7 @@ const request = (body = {}, method = 'POST') => new Request('https://example.tes
 test('all admin operations guarded before SQL; invalid actions/methods fail closed', async () => {
  for (const member of [null, { role: 'OWNER', status: 'SUSPENDED' }, { role: 'MEMBER', status: 'ACTIVE' }]) {
   const api = load(member);
-  for (const action of ['list','create','deactivate','grant-preview','grant','cancel','consume']) {
+  for (const action of ['list','create','create-campaign','deactivate','grant-preview','grant','cancel','consume']) {
    assert.ok([401,403].includes((await api.benefitsAdminAction(request({}, action === 'list' ? 'GET' : 'POST'), action)).status));
   }
   assert.equal(api.calls.length, 0);
@@ -35,6 +35,27 @@ test('all admin operations guarded before SQL; invalid actions/methods fail clos
  const api = load();
  assert.equal((await api.benefitsAdminAction(request(), 'list')).status, 405);
  assert.equal((await api.benefitsAdminAction(request(), 'unknown')).status, 404);
+});
+test('campaign create is strict, uses a distinct SQL action, and preserves UUID and policy values', async () => {
+ const previous = process.env.DATABASE_URL;
+ process.env.DATABASE_URL = 'isolated-mock-only';
+ try {
+  const safe = { id: 6, campaign_code: 'GIFTS', campaign_total: 7, campaign_per_member: 3, campaign_issued: 0 };
+  const api = load(undefined, ['40001'], { ...safe, amount_satang: 42 });
+  const spec = { title: 'Water bottle', campaignCode: 'gifts', campaignKind: 'GIFT', description: 'Counter pickup', usesPerCoupon: 4, bonusDays: 0,
+   perMember: 3, total: 7, activationDurationMinutes: null, expiresAt: '2099-01-01T00:00:00Z', requestKey: randomUUID() };
+  for (const patch of [{ total: 2 }, { usesPerCoupon: 0 }, { bonusDays: 1 }, { activationDurationMinutes: undefined },
+    { campaignKind: 'DISCOUNT' }, { actorId: 9 }, { description: ' ' }, { campaignCode: 'invalid code' }]) {
+   assert.equal((await api.benefitsAdminAction(request({ ...spec, ...patch }), 'create-campaign')).status, 400);
+  }
+  assert.equal(api.calls.length, 0);
+  assert.deepEqual((await api.benefitsAdminAction(request(spec), 'create-campaign')).body.data, safe);
+  assert.deepEqual(api.calls[0], api.calls[1]);
+  assert.equal(api.calls[0].values[1], 'create_r6_campaign');
+  assert.equal(api.calls[0].values[2], spec.requestKey);
+  assert.equal(JSON.parse(api.calls[0].values[3]).campaignCode, 'GIFTS');
+  assert.equal(JSON.parse(api.calls[0].values[3]).activationDurationMinutes, null);
+ } finally { if (previous === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previous; }
 });
 test('strict validation: enums, whole amounts, bonus quota, forged actor/amounts', () => {
  const api = load();
@@ -164,10 +185,49 @@ test('scoped promo create validates fields, keeps request identity, and filters 
  }
 });
 
-test('production pages detached from browser mocks; quote never uses marketing promos', () => {
+test('promo recipient quota and description use the scoped writer even without package or subtotal scope', async () => {
+ const previous = process.env.DATABASE_URL;
+ process.env.DATABASE_URL = 'isolated-mock-only';
+ try {
+  const fields = { id: 11, kind: 'PROMO', promo_description: 'Terms', promo_recipient_limit: 3, max_discount_satang: 2500 };
+  const api = load(undefined, [], { ...fields, amount_satang: 999 });
+  const body = { kind: 'PROMO', title: 'Fixture', code: 'promo11', discountType: 'PERCENT', discountValue: 5, minSatang: 0,
+   maxDiscountSatang: 2500, usageLimit: 1, expiresAt: '2099-01-01T00:00:00Z', requestKey: randomUUID(), promoDescription: ' Terms ', promoRecipientLimit: 3 };
+  for (const patch of [{ promoDescription: ' ' }, { promoRecipientLimit: 0 }, { promoRecipientLimit: '3' }]) {
+   assert.equal((await api.benefitsAdminAction(request({ ...body, ...patch }), 'create')).status, 400);
+  }
+  assert.equal(api.calls.length, 0);
+  assert.deepEqual((await api.benefitsAdminAction(request(body), 'create')).body.data, fields);
+  assert.match(api.calls[0].text, /r6_create_scoped_promo/);
+  assert.equal(JSON.parse(api.calls[0].values[2]).promoDescription, 'Terms');
+  assert.equal(JSON.parse(api.calls[0].values[2]).promoRecipientLimit, 3);
+ } finally { if (previous === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previous; }
+});
+
+test('checkout campaign readiness requires the rollout flag and installed migration; ADMIN sees only definition values', async () => {
+ const previous = { DATABASE_URL: process.env.DATABASE_URL, R6_CHECKOUT_COUPONS_ENABLED: process.env.R6_CHECKOUT_COUPONS_ENABLED };
+ process.env.DATABASE_URL = 'isolated-mock-only';
+ try {
+  const definition = { id: 8, kind: 'COUPON', campaign_kind: 'POINTS', checkout_unit: 'POINTS', checkout_value: 50, checkout_cap: 20 };
+  for (const role of ['ADMIN', 'OWNER']) {
+   for (const [enabled, installed] of [[false, true], [true, false], [true, true]]) {
+    process.env.R6_CHECKOUT_COUPONS_ENABLED = String(enabled);
+    const api = load({ id: 1, role, status: 'ACTIVE' }, [], { definitions: [{ ...definition, amount_satang: 100 }], couponCampaignReady: true }, installed);
+    const { data } = (await api.benefitsAdminAction(request({}, 'GET'), 'list')).body;
+    assert.equal(data.checkoutCampaignReady === true, enabled && installed);
+    assert.equal(api.calls[0].text.includes('to_regprocedure'), enabled);
+    if (role === 'ADMIN') assert.deepEqual(data.definitions, [definition]);
+   }
+  }
+ } finally {
+  for (const [key, value] of Object.entries(previous)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+ }
+});
+
+test('production pages detached from browser mocks; policy never uses marketing promos', () => {
  for (const path of ['../app/admin/coupons/page.tsx','../app/admin/coupons/BenefitsAdminClient.tsx','../app/admin/promo-codes/page.tsx']) assert.doesNotMatch(read(path), /localStorage|mock-data|CouponsAdmin|PromoCodesAdmin|admin-mock/);
  const policy = read('./payment-policy.ts'); assert.doesNotMatch(policy, /mockPromoCodes/);
- assert.match(read('./payment-server.ts'), /promo: parsed.data.promoCode.trim\(\)/);
+ // Promo normalization and the authoritative quote are exercised by payment-server.test.mjs.
  assert.match(read('./auth/http.ts'), /if \(!sameOrigin\(request\)\) return null/);
 });
 

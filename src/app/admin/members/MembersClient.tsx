@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { currentStatus, memberListGenders, type getAdminMembers } from "@/lib/admin-members-server";
+import { currentPackageDurations, currentStatus, memberListGenders, type getAdminMembers } from "@/lib/admin-members-server";
 import MemberRoleAction from "./MemberRoleAction";
 
 export default function MembersClient({
@@ -35,24 +35,47 @@ export default function MembersClient({
         <label>ถึง (รวมวันสิ้นสุด)<input type="date" name="to" defaultValue={filters.to} className={fieldClass} /></label>
         <label>เดือน<input type="month" name="month" defaultValue={filters.month} className={fieldClass} /></label>
       </fieldset>
+      <fieldset className="grid gap-3 sm:grid-cols-2" aria-describedby="member-current-package-hint">
+        <legend className="mb-2 font-bold">แพ็กเกจที่มีสิทธิ์ปัจจุบัน</legend>
+        <label>ประเภทตามระยะเวลา<select name="currentDuration" defaultValue={filters.currentDuration} className={fieldClass}>
+          <option value="">ทุกระยะเวลา</option>
+          {Object.entries(currentPackageDurations).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select></label>
+        <label>ช่วงเวลาตามแพ็กเกจ<input name="currentSlot" placeholder="07:00-14:00" defaultValue={filters.currentSlot} maxLength={11} className={fieldClass} /></label>
+        <p id="member-current-package-hint" className="text-xs text-blu-steel sm:col-span-2">ใช้แพ็กเกจหลักที่เริ่มแล้ว ยังไม่หมดอายุ และตรวจสอบได้เท่านั้น ไม่รวมสิทธิ์เสริม การปรับช่วงเวลารายบุคคล หรือประวัติซื้อ</p>
+      </fieldset>
       <fieldset className="grid gap-3 sm:grid-cols-2" aria-describedby="member-purchase-hint">
         <legend className="mb-2 font-bold">แพ็กเกจที่เคยชำระออนไลน์</legend>
         <label>ประเภทตามป้ายแพ็กเกจ<input name="packageLabel" placeholder="เช่น 1 เดือน" defaultValue={filters.packageLabel} maxLength={100} className={fieldClass} /></label>
         <label>ช่วงเวลาตามแพ็กเกจ<input name="slot" placeholder="07:00-14:00" defaultValue={filters.slot} maxLength={11} className={fieldClass} /></label>
         <p id="member-purchase-hint" className="text-xs text-blu-steel sm:col-span-2">กรอกให้ตรงกับที่บันทึกตอนซื้อ จับคู่จากออเดอร์เดียวกัน (รวมที่คืนเงินภายหลัง) ไม่ใช่สิทธิ์ปัจจุบัน</p>
       </fieldset>
+      <label className="block max-w-xs">เดือนรายงานวงจรสมาชิก (เวลาไทย)<input type="month" name="reportMonth" defaultValue={filters.reportMonth} className={fieldClass} /></label>
+      <p className="text-xs text-blu-steel">เดือนรายงานไม่ใช่เดือนสร้างบัญชีและไม่เปลี่ยนรายชื่อที่ค้นได้</p>
       <div className="flex items-center gap-4">
         <button className="btn-blue rounded-xl px-6 py-3">ค้นหา</button>
         <Link href="/admin/members">ล้างตัวกรอง</Link>
       </div>
     </form>
     {data.invalid && <p role="alert" className="text-red-700">ตัวกรองไม่ถูกต้อง กรุณาตรวจรูปแบบและลำดับวันที่ แล้วค้นหาใหม่</p>}
+    {data.currentUnavailable && <p role="alert" className="text-red-700">ยังตรวจสอบแพ็กเกจที่มีสิทธิ์ปัจจุบันไม่ได้ ฐานข้อมูลยังไม่มีตัวอ่านสิทธิ์ที่รองรับ</p>}
     <p>พบ {data.total.toLocaleString("th-TH")} รายการ · หน้า {data.page} / {data.pages}</p>
     {data.monthly.length > 0 && <section aria-labelledby="members-monthly-title" className="rounded-2xl border bg-white p-4">
       <h2 id="members-monthly-title" className="font-bold">จำนวนบัญชีที่สร้างรายเดือนตามตัวกรอง (สูงสุด 12 เดือนที่พบ)</h2>
       <ul className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-sm">
         {data.monthly.map(({ month, total }) => <li key={month}>{month}: {total.toLocaleString("th-TH")} บัญชี</li>)}
       </ul>
+    </section>}
+    {data.lifecycle && <section aria-labelledby="members-lifecycle-title" className="space-y-2 rounded-2xl border bg-white p-4">
+      <h2 id="members-lifecycle-title" className="font-bold">สรุปวงจรสมาชิก · {data.lifecycle.month}</h2>
+      <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+        {["ผู้ซื้อใหม่ (รวมกลับมาซื้อหลังเกิน 90 วัน)", "สมาชิกเดิมต่ออายุ", "พ้นสภาพ (เกิน 30 วันหลังหมดอายุ)"].map(label =>
+          <div key={label}><dt>{label}</dt><dd className="font-semibold">ข้อมูลไม่พอ</dd></div>)}
+        <div><dt>แพ็กเกจหลักใกล้หมดอายุใน 30 วัน</dt><dd className="font-semibold">{data.lifecycle.nearExpiry === null ? "ไม่พร้อม" : `${data.lifecycle.nearExpiry.toLocaleString("th-TH")} คน`}</dd></div>
+      </dl>
+      <p className="text-xs text-blu-steel">ยังไม่มีประวัติสิทธิ์ครบพอสำหรับสามกลุ่มแรก จำนวนบัญชีที่สร้างไม่ใช่จำนวนผู้ซื้อใหม่</p>
+      {data.lifecycle.nearExpiryAsOf ? <p className="text-xs text-blu-steel">นับคนไม่ซ้ำตามตัวกรอง เฉพาะเทอมหลักที่ยืนยันได้ ณ {new Date(data.lifecycle.nearExpiryAsOf).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" })} (เวลาไทย) ไม่รวมสิทธิ์ในอนาคตหรือข้อมูลที่พิสูจน์ไม่ได้</p>
+        : <p className="text-xs text-blu-steel">ยอดใกล้หมดอายุใช้ได้เฉพาะเดือนปัจจุบันเมื่อฐานข้อมูลมีตัวอ่านสิทธิ์ที่รองรับ ไม่ใช้วันหมดอายุบัญชีเดาย้อนหลัง</p>}
     </section>}
     <div className="overflow-x-auto rounded-2xl border bg-white"><table className="w-full text-left text-sm">
       <thead><tr>{["ชื่อ", "รหัสสมาชิก", "โทรศัพท์", "สถานะปัจจุบัน", "หมดอายุ", "บทบาท", ...(owner ? ["ปรับสิทธิ์"] : [])].map(label => <th key={label} className="whitespace-nowrap p-4">{label}</th>)}</tr></thead>

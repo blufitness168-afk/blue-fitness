@@ -8,6 +8,55 @@ from uuid import uuid4
 
 runner = import_module('r4-staff-free-display-postgres-test')
 base = runner.base
+LIFECYCLE = '20261204_R5_finance_lifecycle'
+READER = 'public.real_finance_action(text,text,uuid,jsonb)'
+
+
+def check_lifecycle(query, scalar, deny, apply, auth_read):
+    def read():
+        return json.loads(scalar(auth_read))
+
+    # Actual R4 finalizer produces both the before and effects evidence. Legacy BLU-3 was
+    # paid before R4 evidence was installed; its second payment alone cannot prove expiry.
+    query('SELECT test_settle(4,6); SELECT test_settle(4,6); SELECT test_settle(3,6); SELECT test_settle(5,6);')
+    orders = scalar("SELECT string_agg(id::text,'|' ORDER BY confirmed_at) FROM package_payment_orders WHERE member_id=4").split('|')
+    first, renewal = (f'package:{id}' for id in orders)
+    pre = read()
+    identity = f"SELECT oid,proowner,proacl,proconfig,prosecdef FROM pg_proc WHERE oid='{READER}'::regprocedure"
+    acl = scalar(identity)
+    migration = (base.MIGRATIONS / (LIFECYCLE + '.sql')).read_text(encoding='utf-8')
+    deny(f"BEGIN; GRANT EXECUTE ON FUNCTION {READER} TO PUBLIC;" + migration.split('BEGIN;', 1)[1], '0A000')
+    apply(LIFECYCLE)
+    assert scalar(identity) == acl
+    classified = [{**r, 'category': 'ต่อสมาชิก'} if r['id'] == renewal else r for r in pre['records']]
+    assert read() == {**pre, 'records': classified}
+    deny(auth_read.replace('token-2', 'token-1'), '42501')
+
+    # Move only fixture timestamps in rolled-back transactions to exercise the precise
+    # boundary without a fake production clock. Normal immutable evidence remains intact.
+    for gap, expected in (('90 days', 'ต่อสมาชิก'), ('90 days 1 microsecond', 'สมัครใหม่')):
+        sql = f'''BEGIN;
+          SET LOCAL session_replication_role='replica';
+          CREATE TEMP TABLE pin ON COMMIT DROP AS
+           SELECT confirmed_at-interval '{gap}' AS expiry FROM package_payment_orders WHERE id='{orders[1]}';
+          UPDATE package_payment_orders SET membership_expires_at=pin.expiry, confirmed_at=pin.expiry-interval '1 day'
+           FROM pin WHERE id='{orders[0]}';
+          UPDATE r4_online_private.settlement_effects SET expiry_after=pin.expiry, confirmed_at=pin.expiry-interval '1 day'
+           FROM pin WHERE order_id='{orders[0]}';
+          UPDATE r4_online_private.settlement_before SET expiry_before=pin.expiry FROM pin WHERE order_id='{orders[1]}';
+          SET LOCAL session_replication_role='origin';
+          SELECT r->>'category' FROM jsonb_array_elements(real_finance_action('token-2','read',NULL,'{{}}')->'records') r
+          WHERE r->>'id'='{renewal}'; ROLLBACK;'''
+        assert scalar(sql) == expected
+    assert next(r for r in read()['records'] if r['id'] == first)['category'] == 'แพ็กเกจ'
+    query('INSERT INTO r4_online_private.reader_cutover VALUES (1);')
+    receipt = json.loads(scalar("SELECT r4_online_private.cancel_online_order('token-2',id,gen_random_uuid(),amount_satang,'Synthetic refund',true) FROM package_payment_orders WHERE member_id=5"))
+    records = read()['records']
+    refund, = [r for r in records if r['id'] == f"online-refund:{receipt['orderId']}"]
+    assert (refund['category'], refund['type'], round(refund['amount'] * 100)) == ('ยกเลิกการสมัคร', 'EXPENSE', receipt['refundSatang'])
+    assert [r for r in records if r['source'] != 'ONLINE_REFUND'] == classified
+    print('PASS R5 lifecycle: install guard, unchanged rows/amounts, real settlement evidence, 90-day boundary, legacy fallback and linked refund', flush=True)
+
 
 
 def exercise(root_query):
@@ -75,6 +124,11 @@ def exercise(root_query):
         else:
             assert scalar("SELECT to_regnamespace('r4_staff_private') IS NULL AND to_regnamespace('r4_online_private') IS NULL") == 't'
         assert json.loads(scalar(auth_read)) == before
+        if flavor == 'r5_with_r4':
+            check_lifecycle(query, scalar, deny, apply, auth_read)
+            before = json.loads(scalar(auth_read))
+        else:
+            deny((base.MIGRATIONS / (LIFECYCLE + '.sql')).read_text(encoding='utf-8'), '0A000')
         key = uuid4()
         commit = call(row, row2, key=key)
         query('BEGIN; ' + commit + ' ROLLBACK;')

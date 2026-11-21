@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ManualVisitForm from "./ManualVisitForm";
 
 type Member = { memberCode: string; fullName: string };
-type Visit = Member & { id: number; checkedAt: string; scannerType: string; pointsAwarded: number; notes: string | null; exitedAt: string | null; durationSeconds: number | null; snapshot: { reason: string; usedTimeSlot: string | null; mainTimeSlot: string | null; package: { name?: string } | null; supplement: { timeSlot: string } | null; serviceType?: string } | null };
+type Visit = Member & { id: number; checkedAt: string; scannerType: string; pointsAwarded: number; notes: string | null; exitedAt: string | null; durationSeconds: number | null; snapshot: { reason: string; usedTimeSlot: string | null; mainTimeSlot: string | null; package: { name?: string } | null; supplement: { timeSlot: string } | null; serviceType?: string; packageSource?: string; staffSaleId?: string | null } | null };
 type Result = { ok: boolean; reason: string; checkinId: number | null; checkedAt: string; member: { name: string } | null };
 const reasons: Record<string, string> = { PAID_ENTRY: "เข้าใช้บริการด้วยแพ็กเกจ", FREE_ENTRY: "ใช้สิทธิ์เข้าฟรี", NO_ENTITLEMENT: "ไม่มีสิทธิ์เข้าใช้บริการ", NOT_FOUND: "ไม่พบสมาชิก", SUSPENDED: "สมาชิกถูกระงับ", BOUNCE: "เพิ่งบันทึกการเข้าใช้บริการ กรุณารอสักครู่", CLOSED: "นอกเวลาทำการ", OFF_PEAK: "นอกช่วงเวลาแพ็กเกจ", EXIT: "บันทึกออกแล้ว", NO_OPEN_VISIT: "ไม่มีรายการเข้า R7 ที่ยังไม่ออก", ALREADY_IN: "ยังไม่ได้บันทึกออกจากครั้งก่อน" };
 async function api(action: string, body: object) {
@@ -21,6 +21,7 @@ export default function CheckinPage() {
     const [direction, setDirection] = useState<"IN" | "OUT">("IN");
   const [outSupported, setOutSupported] = useState<boolean | null>(null);
   const [manualSupported, setManualSupported] = useState(false);
+  const [manualStaffSupported, setManualStaffSupported] = useState(false);
     const [from, setFrom] = useState("");
     const [to, setTo] = useState("");
     const [hourly, setHourly] = useState<{ hour: number; entries: number }[]>([]);
@@ -42,7 +43,8 @@ export default function CheckinPage() {
       const data = await api("history", { query, page, from: from ? `${from}+07:00` : "", to: to ? `${to}+07:00` : "" });
       if (version === historyVersion.current) {
               setRecords(data.records); setHasMore(data.hasMore); setHourly(data.hourly);
-                            setManualSupported(data.manualSupported === true);
+              setManualSupported(data.manualSupported === true);
+              setManualStaffSupported(data.manualStaffSupported === true);
               if (typeof data.outSupported === "boolean") {
                 setOutSupported(data.outSupported);
                 if (!data.outSupported && !pending.current) setDirection("IN");
@@ -96,7 +98,7 @@ export default function CheckinPage() {
     </form>
     {error && <p role="alert" className="text-red-600">{error}</p>}
     {result && <p role="status">{result.member?.name} — {reasons[result.reason] || result.reason}{result.checkinId ? ` (#${result.checkinId})` : ""}</p>}
-    {manualSupported && <ManualVisitForm onSaved={load} />}
+    {manualSupported && <ManualVisitForm staffSupported={manualStaffSupported} onSaved={load} />}
     <section className="space-y-3">
       <h2 className="text-xl font-semibold">ค้นหาสมาชิก / ประวัติจริง</h2>
       <input aria-label="ค้นหาสมาชิก" className="rounded border p-2" placeholder="ชื่อ รหัส หรือโทรศัพท์ (ค้นหาสมาชิก)" maxLength={100} value={query} onChange={event => { setQuery(event.target.value); setPage(1); }} />
@@ -105,7 +107,7 @@ export default function CheckinPage() {
             <p className="text-sm">กรองเวลาเข้า: รวมตั้งแต่ ไม่รวมเวลาสิ้นสุด แสดงครั้งละ 50 รายการ เวลาไทย</p>
             <figure><figcaption>จำนวนครั้งเข้ารายชั่วโมง (ไม่ใช่จำนวนคนในยิม) ตาม filter ทุกหน้า</figcaption><div className="flex h-40 items-end gap-1" aria-label="จำนวนครั้งเข้าครบ 24 ชั่วโมง">{hourly.map(item => <div key={item.hour} className="flex min-w-0 flex-1 flex-col items-center text-xs" title={`${item.hour}:00 — ${item.entries} ครั้ง`}><span>{item.entries}</span><div className="w-full bg-blue-600" style={{ height: `${item.entries / Math.max(1, ...hourly.map(h => h.entries)) * 100}px`, minHeight: 1 }} /><span>{item.hour}</span></div>)}</div></figure>
       <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr>{["เวลาเข้า", "เวลาออก / ระยะเวลา", "แพ็กเกจ / ช่วงเวลา ณ ครั้งบริการ", "สมาชิก", "เครื่องสแกน", "คะแนนจริง", "หมายเหตุ"].map(label => <th className="p-2" key={label}>{label}</th>)}</tr></thead>
-        <tbody>{records.map(record => <tr key={record.id}><td className="p-2">{new Date(record.checkedAt).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" })}</td><td className="p-2">{record.exitedAt ? `${new Date(record.exitedAt).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" })} / ${Math.floor(Number(record.durationSeconds) / 60)} นาที` : "ไม่มีเวลาออก / ไม่ทราบระยะเวลา"}</td><td className="p-2">{record.snapshot ? `${record.snapshot.package?.name || (record.snapshot.reason === "MANUAL_PAIR" ? "ไม่ทราบแพ็กเกจ" : record.snapshot.reason)} / ${record.snapshot.usedTimeSlot || "—"}${record.snapshot.supplement ? ` / สิทธิ์เสริม ${record.snapshot.supplement.timeSlot}` : ""}` : "ข้อมูลเก่า ไม่มี snapshot"}</td><td className="p-2">{record.memberCode} {record.fullName}</td><td className="p-2">{record.snapshot?.reason === "MANUAL_PAIR" ? `บันทึกย้อนหลัง / ${record.snapshot.serviceType}` : record.scannerType}</td><td className="p-2">{record.pointsAwarded}</td><td className="p-2">{record.notes}</td></tr>)}</tbody></table></div>
+        <tbody>{records.map(record => <tr key={record.id}><td className="p-2">{new Date(record.checkedAt).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" })}</td><td className="p-2">{record.exitedAt ? `${new Date(record.exitedAt).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" })} / ${Math.floor(Number(record.durationSeconds) / 60)} นาที` : "ไม่มีเวลาออก / ไม่ทราบระยะเวลา"}</td><td className="p-2">{record.snapshot ? `${record.snapshot.package?.name || (record.snapshot.reason === "MANUAL_PAIR" ? "ไม่ทราบแพ็กเกจ" : record.snapshot.reason)} / ${record.snapshot.usedTimeSlot || "—"}${record.snapshot.supplement ? ` / สิทธิ์เสริม ${record.snapshot.supplement.timeSlot}` : ""}` : "ข้อมูลเก่า ไม่มี snapshot"}{record.snapshot?.reason === "MANUAL_PAIR" && record.snapshot.staffSaleId && <div className="break-all text-xs">{record.snapshot.packageSource === "STAFF_TRANSFER" ? "รายการขายโอนโดยพนักงาน" : "รายการฟรีโดยพนักงาน"}{manualStaffSupported && ` · ${record.snapshot.staffSaleId}`}</div>}</td><td className="p-2">{record.memberCode} {record.fullName}</td><td className="p-2">{record.snapshot?.reason === "MANUAL_PAIR" ? `บันทึกย้อนหลัง / ${record.snapshot.serviceType}` : record.scannerType}</td><td className="p-2">{record.pointsAwarded}</td><td className="p-2">{record.notes}</td></tr>)}</tbody></table></div>
       {!records.length && <p>ไม่พบประวัติ</p>}
       <div className="flex gap-4"><button disabled={page === 1} onClick={() => setPage(page - 1)}>ก่อนหน้า</button><span>หน้า {page}</span><button disabled={!hasMore} onClick={() => setPage(page + 1)}>ถัดไป</button><button onClick={() => void load()}>รีเฟรช</button></div>
     </section>

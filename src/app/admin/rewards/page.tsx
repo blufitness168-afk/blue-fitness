@@ -9,7 +9,7 @@ type Draft = typeof blank & { id?: number };
 type Pending = { action: "save" | "deliver"; body: Record<string, unknown> };
 const input = "w-full rounded-lg border p-2";
 const button = "rounded-lg border px-3 py-2 disabled:opacity-40";
-const initialFilters = { status: "PENDING", memberCode: "", memberName: "", rewardCode: "" };
+const initialFilters = { status: "PENDING", memberCode: "", memberName: "", rewardTitle: "", rewardCode: "" };
 type Search = typeof initialFilters & { scan?: string; packageDays?: number | "UNKNOWN" };
 const thaiDateTime = new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Bangkok" });
 
@@ -128,13 +128,14 @@ export default function AdminRewardsPage() {
         <fieldset disabled={busy || loading} className="grid gap-2 sm:grid-cols-2">
           <label>รหัสสมาชิก<input className={input} maxLength={50} value={filters.memberCode} onChange={event => setFilters({ ...filters, memberCode: event.target.value })} placeholder="BLU-…" /></label>
           <label>ชื่อสมาชิก<input className={input} maxLength={120} value={filters.memberName} onChange={event => setFilters({ ...filters, memberName: event.target.value })} /></label>
+          <label>ชื่อรางวัล<input className={input} name="rewardTitle" maxLength={120} value={filters.rewardTitle} onChange={event => setFilters({ ...filters, rewardTitle: event.target.value })} /></label>
           <label>รหัสรางวัล<input className={input} maxLength={50} value={filters.rewardCode} onChange={event => setFilters({ ...filters, rewardCode: event.target.value })} placeholder="UUID หรือ BLU-RW-…" /></label>
           <label>สถานะ<select className={input} value={filters.status} onChange={event => setFilters({ ...filters, status: event.target.value })}><option value="PENDING">รอรับของ</option><option value="COMPLETED">รับแล้ว</option><option value="ALL">ทั้งหมด</option></select></label>
-          <label>ประเภทแพ็กเกจ (จำนวนวัน)<input type="number" min={1} max={3660} step={1} className={input} disabled={unknownPackage} value={packageDays} onChange={event => setPackageDays(event.target.value)} /></label>
-          <label className="self-end py-2"><input type="checkbox" checked={unknownPackage} onChange={event => setUnknownPackage(event.target.checked)} /> ไม่พบหลักฐานซื้อออนไลน์ก่อนแลก</label>
+          <label>แพ็กเกจหลัก ณ เวลาแลก (จำนวนวัน)<input type="number" min={1} max={3660} step={1} className={input} disabled={unknownPackage} value={packageDays} onChange={event => setPackageDays(event.target.value)} /></label>
+          <label className="self-end py-2"><input type="checkbox" checked={unknownPackage} onChange={event => setUnknownPackage(event.target.checked)} /> ไม่ทราบแพ็กเกจ ณ เวลาแลก</label>
           <div className="flex gap-2"><button className={button}>ค้นหา</button><button className={button} type="button" onClick={() => { setFilters(initialFilters); setPackageDays(""); setUnknownPackage(false); void searchHistory(initialFilters, [null]); }}>ล้างตัวกรอง</button></div>
         </fieldset>
-        <p className="text-xs">ตัวกรองแพ็กเกจอิงระยะเวลาจากรายการซื้อออนไลน์ที่ยืนยันก่อนหรือ ณ เวลาแลก ไม่ใช่แพ็กเกจที่มีผล ณ เวลาแลก และไม่รวมการซื้อหน้าร้าน</p>
+        <p className="text-xs">ใช้จำนวนวันของแพ็กเกจหลักที่ยืนยันได้และบันทึกไว้ตอนแลก รายการเก่าหรือรายการที่ยืนยันไม่ได้อยู่ในกลุ่มไม่ทราบ</p>
       </form>
       {loading && <p role="status">กำลังโหลดประวัติ…</p>}
       {historyError && <p role="alert" className="text-rose-700">{historyError}</p>}

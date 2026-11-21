@@ -17,7 +17,7 @@ export type AdminRewardsHistory = { rewards: RealReward[]; redemptions: RealRede
 
 type HistoryFilters = {
   status: "ALL" | "PENDING" | "COMPLETED";
-  memberCode: string | null; memberName: string | null; rewardCode: string | null; cardCode: string | null;
+  memberCode: string | null; memberName: string | null; rewardTitle: string | null; rewardCode: string | null; cardCode: string | null;
   packageDays: number | "UNKNOWN" | null; beforeId: number | null;
 };
 
@@ -28,12 +28,13 @@ function canonicalRewardCode(value: unknown) {
 }
 
 export function rewardHistoryFilters(body: Record<string, unknown>): HistoryFilters | null {
-  if (Object.keys(body).some(key => !["status", "memberCode", "memberName", "rewardCode", "scan", "packageDays", "beforeId"].includes(key))) return null;
-  const { status = "PENDING", memberCode = "", memberName = "", rewardCode = "", scan = "", packageDays = null, beforeId = null } = body;
+  if (Object.keys(body).some(key => !["status", "memberCode", "memberName", "rewardTitle", "rewardCode", "scan", "packageDays", "beforeId"].includes(key))) return null;
+  const { status = "PENDING", memberCode = "", memberName = "", rewardTitle = "", rewardCode = "", scan = "", packageDays = null, beforeId = null } = body;
   if (status !== "ALL" && status !== "PENDING" && status !== "COMPLETED") return null;
   if (beforeId !== null && (typeof beforeId !== "number" || !integer(beforeId, 1, 2147483647))) return null;
   if (packageDays !== null && packageDays !== "UNKNOWN" && (typeof packageDays !== "number" || !integer(packageDays, 1, 3660))) return null;
   if (typeof memberCode !== "string" || memberCode.length > 50 || typeof memberName !== "string" || memberName.length > 120 || /[\u0000-\u001f\u007f]/.test(memberName) ||
+    typeof rewardTitle !== "string" || rewardTitle.length > 120 || /[\u0000-\u001f\u007f]/.test(rewardTitle) ||
     typeof rewardCode !== "string" || rewardCode.length > 50 || typeof scan !== "string" || scan.length > 100) return null;
   const member = memberCode.trim().toUpperCase();
   const reward = canonicalRewardCode(rewardCode);
@@ -44,7 +45,8 @@ export function rewardHistoryFilters(body: Record<string, unknown>): HistoryFilt
   const cardCode = cardCodePattern.test(scanned) ? scanned : null;
   if (scanned && !scannedReward && !scannedMember && !cardCode) return null;
   if ((scannedMember && member && member !== scannedMember) || (scannedReward && reward && reward !== scannedReward)) return null;
-  return { status, memberCode: scannedMember ?? (member || null), memberName: memberName.trim() || null, rewardCode: scannedReward ?? reward, cardCode, packageDays, beforeId };
+  return { status, memberCode: scannedMember ?? (member || null), memberName: memberName.trim() || null,
+    rewardTitle: rewardTitle.trim() || null, rewardCode: scannedReward ?? reward, cardCode, packageDays, beforeId };
 }
 
 export function rewardPayload(action: string, body: Record<string, unknown>): Record<string, unknown> | null {
@@ -84,22 +86,19 @@ async function execute(action: string, key: string | null, payload: Record<strin
 
 async function readAdminHistory(filters: HistoryFilters): Promise<AdminRewardsHistory | null> {
   const { sql, digest } = await rewardConnection();
-  // R2 card bindings are optional on the original rewards schema. No lookup of legacy/mock card values.
-  const [capabilities] = await sql`SELECT pg_catalog.to_regclass('public.member_cards') IS NOT NULL AS cards`;
+  // Optional migrations: neither legacy card values nor purchase history substitute for evidence.
+  const [capabilities] = await sql`SELECT pg_catalog.to_regclass('public.member_cards') IS NOT NULL AS cards,
+    EXISTS (SELECT 1 FROM pg_catalog.pg_attribute
+      WHERE attrelid='public.redemptions'::regclass AND attname='package_days_at_redemption'
+        AND attnum>0 AND NOT attisdropped) AS package_snapshot`;
   const cards = capabilities.cards === true;
   const cardMatch = !filters.cardCode ? sql`TRUE` : cards
     ? sql`EXISTS (SELECT 1 FROM public.member_cards c WHERE c.card_code=${filters.cardCode} AND c.member_id=h.member_id)`
     : sql`FALSE`;
-  // A confirmed purchase snapshot is evidence of purchase, not of entitlement at redemption.
-  // Skip the purchase lookup completely for the default, unfiltered history.
-  const packageMatch = filters.packageDays === null ? sql`TRUE` : sql`
-    EXISTS (SELECT 1 FROM public.package_payment_orders o
-      WHERE o.member_id=h.member_id AND o.status='PAID' AND o.confirmed_at<=h.redeemed_at
-      AND jsonb_typeof(o.package_snapshot->'durationDays')='number'
-      AND o.package_snapshot->>'durationDays' ~ '^[1-9][0-9]{0,3}$'
-      AND (length(o.package_snapshot->>'durationDays')<4 OR o.package_snapshot->>'durationDays'<='3660')
-      AND (${filters.packageDays === "UNKNOWN" ? null : String(filters.packageDays)}::text IS NULL
-        OR o.package_snapshot->>'durationDays'=${String(filters.packageDays)}::text)) = ${filters.packageDays !== "UNKNOWN"}::boolean`;
+  const packageMatch = filters.packageDays === null ? sql`TRUE`
+    : capabilities.package_snapshot !== true ? sql`${filters.packageDays === "UNKNOWN"}::boolean`
+    : filters.packageDays === "UNKNOWN" ? sql`h.package_days_at_redemption IS NULL`
+    : sql`h.package_days_at_redemption=${filters.packageDays}::integer`;
   const [row] = await sql`
     WITH staff AS MATERIALIZED (
       SELECT m.id FROM public.auth_sessions s JOIN public.members m ON m.id=s.member_id
@@ -115,6 +114,7 @@ async function readAdminHistory(filters: HistoryFilters): Promise<AdminRewardsHi
         AND (${filters.status}::text='ALL' OR h.status=${filters.status})
         AND (${filters.memberCode}::text IS NULL OR m.member_code=${filters.memberCode})
         AND (${filters.memberName}::text IS NULL OR strpos(lower(m.full_name), lower(${filters.memberName}::text))>0)
+        AND (${filters.rewardTitle}::text IS NULL OR strpos(lower(coalesce(h.reward_title,catalog.title)), lower(${filters.rewardTitle}::text))>0)
         AND (${filters.rewardCode}::uuid IS NULL OR h.reward_code=${filters.rewardCode}::uuid)
         AND ${cardMatch} AND ${packageMatch}
       ORDER BY h.id DESC LIMIT ${historyPageSize + 1}

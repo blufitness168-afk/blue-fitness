@@ -18,8 +18,17 @@ export async function realCheckinAction(request: Request, action: string) {
     const session = createHash("sha256").update(token).digest("hex");
     if (action === "manual") {
       if (member.role !== "OWNER") return json({ error: "เฉพาะ OWNER เท่านั้น" }, 403);
-      const { requestKey, ...input } = body;
+      const { requestKey, staffSaleId, ...input } = body;
       if (typeof requestKey !== "string" || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(requestKey)) return json({ error: "รหัสคำขอไม่ถูกต้อง" }, 400);
+      if (staffSaleId != null) {
+        if (typeof staffSaleId !== "string" || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(staffSaleId) || input.orderId != null) {
+          return json({ error: "ระบุ UUID ของรายการขายโดยพนักงานและไม่ระบุออเดอร์ออนไลน์พร้อมกัน" }, 400);
+        }
+        const capability = await sql`SELECT to_regprocedure('public.r7_manual_staff_source(integer,timestamptz,uuid)') IS NOT NULL AS supported`;
+        if (capability[0]?.supported === false) return json({ error: "ระบบยังไม่รองรับรายการขายโดยพนักงาน — ยังไม่ได้บันทึก", reason: "MANUAL_STAFF_UNSUPPORTED" }, 422);
+        if (capability[0]?.supported !== true) throw Error("Unknown manual staff capability");
+        input.staffSaleId = staffSaleId;
+      }
       const rows = await sql`SELECT public.r7_manual_visit(${session},${requestKey}::uuid,${JSON.stringify(input)}::jsonb) AS result`;
       return json(rows[0].result);
     }
@@ -50,7 +59,8 @@ export async function realCheckinAction(request: Request, action: string) {
     if (from === false || to === false || (from && to && Date.parse(from) >= Date.parse(to))) return json({ error: "ช่วงเวลาไม่ถูกต้อง" }, 400);
     const capability = await sql`SELECT to_regclass('public.r7_visits') IS NOT NULL AS visits,
       to_regprocedure('public.r7_visit_action(text,text,uuid,text,text)') IS NOT NULL AS "outSupported",
-      to_regprocedure('public.r7_manual_visit(text,uuid,jsonb)') IS NOT NULL AS "manualSupported"`;
+      to_regprocedure('public.r7_manual_visit(text,uuid,jsonb)') IS NOT NULL AS "manualSupported",
+      to_regprocedure('public.r7_manual_staff_source(integer,timestamptz,uuid)') IS NOT NULL AS "manualStaffSupported"`;
     if (typeof capability[0]?.visits !== "boolean" || typeof capability[0]?.outSupported !== "boolean") throw Error("Unknown admission capability");
     const rows = capability[0].visits ? await sql`WITH filtered AS (
       SELECT c.id, m.member_code AS "memberCode", m.full_name AS "fullName", coalesce(v.entered_at,c.checkin_time) AS "checkedAt", c.scanner_type AS "scannerType", c.points_awarded AS "pointsAwarded", c.notes,
@@ -77,12 +87,12 @@ export async function realCheckinAction(request: Request, action: string) {
       coalesce((SELECT jsonb_agg(r ORDER BY r."checkedAt" DESC,r.id DESC) FROM (SELECT * FROM filtered ORDER BY "checkedAt" DESC,id DESC LIMIT 51 OFFSET ${(page - 1) * 50}) r),'[]'::jsonb) AS records,
       (SELECT jsonb_agg(jsonb_build_object('hour',h,'entries',(SELECT count(*) FROM filtered WHERE hour=h)) ORDER BY h) FROM generate_series(0,23) h) AS hourly`;
     const records = rows[0]?.records ?? [];
-    return json({ ...(member.role === "OWNER" && capability[0].manualSupported === true ? { manualSupported: true } : {}), outSupported: capability[0].outSupported, records: records.slice(0, 50), hasMore: records.length > 50, hourly: rows[0]?.hourly ?? Array.from({ length: 24 }, (_, hour) => ({ hour, entries: 0 })) });
+    return json({ ...(member.role === "OWNER" && capability[0].manualSupported === true ? { manualSupported: true, ...(capability[0].manualStaffSupported === true ? { manualStaffSupported: true } : {}) } : {}), outSupported: capability[0].outSupported, records: records.slice(0, 50), hasMore: records.length > 50, hourly: rows[0]?.hourly ?? Array.from({ length: 24 }, (_, hour) => ({ hour, entries: 0 })) });
   } catch (error) {
     const databaseError = error as { code?: string; detail?: string };
     if (action === "manual") {
       if (databaseError.code === "42501") return json({ error: "ต้องใช้เซสชัน OWNER ปกติ" }, 403);
-      if (["22023", "22007", "22008", "22P02"].includes(databaseError.code ?? "")) return json({ error: "ข้อมูลไม่ถูกต้อง: ตรวจเหตุผล เวลา IN/OUT และรหัสออเดอร์ หรือรีเฟรชเพื่อตรวจประวัติหากใช้รหัสคำขอซ้ำ" }, 400);
+      if (["22023", "22007", "22008", "22P02"].includes(databaseError.code ?? "")) return json({ error: "ข้อมูลไม่ถูกต้อง: ตรวจเหตุผล เวลา IN/OUT และรหัสออเดอร์หรือรายการขาย หรือรีเฟรชเพื่อตรวจประวัติหากใช้รหัสคำขอซ้ำ" }, 400);
     }
     if (databaseError.code === "0A000" && databaseError.detail === "MEMBER_SCAN_OUT_UNSUPPORTED_BEFORE_WRITE") return json({ error: "ระบบเข้าใช้บริการปัจจุบันยังไม่รองรับ OUT — ยังไม่ได้บันทึกรายการ", reason: "OUT_UNSUPPORTED", operationUnavailable: true, outSupported: false }, 422);
     return json({ error: "ระบบไม่พร้อมใช้งาน กรุณาลองคำขอเดิมอีกครั้ง" }, 503);

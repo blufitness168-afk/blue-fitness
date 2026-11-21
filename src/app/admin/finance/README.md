@@ -21,7 +21,11 @@ Amounts sent over HTTP are baht (up to two decimals); database mutations use int
 
 ## Accounting rules
 
-`records` contains active manual entries plus exactly one row per PAID package order with a non-null paid_at. Package dates use Asia/Bangkok paid_at, and actual amount_satang already includes discounts. No joins to attempts/legacy payments, no synthetic income rows inserted for orders, and no browser mock imports. Package record IDs have `package:` prefixes and cannot be sent as editable UUID ledger IDs. Package rows are always read-only.
+With the R5 finance baseline, `records` contains active manual entries plus exactly one income row per PAID online order with non-null `confirmed_at`, dated in Asia/Bangkok. PAID rows without that timestamp are counted separately, not dated from `paid_at`. The amount is the actual `amount_satang` after discounts. The optional R4 stack adds its own staff renewals and cancellation/refund events. Package records are read-only; no order amount is inserted as a manual entry.
+
+`20261204_R5_finance_lifecycle.sql` is prepared for the R5 finance reader **after** the complete R4 settlement/cancellation chain. It changes only the online income category. Where locked settlement evidence matches the order and the prior expiry matches a positively evidenced online term, `ต่อสมาชิก` includes purchases made while active and up to exactly 90 days after expiry; `สมัครใหม่` means a return more than 90 days after expiry. A prior term cancelled by the time of purchase or a staff term that could supersede the captured expiry prevents classification. A NULL expiry does not prove a first purchase. Legacy, unproved prior terms, and other ambiguous rows stay `แพ็กเกจ`. The original income and its category are retained on cancellation; the cancellation/refund has its own row. The existing Excel export reads the same categories with no writer changes.
+
+Apply only after approved rehearsal using the actual backend principal; the invoker also needs read access to the referenced R4 evidence/staff relations. The migration grants nothing and refuses other reader definitions (including standalone October/R5). No backfill is needed or performed.
 
 Deletion is audited soft cancellation, excluded from totals but retained with before/after snapshots and reason in audit. Edits are audited. Audit + request record + ledger mutation commit atomically. No payment, member points, or expiry writes occur.
 

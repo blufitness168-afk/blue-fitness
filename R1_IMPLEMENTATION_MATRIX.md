@@ -1,6 +1,8 @@
 # R1 Implementation Matrix — BLU FITNESS
 
-วันที่ตรวจ: 18 พ.ย. 2026 — **static source inspection / read-only assessment**
+วันที่ตรวจ baseline: 18 พ.ย. 2026 — **static source inspection / read-only assessment**
+
+> สำหรับสถานะปัจจุบัน, ผล native PostgreSQL, โค้ดที่ยังขาด และรายการขึ้นระบบ/UAT ให้ดูหัวข้อ **สถานะล่าสุด R1–R8** ใน [TODO.md](TODO.md) ก่อน ตารางด้านล่างเก็บไว้เป็น baseline ไม่ใช่สถานะล่าสุด.
 
 ## 1. ขอบเขตและระดับหลักฐาน
 

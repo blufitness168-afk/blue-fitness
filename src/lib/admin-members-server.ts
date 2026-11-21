@@ -19,7 +19,7 @@ export interface OrderRow {
   createdAt: string; paidAt?: string | null; membershipExpiresAt: string | null; cancelledAt: string | null;
 }
 export interface CheckinRow {
-  id: number; checkinTime: string; scannerType: string;
+  id: number; checkinTime: string; scannerType: string; exitedAt: string | null;
   packageName: string | null; usedTimeSlot: string | null;
 }
 export interface CouponRow {
@@ -71,7 +71,8 @@ export function monthRange(input?: string, now = new Date()) {
   return { month, start: `${month}-01T00:00:00+07:00`, end: `${number === 12 ? year + 1 : year}-${String(number === 12 ? 1 : number + 1).padStart(2, "0")}-01T00:00:00+07:00` };
 }
 export const memberListGenders = { MALE: "ชาย", FEMALE: "หญิง", OTHER: "อื่น ๆ" } as const;
-type MemberListFilters = Record<"q" | "name" | "gender" | "code" | "phone" | "from" | "to" | "month" | "packageLabel" | "slot", string>;
+export const currentPackageDurations = { "1": "รายวัน", "30": "1 เดือน", "90": "3 เดือน", "180": "6 เดือน", "365": "12 เดือน" } as const;
+type MemberListFilters = Record<"q" | "name" | "gender" | "code" | "phone" | "from" | "to" | "month" | "reportMonth" | "packageLabel" | "slot" | "currentDuration" | "currentSlot", string>;
 export type MemberListInput = Partial<Record<keyof MemberListFilters | "page", string | string[]>>;
 
 function validMemberListDay(day: string) {
@@ -99,7 +100,10 @@ function memberListFilters(input: MemberListInput) {
     gender: checked("gender", value => Object.hasOwn(memberListGenders, value)),
     from: checked("from", validMemberListDay), to: checked("to", validMemberListDay),
     month: checked("month", value => /^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(value)),
+    reportMonth: checked("reportMonth", value => /^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(value)),
     packageLabel: text("packageLabel", 100), slot: checked("slot", value => !!packageCatalogDailySlot(value)),
+    currentDuration: checked("currentDuration", value => Object.hasOwn(currentPackageDurations, value)),
+    currentSlot: checked("currentSlot", value => !!packageCatalogDailySlot(value)),
   };
   if (filters.from && filters.to && filters.from > filters.to) invalid = true;
   return { filters, invalid };
@@ -107,9 +111,88 @@ function memberListFilters(input: MemberListInput) {
 
 export async function getAdminMembers(input: MemberListInput = {}) {
   const { sql, fragment, callerRole } = await memberReader();
-  const expiry = staffPaidReadsEnabled() ? fragment`COALESCE(r4_staff_private.paid_active_expiry(id, now()), expire_date)` : fragment`expire_date`;
+  const asOf = Date.now();
   const { filters, invalid } = memberListFilters(input);
-  const { q, name, code, phone, gender, from, to, month, packageLabel, slot } = filters;
+  const { q, name, code, phone, gender, from, to, month, reportMonth, packageLabel, slot, currentDuration, currentSlot } = filters;
+  const current = !!(currentDuration || currentSlot);
+  const currentReport = !!reportMonth && reportMonth === monthRange(undefined, new Date(asOf)).month;
+  const instant = new Date(asOf).toISOString();
+  let termJoin = fragment``;
+  let currentUnavailable = false;
+  let nearExpiryAvailable = false;
+  if ((current || currentReport) && !invalid) {
+    const [sources] = await sql`SELECT
+      CASE WHEN p.oid IS NULL THEN 'absent'
+        WHEN p.proretset AND p.prorettype = 'pg_catalog.record'::regtype
+          AND p.proargmodes = ARRAY['i','i','t','t','t','t']::"char"[]
+          AND p.proargnames[3:6] = ARRAY['order_id','sale_id','package_snapshot','main_end']
+          AND p.proallargtypes[3:6] = ARRAY['pg_catalog.uuid'::regtype,'pg_catalog.uuid'::regtype,
+            'pg_catalog.jsonb'::regtype,'pg_catalog.timestamptz'::regtype]::oid[] THEN 'combined'
+        WHEN p.proretset AND p.prorettype = pg_catalog.to_regtype('public.package_payment_orders') AND p.proallargtypes IS NULL THEN 'standalone'
+        ELSE 'unsupported' END AS term_contract,
+      to_regprocedure('public.r3_override_current_order(integer,timestamptz)') IS NOT NULL AS standalone,
+      to_regnamespace('r4_staff_private') IS NOT NULL AS staff_schema,
+      to_regclass('r4_staff_private.free_sales') IS NOT NULL AS staff_sales,
+      to_regprocedure('r4_staff_private.admission_term(integer,timestamptz,uuid)') IS NOT NULL AS staff_term,
+      to_regclass('r4_online_private.active_paid_orders') IS NOT NULL AS online_active,
+      to_regclass('r4_online_private.cancellations') IS NOT NULL AS online_cancellations
+      FROM (SELECT pg_catalog.to_regprocedure('public.time_supplement_main(integer,timestamptz)') AS main_proc) f
+      LEFT JOIN pg_catalog.pg_proc p ON p.oid = f.main_proc`;
+    if (!sources) throw new Error("Forbidden");
+    const combined = sources.term_contract === "combined";
+    const legacy = sources.term_contract === "absent" || sources.term_contract === "standalone";
+    const termAvailable = combined || (legacy && sources.standalone
+      && (!(sources.staff_schema || sources.staff_sales || sources.staff_term || staffPaidReadsEnabled()) || (sources.staff_sales && sources.staff_term))
+      && sources.online_active === sources.online_cancellations);
+    currentUnavailable = current && !termAvailable;
+    // Only the combined authority covers R4 sales, revocations and proven renewals.
+    // It reads present member state, so it cannot be used for past/future report months.
+    nearExpiryAvailable = currentReport && combined;
+    if ((current && termAvailable) || nearExpiryAvailable) {
+      let candidates;
+      if (combined) {
+        // The standalone supplement helper has the same inputs but returns orders. An empty combined result is authoritative.
+        candidates = fragment`SELECT CASE WHEN (o.order_id IS NULL) <> (o.sale_id IS NULL)
+            AND jsonb_typeof(o.package_snapshot->'durationDays') = 'number'
+            THEN o.package_snapshot->>'durationDays' END AS duration, o.package_snapshot->>'timeSlot' AS daily_slot,
+          o.main_end AS ends_at
+        FROM public.time_supplement_main(members.id, ${instant}::timestamptz) o`;
+      } else {
+        const paid = sources.online_active ? fragment`r4_online_private.active_paid_orders` : fragment`public.package_payment_orders`;
+        // Latest is only a routing input to R4, never proof of an online term.
+        const staffTerm = sources.staff_term ? fragment`SELECT a.* FROM r4_staff_private.admission_term(members.id, ${instant}::timestamptz, (
+          SELECT o.id FROM ${paid} o WHERE o.member_id = members.id AND o.status = 'PAID'
+          ORDER BY o.paid_at DESC NULLS LAST, o.created_at DESC, o.id DESC LIMIT 1
+        )) a` : fragment`SELECT NULL::text AS source_kind, NULL::uuid AS source_id WHERE FALSE`;
+        const staffCandidate = sources.staff_term ? fragment`UNION ALL
+          SELECT s.duration_days::text, s.daily_slot, s.ends_at
+          FROM staff_term a JOIN r4_staff_private.free_sales s ON s.sale_id = a.source_id AND s.member_id = members.id
+          JOIN ${paid} predecessor ON predecessor.id = s.predecessor_order_id AND predecessor.member_id = members.id AND predecessor.status = 'PAID'
+          WHERE a.source_kind IN ('STAFF_FREE', 'STAFF_TRANSFER') AND a.source_kind = s.method
+            AND s.recorded_at <= ${instant}::timestamptz` : fragment``;
+        candidates = fragment`WITH staff_term AS (${staffTerm})
+          SELECT CASE WHEN jsonb_typeof(o.package_snapshot->'durationDays') = 'number'
+            THEN o.package_snapshot->>'durationDays' END AS duration, o.package_snapshot->>'timeSlot' AS daily_slot,
+            o.membership_expires_at AS ends_at
+          FROM public.r3_override_current_order(members.id, ${instant}::timestamptz) o
+          JOIN ${paid} live ON live.id = o.id AND live.status = 'PAID'
+          WHERE NOT EXISTS (SELECT FROM staff_term a WHERE (a.source_kind = 'ONLINE_PAID' AND a.source_id = o.id) IS NOT TRUE)
+          ${staffCandidate}`;
+      }
+      termJoin = fragment`JOIN LATERAL (
+        WITH candidates AS (${candidates})
+        SELECT ends_at FROM (SELECT candidates.*, count(*) OVER () AS candidate_count FROM candidates) term
+        WHERE candidate_count = 1 AND isfinite(ends_at) AND ends_at > ${instant}::timestamptz
+          AND duration ~ '^[1-9][0-9]{0,3}$' AND public.package_catalog_daily_slot_valid(daily_slot)
+          ${currentDuration ? fragment`AND duration = ${currentDuration}` : fragment``}
+          ${currentSlot ? fragment`AND daily_slot = ${currentSlot}` : fragment``}
+      ) current_term ON members.role = 'MEMBER' AND members.status = 'ACTIVE'
+        AND NOT EXISTS (SELECT FROM package_payment_orders p WHERE p.member_id = members.id AND p.status = 'PENDING')`;
+    }
+  }
+  const currentJoin = current ? termJoin : fragment``;
+  const expiry = current && !invalid && !currentUnavailable ? fragment`current_term.ends_at`
+    : !current && staffPaidReadsEnabled() ? fragment`COALESCE(r4_staff_private.paid_active_expiry(id, now()), expire_date)` : fragment`expire_date`;
   const literal = (value: string) => value.replace(/[\\%_]/g, "\\$&");
   const contains = (value: string) => `%${literal(value)}%`;
   const pattern = contains(q);
@@ -129,13 +212,15 @@ export async function getAdminMembers(input: MemberListInput = {}) {
     ${to ? fragment`AND created_at < ((${to}::date + 1)::timestamp AT TIME ZONE 'Asia/Bangkok')` : fragment``}
     ${month ? fragment`AND created_at >= (${monthStart}::date::timestamp AT TIME ZONE 'Asia/Bangkok')
       AND created_at < ((${monthStart}::date + interval '1 month') AT TIME ZONE 'Asia/Bangkok')` : fragment``}
-    ${purchase} ${invalid ? fragment`AND FALSE` : fragment``}`;
+    ${purchase} ${invalid || currentUnavailable ? fragment`AND FALSE` : fragment``}`;
   const [count] = await sql`WITH monthly AS (
     SELECT to_char(created_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM') AS month, count(*)::int AS total
-    FROM members WHERE ${where} GROUP BY 1
+    FROM members ${currentJoin} WHERE ${where} GROUP BY 1
   ) SELECT coalesce(sum(total), 0)::int AS total,
     (SELECT coalesce(json_agg(json_build_object('month', month, 'total', total) ORDER BY month DESC), '[]'::json)
       FROM (SELECT month, total FROM monthly ORDER BY month DESC LIMIT 12) recent) AS monthly
+    ${nearExpiryAvailable ? fragment`, (SELECT count(DISTINCT members.id)::int FROM members ${termJoin}
+      WHERE ${where} AND current_term.ends_at <= ${instant}::timestamptz + interval '720 hours') AS "nearExpiry"` : fragment``}
     FROM monthly`;
   if (!count) throw new Error("Forbidden");
   const total = Number(count.total);
@@ -143,11 +228,16 @@ export async function getAdminMembers(input: MemberListInput = {}) {
   const pageInput = typeof input.page === "string" ? Number(input.page) : 1;
   const page = Math.min(pages, Math.max(1, Number.isSafeInteger(pageInput) ? pageInput : 1));
   const rows = await sql`SELECT member_code AS "memberCode", full_name AS "fullName", nickname, phone, gender, role, status,
-    ${expiry} AS "expireDate", created_at AS "createdAt", points FROM members
+    ${expiry} AS "expireDate", created_at AS "createdAt", points FROM members ${currentJoin}
     WHERE ${where}
     ORDER BY created_at DESC, id DESC LIMIT 50 OFFSET ${(page - 1) * 50}`;
   const monthly = (count.monthly as { month: string; total: number }[] | undefined ?? []).map(({ month, total }) => ({ month, total }));
-  return { members: rows.map(memberProfile), callerRole, total, page, pages, filters, invalid, monthly, asOf: Date.now() };
+  const lifecycle = reportMonth && !invalid ? {
+    month: reportMonth,
+    nearExpiry: nearExpiryAvailable ? Number(count.nearExpiry) : null,
+    nearExpiryAsOf: nearExpiryAvailable ? instant : null,
+  } : null;
+  return { members: rows.map(memberProfile), callerRole, total, page, pages, filters, invalid, currentUnavailable, monthly, lifecycle, asOf };
 }
 export type MemberHistoryInput = { ordersPage?: string | string[]; checkinsPage?: string | string[]; couponsPage?: string | string[] };
 export function historyPage(input?: string | string[]) {
@@ -173,10 +263,10 @@ export async function getAdminMember(memberCode: string, input: MemberHistoryInp
       to_regclass('public.time_supplement_activations') IS NOT NULL AS supplements`,
   ]);
   // Do not mention an absent relation in SQL; errors from installed sources must surface.
-  const visitSnapshot = historySources?.visits ? fragment`
+  const visitFields = historySources?.visits ? fragment`v.exited_at AS "exitedAt",
     CASE WHEN jsonb_typeof(v.snapshot #> '{package,name}') = 'string' THEN NULLIF(btrim(v.snapshot #>> '{package,name}'), '') END AS "packageName",
     CASE WHEN jsonb_typeof(v.snapshot->'usedTimeSlot') = 'string' THEN NULLIF(btrim(v.snapshot->>'usedTimeSlot'), '') END AS "usedTimeSlot"`
-    : fragment`NULL::text AS "packageName", NULL::text AS "usedTimeSlot"`;
+    : fragment`NULL::timestamptz AS "exitedAt", NULL::text AS "packageName", NULL::text AS "usedTimeSlot"`;
   const visitJoin = historySources?.visits ? fragment`LEFT JOIN public.r7_visits v ON v.checkin_id = c.id AND v.member_id = c.member_id` : fragment``;
   // These timestamps come from writers that record the coupon ID in the same transaction as consumption.
   // A campaign activation alone is not consumption, and legacy checkin notes are not used as evidence.
@@ -218,7 +308,7 @@ export async function getAdminMember(memberCode: string, input: MemberHistoryInp
         SELECT 'staff-transfer:' || sale_id, package_name, daily_slot, 'STAFF_TRANSFER', recorded_at, starts_at, ends_at, cancelled_at
         FROM r4_staff_private.paid_history WHERE member_id = ${member.id}` : fragment``}
       ) history ORDER BY "createdAt" DESC, id DESC LIMIT 101 OFFSET ${(pages.orders - 1) * 100}`,
-    sql`SELECT c.id, c.checkin_time AS "checkinTime", c.scanner_type AS "scannerType", ${visitSnapshot}
+    sql`SELECT c.id, c.checkin_time AS "checkinTime", c.scanner_type AS "scannerType", ${visitFields}
       FROM (SELECT id, member_id, checkin_time, scanner_type FROM checkins
         WHERE member_id = ${member.id} ORDER BY checkin_time DESC, id DESC LIMIT 101 OFFSET ${(pages.checkins - 1) * 100}) c
       ${visitJoin} ORDER BY c.checkin_time DESC, c.id DESC`,
@@ -241,7 +331,7 @@ export async function getAdminMember(memberCode: string, input: MemberHistoryInp
       ...(callerRole === "OWNER" ? { amountSatang: row.amountSatang, paidAt: row.paidAt } : {})
     })) as OrderRow[], pages.orders),
     checkins: historyResult(checkins.map((row): CheckinRow => ({ id: row.id, checkinTime: row.checkinTime, scannerType: row.scannerType,
-      packageName: row.packageName ?? null, usedTimeSlot: row.usedTimeSlot ?? null })), pages.checkins),
+      exitedAt: row.exitedAt ?? null, packageName: row.packageName ?? null, usedTimeSlot: row.usedTimeSlot ?? null })), pages.checkins),
     coupons: historyResult(coupons.map((row): CouponRow => ({ id: row.id, title: row.title, type: row.type, status: row.status,
       totalQuota: row.totalQuota, usedCount: row.usedCount, expireDate: row.expireDate, lastRecordedUsedAt: row.lastRecordedUsedAt ?? null })), pages.coupons), asOf: Date.now() };
 }

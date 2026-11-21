@@ -86,8 +86,8 @@ test('member histories render recorded visit fields and Bangkok coupon use times
   const timestamp = '2026-11-20T21:05:00Z';
   const html = render('ADMIN', 'ADMIN', [], false, {
     checkins: { page: 1, rows: [
-      { scannerType: 'HARDWARE_USB', packageName: 'Historical package', usedTimeSlot: '15:00-21:00' },
-      { scannerType: 'LEGACY', packageName: null, usedTimeSlot: null },
+      { scannerType: 'HARDWARE_USB', packageName: 'Historical package', usedTimeSlot: '15:00-21:00', exitedAt: timestamp },
+      { scannerType: 'LEGACY', packageName: null, usedTimeSlot: null, exitedAt: null },
     ] },
     coupons: { page: 1, rows: [
       { title: 'Logged use', status: 'AVAILABLE', usedCount: 1, totalQuota: 3, lastRecordedUsedAt: timestamp },
@@ -96,8 +96,13 @@ test('member histories render recorded visit fields and Bangkok coupon use times
     ] },
   });
   const rows = html.match(/<tr\b[^>]*>.*?<\/tr>/g);
-  assert.match(rows.find(row => row.includes('Historical package')), /15:00-21:00/);
-  assert.equal(rows.find(row => row.includes('LEGACY')).match(/ไม่ทราบ/g).length, 2);
+  const visit = rows.find(row => row.includes('Historical package'));
+  const legacy = rows.find(row => row.includes('LEGACY'));
+  assert.match(html, /เวลาออก \(ไทย\)/);
+  assert.match(visit, /15:00-21:00/);
+  assert.ok(visit.includes(new Date(timestamp).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })));
+  assert.match(legacy, />ไม่บันทึก<\/td>/);
+  assert.equal(legacy.match(/ไม่ทราบ/g).length, 2);
   assert.ok(rows.find(row => row.includes('Logged use')).includes(new Date(timestamp).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })));
   assert.match(rows.find(row => row.includes('Unknown use')), />ไม่ทราบ<\/td><\/tr>$/);
   assert.match(rows.find(row => row.includes('Unused')), />—<\/td><\/tr>$/);

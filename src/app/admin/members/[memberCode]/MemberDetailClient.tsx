@@ -9,8 +9,8 @@ function date(value: string | null | undefined) {
 function Table({ title, headings, rows, navigation }: { title: string; headings: string[]; rows: React.ReactNode[][]; navigation: React.ReactNode }) {
   return <section className="min-w-0 rounded-2xl border bg-white p-5"><h2 className="mb-3 font-bold">{title} (หน้าละ 100 รายการ)</h2><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr>{headings.map(h => <th key={h} className="whitespace-nowrap p-3">{h}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i} className="border-t">{row.map((cell, j) => <td key={j} className="whitespace-nowrap p-3">{cell}</td>)}</tr>)}{!rows.length && <tr><td colSpan={headings.length} className="p-6 text-center">ยังไม่มีประวัติ</td></tr>}</tbody></table></div>{navigation}</section>;
 }
-export default function MemberDetailClient({ data, callerRole, staffFreeEntitlement, onlineCancellationEnabled = false }: {
-  data: NonNullable<Awaited<ReturnType<typeof getAdminMember>>>; callerRole?: string; staffFreeEntitlement?: React.ReactNode; onlineCancellationEnabled?: boolean;
+export default function MemberDetailClient({ data, callerRole, staffFreeEntitlement, onlineCancellationEnabled = false, memberActions }: {
+  data: NonNullable<Awaited<ReturnType<typeof getAdminMember>>>; callerRole?: string; staffFreeEntitlement?: React.ReactNode; onlineCancellationEnabled?: boolean; memberActions?: React.ReactNode;
 }) {
   const m = data.member;
   const owner = data.callerRole === "OWNER";
@@ -42,6 +42,7 @@ export default function MemberDetailClient({ data, callerRole, staffFreeEntitlem
     <Link href="/admin/members" className="text-blu-slate underline">← กลับรายชื่อสมาชิก</Link>
     <h1 className="break-words text-2xl font-black">{m.fullName} <span className="text-base text-blu-steel">{m.memberCode}</span></h1>
     <p className="rounded-xl bg-blu-ice p-4 text-sm">ตารางนี้แสดงข้อมูลจริง การแก้โปรไฟล์ใช้ฟอร์มด้านล่างเมื่อมีสิทธิ์ การต่ออายุและเปลี่ยนเบอร์/รหัสผ่านต้องใช้ขั้นตอนที่กำหนด ไม่สามารถกำหนด PAID วันหมดอายุ คะแนน หรือแจกคูปองจากฟอร์มโปรไฟล์ได้</p>
+    {memberActions}
     <dl className="grid gap-4 rounded-2xl border bg-white p-5 sm:grid-cols-2 lg:grid-cols-3">{fields.map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-blu-steel">{label}</dt><dd className="mt-1 break-words font-semibold">{value || "—"}</dd></div>)}</dl>
     {staffFreeEntitlement}
     <Table navigation={navigation("orders")} title="คำสั่งซื้อแพ็กเกจ (ไม่รวมระบบชำระเงินเก่า)" headings={["รหัสคำสั่งซื้อ", "แพ็กเกจ", ...(owner ? ["ยอด"] : []), "สถานะ", "สร้างเมื่อ", "วันเริ่มสิทธิ์", "ช่วงเวลา", ...(owner ? ["ชำระเมื่อ"] : []), "หมดอายุหลังชำระ"]}
@@ -62,8 +63,8 @@ export default function MemberDetailClient({ data, callerRole, staffFreeEntitlem
         date(o.createdAt), o.membershipStartsAt ? date(o.membershipStartsAt) : "ไม่มีข้อมูลวันเริ่มสิทธิ์",
         o.timeSlot || "—", ...(owner ? [date(o.paidAt)] : []), date(o.membershipExpiresAt),
       ])} />
-    <Table navigation={navigation("checkins")} title="ประวัติเช็คอิน" headings={["วันที่/เวลา (ไทย)", "ช่องทาง", "แพ็กเกจที่บันทึก", "ช่วงเวลาที่ใช้ (ไทย)"]}
-      rows={data.checkins.rows.map(c => [date(c.checkinTime), c.scannerType, c.packageName ?? "ไม่ทราบ", c.usedTimeSlot ?? "ไม่ทราบ"])} />
+    <Table navigation={navigation("checkins")} title="ประวัติเข้า–ออก" headings={["เวลาเข้า (ไทย)", "เวลาออก (ไทย)", "ช่องทาง", "แพ็กเกจที่บันทึก", "ช่วงเวลาที่ใช้ (ไทย)"]}
+      rows={data.checkins.rows.map(c => [date(c.checkinTime), c.exitedAt ? date(c.exitedAt) : "ไม่บันทึก", c.scannerType, c.packageName ?? "ไม่ทราบ", c.usedTimeSlot ?? "ไม่ทราบ"])} />
     <Table navigation={navigation("coupons")} title="คูปอง" headings={["ชื่อ", "ประเภท", "สถานะปัจจุบัน", "ใช้แล้ว/สิทธิ์ทั้งหมด", "หมดอายุ", "เวลาใช้ล่าสุดที่บันทึก (ไทย)"]}
       rows={data.coupons.rows.map(c => [c.title, c.type, c.status === "AVAILABLE" && c.expireDate && Date.parse(c.expireDate) <= data.asOf ? "EXPIRED" : c.status,
         `${c.usedCount}/${c.totalQuota}`, date(c.expireDate), c.lastRecordedUsedAt ? date(c.lastRecordedUsedAt) : c.usedCount > 0 ? "ไม่ทราบ" : "—"])} />

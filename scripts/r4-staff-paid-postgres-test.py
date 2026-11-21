@@ -10,12 +10,40 @@ base = runner.base
 PAID = '20261122_R4_staff_paid_transfer'
 
 
+# The fixture installs staff-paid reads but not the later online cancellation schema.
+STAFF_READ_FLAGS = {'r4Reads': True, 'onlineReads': False, 'extendedHistory': True}
+SQL_BRANCH = re.compile(r'\$\{(r4Reads|onlineReads|extendedHistory)\s*\?\s*(sql|fragment)`([^`]*)`\s*:\s*\2`([^`]*)`\s*\}')
+
+
+def expand_staff_sql(source):
+    # Resolve innermost literal branches first; the outer wallet branches contain nested templates.
+    while True:
+        source, count = SQL_BRANCH.subn(lambda m: m[3] if STAFF_READ_FLAGS[m[1]] else m[4], source)
+        if not count:
+            return source
+
+
 def r4_wallet_sql(source, member_id):
-    # Expand the literal fragments used when ENABLE_STAFF_PAID_READS is true.
-    source = re.sub(r'\$\{r4Reads \? sql`([^`]*)` : sql`[^`]*`\s*\}', r'\1', source)
-    statement = re.search(r'await sql`([\s\S]*?)`', source)[1].replace('${member.id}', str(int(member_id)))
-    assert '${' not in statement and 'r4_staff_private.paid_history' in statement
+    match = re.search(r'const rows = await sql`(.*?)`\s*;', expand_staff_sql(source), re.S)
+    assert match, 'Could not extract member wallet SQL template'
+    statement = match[1].replace('${member.id}', str(int(member_id)))
+    assert '${' not in statement and '`' not in statement, 'Unresolved member wallet SQL template'
+    assert 'r4_staff_private.paid_history' in statement and 'r4_online_private.' not in statement
     return statement
+
+
+def r4_admin_order_sql(source, member_id):
+    history_source = re.search(r'const onlineHistorySource = (.*?);', source, re.S)
+    assert history_source, 'Could not locate admin order history source template'
+    relation = expand_staff_sql('${' + history_source[1] + '}')
+    assert relation == 'package_payment_orders', 'Unresolved offline order history source'
+    source = expand_staff_sql(source).replace('${onlineHistorySource}', relation)
+    statements = re.findall(r'sql`(SELECT id, "packageName", "timeSlot",[^`]+\) history ORDER BY[^`]+)`', source)
+    assert len(statements) == 2, 'Expected OWNER and ADMIN order history SQL templates'
+    for statement in statements:
+        statement = statement.replace('${member.id}', str(int(member_id))).replace('${(pages.orders - 1) * 100}', '0')
+        assert '${' not in statement and 'r4_staff_private.paid_history' in statement, 'Unresolved staff order history SQL template'
+        yield statement
 
 
 def exercise(root_query):
@@ -113,11 +141,7 @@ def exercise(root_query):
         active = json.loads(scalar(wallet_sql.replace('now()', '(SELECT starts_at FROM r4_staff_private.paid_history WHERE member_id=3)')))
         assert active['status']=='ACTIVE' and active['expiresAt']==purchase['membershipExpiresAt']
         admin_source = (base.ROOT / 'src/lib/admin-members-server.ts').read_text(encoding='utf-8')
-        admin_source = re.sub(r'\$\{r4Reads \? fragment`([^`]*)` : fragment``\s*\}', r'\1', admin_source)
-        admin_sql = re.findall(r'sql`(SELECT id, "packageName", "timeSlot",[^`]+\) history ORDER BY[^`]+)`', admin_source)
-        assert len(admin_sql)==2
-        for owner, statement in zip((True, False), admin_sql):
-            statement = statement.replace('${member.id}', '3').replace('${(pages.orders - 1) * 100}', '0')
+        for owner, statement in zip((True, False), r4_admin_order_sql(admin_source, 3), strict=True):
             row = json.loads(scalar(f"SELECT row_to_json(q) FROM ({statement}) q WHERE status='STAFF_TRANSFER';"))
             assert row['id']==purchase['id'] and row['membershipStartsAt']==purchase['startsAt']
             assert ('amountSatang' in row)==owner and ('paidAt' in row)==owner
