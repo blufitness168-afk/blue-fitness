@@ -10,6 +10,10 @@ const client = () => {
   if (!process.env.DATABASE_URL) throw Error("Database unavailable");
   return neon(process.env.DATABASE_URL);
 };
+async function pairedVisits(sql: ReturnType<typeof client>) {
+  const rows = await sql`SELECT to_regprocedure('public.r7_kiosk_scan(text,text,uuid,text,text)') IS NOT NULL AS supported`;
+  return rows[0]?.supported === true;
+}
 async function digest() {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token || !/^[a-f0-9]{64}$/.test(token)) throw Error("Unauthorized");
@@ -30,7 +34,7 @@ export async function kioskAction(request: Request, action: string) {
     }
     const current = await requireKioskSession();
     if (!current) return json({ error: "เซสชัน kiosk สิ้นสุด กรุณาให้พนักงานเข้าสู่ระบบใหม่" }, 401);
-    if (action === "status") return json({ ok: true, expiresAt: current.session.expiresAt });
+    if (action === "status") return json({ ok: true, expiresAt: current.session.expiresAt, outSupported: await pairedVisits(sql) });
     if (action === "exit") {
       if (typeof body.password !== "string" || !body.password.length || body.password.length > 128) return json({ error: "กรุณากรอกรหัสผ่าน" }, 400);
       // Reuse existing password verification + throttle. Never change role or other sessions.
@@ -51,6 +55,23 @@ export async function kioskAction(request: Request, action: string) {
     }
     if (action === "scan") {
       if (typeof body.code !== "string" || !/^(?:BLU-\d{1,12}|CARD-[0-9]{1,95})$/i.test(body.code.trim()) || typeof body.requestKey !== "string" || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(body.requestKey)) return json({ error: "รหัสสแกนไม่ถูกต้อง" }, 400);
+      const direction = body.direction;
+      if (direction !== undefined && direction !== "IN" && direction !== "OUT") return json({ error: "เลือกเข้า หรือ ออก" }, 400);
+      if (await pairedVisits(sql)) {
+        try {
+          const rows = await sql`SELECT public.r7_kiosk_scan(${await digest()},${station()},${body.requestKey}::uuid,${body.code.trim().toUpperCase()},${direction ?? "IN"}) AS result`;
+          return json(rows[0].result);
+        } catch (error) {
+          const code = (error as { code?: string } | null)?.code;
+          if (code === "42501" && (error as { message?: string }).message?.match(/^(Kiosk required|Live staff session required|Session expired)$/)) {
+            return json({ error: "เซสชัน kiosk สิ้นสุด กรุณาให้พนักงานเข้าสู่ระบบใหม่" }, 401);
+          }
+          if (code === "22023") return json({ error: "รหัสคำขอนี้ถูกใช้กับการสแกนอื่นแล้ว" }, 409);
+          throw error;
+        }
+      }
+      // Explicit-direction requests may be retries from a paired station. Never downgrade them.
+      if (direction !== undefined) return json({ error: "สถานีไม่พร้อมบันทึกเข้า–ออก กรุณาลองคำขอเดิมอีกครั้ง" }, 503);
       if (body.code.trim().toUpperCase().startsWith("CARD-")) {
         const rows = await sql`SELECT member_card_admit(${await digest()},${station()},${body.requestKey}::uuid,${body.code.trim().toUpperCase()},${null}::text) AS result`;
         return json(rows[0].result);

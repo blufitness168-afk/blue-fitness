@@ -50,6 +50,7 @@ export const scannerTypeEnum = pgEnum("scanner_type", [
   "WEB_CAMERA",  // สแกนผ่านกล้องมือถือพนักงาน
   "HARDWARE_USB",// สแกนผ่านเครื่องอ่านบาร์โค้ด USB
   "API_GATE",    // สแกนผ่านระบบเปิด-ปิดประตูอัตโนมัติ
+  "MANUAL",      // R7 OWNER records an observed IN/OUT pair
 ]);
 
 export const paymentStatusEnum = pgEnum("payment_status", [
