@@ -24,7 +24,7 @@ vm.runInNewContext(outputText, { exports, URLSearchParams, require: name => {
 } });
 
 const notice = /ต้องตรวจสอบก่อนยกเลิก/;
-function render(callerRole, dataRole, orders, onlineCancellationEnabled = false) {
+function render(callerRole, dataRole, orders, onlineCancellationEnabled = false, histories = {}) {
   const data = {
     callerRole: dataRole,
     member: { memberCode: 'BLU-7', role: 'MEMBER', status: 'ACTIVE', points: 0 },
@@ -35,7 +35,7 @@ function render(callerRole, dataRole, orders, onlineCancellationEnabled = false)
         membershipExpiresAt: '2026-12-20T09:00:00Z', ...(typeof order === 'string' ? {} : order),
       };
     }) },
-    checkins: { page: 1, rows: [] }, coupons: { page: 1, rows: [] },
+    checkins: { page: 1, rows: [] }, coupons: { page: 1, rows: [] }, ...histories,
   };
   return renderToStaticMarkup(createElement(exports.default, { data, callerRole, onlineCancellationEnabled }));
 }
@@ -80,6 +80,27 @@ test('online cancellation controls require an enabled OWNER view and are hidden 
   const canceled = render('OWNER', 'OWNER', [{ status: 'PAID', cancelledAt: '2026-11-22T09:00:00Z' }], true);
   assert.match(canceled, /PAID · ยกเลิกแล้ว/);
   assert.doesNotMatch(canceled, /ตรวจเงื่อนไขยกเลิก/);
+});
+
+test('member histories render recorded visit fields and Bangkok coupon use times without filling unknown legacy fields', () => {
+  const timestamp = '2026-11-20T21:05:00Z';
+  const html = render('ADMIN', 'ADMIN', [], false, {
+    checkins: { page: 1, rows: [
+      { scannerType: 'HARDWARE_USB', packageName: 'Historical package', usedTimeSlot: '15:00-21:00' },
+      { scannerType: 'LEGACY', packageName: null, usedTimeSlot: null },
+    ] },
+    coupons: { page: 1, rows: [
+      { title: 'Logged use', status: 'AVAILABLE', usedCount: 1, totalQuota: 3, lastRecordedUsedAt: timestamp },
+      { title: 'Unknown use', status: 'USED', usedCount: 1, totalQuota: 1, lastRecordedUsedAt: null },
+      { title: 'Unused', status: 'AVAILABLE', usedCount: 0, totalQuota: 1, lastRecordedUsedAt: null },
+    ] },
+  });
+  const rows = html.match(/<tr\b[^>]*>.*?<\/tr>/g);
+  assert.match(rows.find(row => row.includes('Historical package')), /15:00-21:00/);
+  assert.equal(rows.find(row => row.includes('LEGACY')).match(/ไม่ทราบ/g).length, 2);
+  assert.ok(rows.find(row => row.includes('Logged use')).includes(new Date(timestamp).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })));
+  assert.match(rows.find(row => row.includes('Unknown use')), />ไม่ทราบ<\/td><\/tr>$/);
+  assert.match(rows.find(row => row.includes('Unused')), />—<\/td><\/tr>$/);
 });
 
 test('online review stays hidden without OWNER agreement from page and history', () => {

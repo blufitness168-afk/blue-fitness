@@ -2,15 +2,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire, Module } from 'node:module';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
-function load(member = { id: 1, role: 'MEMBER', status: 'ACTIVE' }, failures = []) {
+function load(member = { id: 1, role: 'MEMBER', status: 'ACTIVE' }, failures = [], overrides = {}) {
   const calls = [];
   const filename = new URL('./real-rewards-server.ts', import.meta.url).pathname;
   const source = ts.transpileModule(readFileSync(new URL('./real-rewards-server.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const loaded = new Module(filename);
   loaded.require = name => {
+    if (name in overrides) return overrides[name];
     if (name === 'server-only') return {};
     if (name === './auth/server') return { SESSION_COOKIE: 'blu_session', getCurrentMember: async () => member };
     if (name === 'next/headers') return { cookies: async () => ({ get: () => ({ value: 'a'.repeat(64) }) }) };
@@ -30,7 +31,7 @@ test('guards reject unauthenticated, suspended and member staff access before SQ
   for (const member of [null, { role: 'MEMBER', status: 'SUSPENDED' }]) {
     const api = load(member); assert.equal((await api.rewardsAction(request(), 'redeem')).status, 401); assert.equal(api.calls.length, 0);
   }
-  for (const action of ['admin', 'save', 'deliver']) {
+  for (const action of ['admin', 'admin-history', 'save', 'deliver']) {
     const api = load(); assert.equal((await api.rewardsAction(request({}, action === 'admin' ? 'GET' : 'POST'), action)).status, 403); assert.equal(api.calls.length, 0);
   }
 });
@@ -40,6 +41,14 @@ test('payload strips forged member, balance, cost and code; rejects invalid inte
   for (const rewardId of [-1, 0, 1.5, '2', Infinity]) assert.equal(api.rewardPayload('redeem', { rewardId }), null);
   assert.equal(api.rewardPayload('deliver', { rewardCode: 'BLU-1' }), null);
   assert.equal((await api.rewardsAction(request({ rewardId: 2, requestKey: 'invalid' }), 'redeem')).status, 400);
+  assert.equal(api.calls.length, 0);
+});
+test('history rejects malformed filters, conflicting scans and attempts to override server page size', async () => {
+  const api = load({ role: 'ADMIN', status: 'ACTIVE' });
+  for (const bad of [{ status: 'all' }, { packageDays: 0 }, { packageDays: '30' }, { packageDays: 3661 }, { beforeId: '10' }, { beforeId: -1 }, { beforeId: 2147483648 }, { limit: 1000 }, { memberId: 12 }, { memberName: 'A\u0000B' }, { memberName: 'x'.repeat(121) }, { scan: 'https://example.test/BLU-1' }, { scan: 'BLU-RW-2-DEMO01' }, { scan: 'CARD-abc' }, { scan: 'BLU-2', memberCode: 'BLU-1' }]) {
+    assert.equal((await api.rewardsAction(request(bad), 'admin-history')).status, 400, JSON.stringify(bad));
+  }
+  assert.equal((await api.rewardsAction(request({}, 'GET'), 'admin-history')).status, 405);
   assert.equal(api.calls.length, 0);
 });
 test('SQL receives session digest and canonical UUID; transient retries retain exact request', async () => {
@@ -201,9 +210,13 @@ test('real PostgreSQL migration and atomic redemption invariants (isolated WASM)
     await assert.rejects(call(1, 'redeem', { rewardId: 1 }, key), /Unauthorized/);
     await assert.rejects(call(3, 'deliver', { rewardCode: first.rewardCode }), /Recipient unavailable/);
     await db.exec("UPDATE members SET status='ACTIVE' WHERE id=1");
-    const delivered = await call(3, 'deliver', { rewardCode: first.rewardCode });
+    const deliverPayload = load().rewardPayload;
+    const deliveryKey = randomUUID();
+    const delivered = await call(3, 'deliver', deliverPayload('deliver', { rewardCode: `BLU-RW-${first.rewardCode.toUpperCase()}` }), deliveryKey);
     assert.equal(delivered.status, 'COMPLETED');
-    assert.deepEqual(await call(4, 'deliver', { rewardCode: first.rewardCode }), delivered);
+    const legacy = deliverPayload('deliver', { rewardCode: first.rewardCode });
+    assert.deepEqual(await call(3, 'deliver', legacy, deliveryKey), delivered);
+    assert.deepEqual(await call(4, 'deliver', legacy), delivered);
     assert.equal(await scalar('SELECT completed_by AS value FROM redemptions WHERE id=1'), 3);
     assert.equal(await scalar('SELECT points AS value FROM members WHERE id=1'), 70);
     // A ledger failure must roll back both wallet, stock and redemption.
@@ -228,4 +241,103 @@ test('real PostgreSQL migration and atomic redemption invariants (isolated WASM)
     await db.exec("UPDATE members SET role='MEMBER' WHERE id=3");
     for (const action of ['admin', 'save', 'deliver']) await assert.rejects(call(3, action), /Forbidden/);
   } finally { await db.close(); }
+});
+
+test('R8 history SQL: baseline pagination, scans, purchase evidence, privacy and persisted authorization', { skip: !PGlite && 'Requires the existing isolated PGlite harness' }, async () => {
+  const db = new PGlite();
+  const priorUrl = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = 'postgres://unused:unused@invalid.invalid/unused';
+  try {
+    const digest = createHash('sha256').update('a'.repeat(64)).digest('hex');
+    const rewardCode = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const neon = require('@neondatabase/serverless').neon(process.env.DATABASE_URL);
+    // Compile via the real Neon tag, execute each resulting PostgreSQL query locally, never await a Neon HTTP query.
+    const tag = (...args) => {
+      const query = neon(...args);
+      query.then = (resolve, reject) => {
+        const { query: text, params } = query.queryData.toParameterizedQuery();
+        return db.query(text, params).then(result => result.rows).then(resolve, reject);
+      };
+      return query;
+    };
+    const api = load({ role: 'ADMIN', status: 'ACTIVE' }, [], { '@neondatabase/serverless': { neon: () => tag } });
+    const history = async (filters = {}, expected = 200) => {
+      const response = await api.rewardsAction(request(filters), 'admin-history');
+      assert.equal(response.status, expected, JSON.stringify(response.body));
+      return response.body.data;
+    };
+    const ids = data => data.redemptions.map(row => row.id);
+    await db.exec(`
+      CREATE TYPE mem_role AS ENUM ('MEMBER','ADMIN','OWNER');
+      CREATE TABLE members(id integer PRIMARY KEY,member_code varchar(50),full_name text,status text,role mem_role, phone text, email text);
+      CREATE TABLE auth_sessions(member_id integer,token_hash text UNIQUE,mode text,revoked_at timestamptz,expires_at timestamptz);
+      CREATE TABLE rewards(id integer PRIMARY KEY,title text,description text,image_url text,point_cost integer,stock integer,is_active boolean);
+      CREATE TABLE redemptions(id serial PRIMARY KEY,member_id integer,reward_id integer,points_spent integer,status text,redeemed_at timestamptz, completed_at timestamptz,reward_code uuid UNIQUE,reward_title text,completed_by integer);
+      INSERT INTO members VALUES (1,'BLU-1','Jane 100%','ACTIVE','MEMBER','PRIVATE-PHONE','PRIVATE-EMAIL'),(2,'BLU-2','Jane 100X','ACTIVE','MEMBER',NULL,NULL),(3,'BLU-3','Staff','ACTIVE','ADMIN',NULL,NULL);
+      INSERT INTO rewards VALUES(1,'Current title',NULL,NULL,20,1,true);
+      INSERT INTO redemptions(member_id,reward_id,points_spent,status,redeemed_at)
+        SELECT 2,1,20,'PENDING','2026-10-01Z' FROM generate_series(1,51);
+      INSERT INTO redemptions(member_id,reward_id,points_spent,status,redeemed_at,completed_at,reward_code,reward_title,completed_by)
+        VALUES (1,1,20,'COMPLETED','2026-10-01Z','2026-10-02Z','${rewardCode}','Snapshot title',3);
+    `);
+    await db.query("INSERT INTO auth_sessions VALUES (3,$1,'NORMAL',NULL,now()+interval '1 day')", [digest]);
+    const page = await history();
+    assert.equal(page.cardSearchAvailable, false);
+    assert.equal(page.redemptions.length, 50);
+    assert.equal(page.nextBeforeId, 2);
+    await db.exec("INSERT INTO redemptions(member_id,reward_id,points_spent,status,redeemed_at) VALUES(2,1,20,'PENDING','2026-10-01Z')");
+    const next = await history({ beforeId: page.nextBeforeId });
+    assert.deepEqual(ids(next), [1]);
+    assert.equal(next.nextBeforeId, null);
+    await history({ scan: 'CARD-0001' }, 503);
+    const filtered = await history({ status: 'ALL', memberCode: ' blu-1 ', memberName: 'jAnE 100%' });
+    assert.deepEqual(ids(filtered), [52]);
+    assert.deepEqual(ids(await history({ status: 'ALL', memberName: '100%' })), [52]);
+    assert.deepEqual(ids(await history({ status: 'ALL', memberName: "' OR 1=1 --" })), []);
+    assert.equal(filtered.redemptions[0].rewardTitle, 'Snapshot title');
+    assert.deepEqual(Object.keys(filtered.redemptions[0]).sort(), ['id','rewardId','rewardTitle','rewardCode','pointsSpent','status','redeemedAt','completedAt','memberCode','memberName'].sort());
+    assert.deepEqual(Object.keys(filtered.rewards[0]).sort(), ['id','title','description','imageUrl','pointCost','stock','isActive'].sort());
+    for (const filters of [{ scan: ' bLu-1 ' }, { rewardCode }, { scan: `blu-rw-${rewardCode.toUpperCase()}` }, { scan: rewardCode }]) {
+      assert.deepEqual(ids(await history({ status: 'COMPLETED', ...filters })), [52]);
+    }
+    assert.equal((await history({ status: 'ALL', memberCode: 'BLU-2', beforeId: 2 })).redemptions[0].rewardCode, null);
+    await db.exec(`
+      CREATE TABLE member_cards(member_id integer PRIMARY KEY,card_code text UNIQUE);
+      INSERT INTO member_cards VALUES(1,'CARD-0001');
+      CREATE TABLE package_payment_orders(member_id integer,status text,confirmed_at timestamptz,package_snapshot jsonb,amount_satang integer,receiver_snapshot jsonb);
+      INSERT INTO package_payment_orders VALUES
+        (1,'PAID','2026-09-01Z','{"durationDays":30}',12345,'{"phone":"PRIVATE-PAYMENT"}'),
+        (1,'PAID','2026-10-01Z','{"durationDays":90}',12345,'{}'),
+        (1,'PAID','2026-10-02Z','{"durationDays":180}',12345,'{}'),
+        (1,'PENDING','2026-09-01Z','{"durationDays":365}',12345,'{}'),
+        (2,'PAID','2026-09-01Z','{"durationDays":"30"}',12345,'{}'),
+        (2,'PAID',NULL,'{"durationDays":30}',12345,'{}');
+    `);
+    const card = await history({ status: 'ALL', scan: 'card-0001', packageDays: 30 });
+    assert.deepEqual(ids(card), [52]);
+    assert.equal(card.cardSearchAvailable, true);
+    assert.doesNotMatch(JSON.stringify(card), /PRIVATE|CARD-0001|12345|completed_by/);
+    for (const [days, expected] of [[90, [52]], [180, []], [365, []], ['UNKNOWN', []]]) {
+      assert.deepEqual(ids(await history({ status: 'ALL', scan: 'CARD-0001', packageDays: days })), expected);
+    }
+    assert.deepEqual(ids(await history({ status: 'ALL', scan: 'CARD-0002' })), []);
+    assert.deepEqual(ids(await history({ status: 'ALL', memberCode: 'BLU-2', beforeId: 2, packageDays: 'UNKNOWN' })), [1]);
+    await db.exec("UPDATE members SET role='OWNER' WHERE id=3");
+    assert.deepEqual(ids(await history({ status: 'COMPLETED' })), [52]);
+    for (const [reject, restore] of [
+      ["UPDATE members SET role='MEMBER' WHERE id=3", "UPDATE members SET role='ADMIN' WHERE id=3"],
+      ["UPDATE members SET status='SUSPENDED' WHERE id=3", "UPDATE members SET status='ACTIVE' WHERE id=3"],
+      ["UPDATE auth_sessions SET mode='KIOSK'", "UPDATE auth_sessions SET mode='NORMAL'"],
+      ['UPDATE auth_sessions SET revoked_at=now()', 'UPDATE auth_sessions SET revoked_at=NULL'],
+      ["UPDATE auth_sessions SET expires_at=now()-interval '1 day'", "UPDATE auth_sessions SET expires_at=now()+interval '1 day'"],
+      ["DELETE FROM auth_sessions", 'SELECT 1'],
+    ]) {
+      await db.exec(reject);
+      assert.equal(await history({}, 403), undefined);
+      await db.exec(restore);
+    }
+  } finally {
+    if (priorUrl === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = priorUrl;
+    await db.close();
+  }
 });

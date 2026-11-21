@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { currentStatus, type getAdminMembers } from "@/lib/admin-members-server";
+import { currentStatus, memberListGenders, type getAdminMembers } from "@/lib/admin-members-server";
 import MemberRoleAction from "./MemberRoleAction";
 
 export default function MembersClient({
@@ -10,14 +10,50 @@ export default function MembersClient({
   callerRole?: string;
 }) {
   const owner = data.callerRole === "OWNER";
-  const href = (page: number) => `/admin/members?${new URLSearchParams({ q: data.query, page: String(page) })}`;
+  const { filters } = data;
+  const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
+  const href = (page: number) => `/admin/members?${new URLSearchParams([...params, ["page", String(page)]])}`;
+  const fieldClass = "mt-1 block w-full rounded-xl border p-3";
   return <div className="space-y-6">
     <h1 className="text-2xl font-black text-blu-dark">สมาชิก</h1>
-    <form action="/admin/members" className="flex flex-wrap gap-3">
-      <label className="flex-1">ค้นหาชื่อ รหัสสมาชิก หรือเบอร์โทร<input name="q" defaultValue={data.query} maxLength={100} className="mt-2 block w-full rounded-xl border p-3" /></label>
-      <button className="btn-blue self-end rounded-xl px-6 py-3">ค้นหา</button>
+    <form key={params.toString()} action="/admin/members" method="get" className="space-y-4 rounded-2xl border bg-white p-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {([
+          ["q", "ค้นหาชื่อ รหัสสมาชิก หรือเบอร์โทร", 100],
+          ["name", "ชื่อ / นามสกุล (ค้นจากชื่อเต็ม)", 100],
+          ["code", "รหัสสมาชิก", 50],
+          ["phone", "เบอร์โทร", 20],
+        ] as const).map(([key, label, limit]) => <label key={key}>{label}<input name={key} defaultValue={filters[key]} maxLength={limit} className={fieldClass} /></label>)}
+        <label>เพศ<select name="gender" defaultValue={filters.gender} className={fieldClass}>
+          <option value="">ทั้งหมด</option>
+          {Object.entries(memberListGenders).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select></label>
+      </div>
+      <fieldset className="grid gap-3 sm:grid-cols-3">
+        <legend className="mb-2 font-bold">วันที่สร้างบัญชีสมาชิก (เวลาไทย)</legend>
+        <label>ตั้งแต่<input type="date" name="from" defaultValue={filters.from} className={fieldClass} /></label>
+        <label>ถึง (รวมวันสิ้นสุด)<input type="date" name="to" defaultValue={filters.to} className={fieldClass} /></label>
+        <label>เดือน<input type="month" name="month" defaultValue={filters.month} className={fieldClass} /></label>
+      </fieldset>
+      <fieldset className="grid gap-3 sm:grid-cols-2" aria-describedby="member-purchase-hint">
+        <legend className="mb-2 font-bold">แพ็กเกจที่เคยชำระออนไลน์</legend>
+        <label>ประเภทตามป้ายแพ็กเกจ<input name="packageLabel" placeholder="เช่น 1 เดือน" defaultValue={filters.packageLabel} maxLength={100} className={fieldClass} /></label>
+        <label>ช่วงเวลาตามแพ็กเกจ<input name="slot" placeholder="07:00-14:00" defaultValue={filters.slot} maxLength={11} className={fieldClass} /></label>
+        <p id="member-purchase-hint" className="text-xs text-blu-steel sm:col-span-2">กรอกให้ตรงกับที่บันทึกตอนซื้อ จับคู่จากออเดอร์เดียวกัน (รวมที่คืนเงินภายหลัง) ไม่ใช่สิทธิ์ปัจจุบัน</p>
+      </fieldset>
+      <div className="flex items-center gap-4">
+        <button className="btn-blue rounded-xl px-6 py-3">ค้นหา</button>
+        <Link href="/admin/members">ล้างตัวกรอง</Link>
+      </div>
     </form>
+    {data.invalid && <p role="alert" className="text-red-700">ตัวกรองไม่ถูกต้อง กรุณาตรวจรูปแบบและลำดับวันที่ แล้วค้นหาใหม่</p>}
     <p>พบ {data.total.toLocaleString("th-TH")} รายการ · หน้า {data.page} / {data.pages}</p>
+    {data.monthly.length > 0 && <section aria-labelledby="members-monthly-title" className="rounded-2xl border bg-white p-4">
+      <h2 id="members-monthly-title" className="font-bold">จำนวนบัญชีที่สร้างรายเดือนตามตัวกรอง (สูงสุด 12 เดือนที่พบ)</h2>
+      <ul className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-sm">
+        {data.monthly.map(({ month, total }) => <li key={month}>{month}: {total.toLocaleString("th-TH")} บัญชี</li>)}
+      </ul>
+    </section>}
     <div className="overflow-x-auto rounded-2xl border bg-white"><table className="w-full text-left text-sm">
       <thead><tr>{["ชื่อ", "รหัสสมาชิก", "โทรศัพท์", "สถานะปัจจุบัน", "หมดอายุ", "บทบาท", ...(owner ? ["ปรับสิทธิ์"] : [])].map(label => <th key={label} className="whitespace-nowrap p-4">{label}</th>)}</tr></thead>
       <tbody>{data.members.map(member => <tr key={member.memberCode} className="border-t">

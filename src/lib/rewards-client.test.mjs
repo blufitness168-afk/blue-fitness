@@ -165,7 +165,8 @@ test('redemption submits only reward ID and UUID, refreshes authoritative balanc
   assert.deepEqual(JSON.parse(post.init.body), { rewardId: 1, requestKey: keys[0] });
   assert.equal(app.calls[1].init.cache, 'no-store');
   assert.ok(app.nodes().some(node => node.type === 'p' && node.props.children.includes?.('70')));
-  assert.ok(app.nodes().some(node => node.type === 'qr' && node.props.value === rewardCode));
+  assert.ok(app.nodes().some(node => node.type === 'qr' && node.props.value === `BLU-RW-${rewardCode}`));
+  assert.ok(app.nodes().some(node => node.type === 'p' && node.props.children === rewardCode));
   assert.match(app.text(), /แลกรางวัลสำเร็จ/);
   assert.match(app.text(), /รอรับของ/);
   assert.ok(!app.nodes().some(node => node.props?.role === 'alert'));

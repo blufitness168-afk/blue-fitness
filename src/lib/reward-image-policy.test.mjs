@@ -28,19 +28,24 @@ function api(member = { role: 'ADMIN', status: 'ACTIVE' }, fail = false) {
   });
   return { ...route, calls, authCalls: () => authCalls };
 }
-test('admin UI uploads file then saves returned URL through real rewards API', async () => {
+function adminPage() {
   const slots = []; let cursor = 0;
   const jsx = (type, props) => ({ type, props });
   const page = compile('../app/admin/rewards/page.tsx', {
-    'react/jsx-runtime': { jsx, jsxs: jsx },
+    'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'fragment' },
+    '@/components/AdminScanner': { default: 'scanner' },
     react: {
-      useState: initial => { const index = cursor++; if (!(index in slots)) slots[index] = index === 0 ? { rewards: [], redemptions: [] } : initial; return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }]; },
+      useState: initial => { const index = cursor++; if (!(index in slots)) slots[index] = index === 0 ? { rewards: [], redemptions: [], nextBeforeId: null, cardSearchAvailable: true } : index === 1 ? false : initial; return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }]; },
       useRef: initial => { const index = cursor++; if (!(index in slots)) slots[index] = { current: initial }; return slots[index]; },
       useEffect: () => {}, useCallback: callback => callback,
     },
   });
   function nodes(node) { if (!node || typeof node !== 'object') return []; return [node, ...[node.props?.children].flat(Infinity).flatMap(nodes)]; }
-  const render = () => { cursor = 0; return nodes(page.default()); };
+  return () => { cursor = 0; return nodes(page.default()); };
+}
+
+test('admin UI uploads file then saves returned URL through real rewards API', async () => {
+  const render = adminPage();
   const previous = globalThis.fetch; const calls = []; let finish;
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options });
@@ -55,13 +60,41 @@ test('admin UI uploads file then saves returned URL through real rewards API', a
     assert.equal(calls[0].url, '/api/rewards/upload'); assert.ok(calls[0].options.body.get('file') instanceof File);
     finish(); await new Promise(resolve => setImmediate(resolve));
     let tree = render();
-    const title = tree.find(node => node.type === 'input' && node.props.maxLength === 120); title.props.onChange({ target: { value: 'Reward' } });
+    const title = tree.find(node => node.type === 'input' && node.props.required && node.props.maxLength === 120); title.props.onChange({ target: { value: 'Reward' } });
     tree = render(); const form = tree.find(node => node.type === 'form' && node.props.className === 'space-y-3');
     form.props.onSubmit({ preventDefault() {} }); await new Promise(resolve => setImmediate(resolve));
     const saved = calls.find(call => call.url === '/api/rewards/save');
     assert.equal(JSON.parse(saved.options.body).imageUrl, 'https://res.cloudinary.com/test/reward.png');
     assert.equal(JSON.parse(saved.options.body).title, 'Reward'); assert.match(JSON.parse(saved.options.body).requestKey, /^[a-f0-9-]{36}$/);
     assert.equal(calls.filter(call => call.url === '/api/rewards/save').length, 1);
+  } finally { globalThis.fetch = previous; }
+});
+
+test('admin scanner uses read-only history, retains scan across pages and resets cursor on filter submit', async () => {
+  const render = adminPage();
+  const previous = globalThis.fetch;
+  const calls = [];
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, '/api/rewards/admin-history');
+    assert.equal(options.method, 'POST');
+    const body = JSON.parse(options.body);
+    calls.push(body);
+    return Response.json({ data: { rewards: [], redemptions: [], nextBeforeId: body.beforeId ? null : 42, cardSearchAvailable: true } });
+  };
+  const button = label => render().find(node => node.type === 'button' && node.props.children === label);
+  try {
+    await render().find(node => node.type === 'scanner').props.onScan('CARD-0007');
+    assert.deepEqual(calls[0], { status: 'ALL', memberCode: '', memberName: '', rewardCode: '', scan: 'CARD-0007', beforeId: null });
+    button('ถัดไป').props.onClick(); await settle();
+    assert.deepEqual(calls[1], { ...calls[0], beforeId: 42 });
+    assert.equal(button('ถัดไป').props.disabled, true);
+    button('ก่อนหน้า').props.onClick(); await settle();
+    assert.deepEqual(calls[2], calls[0]);
+    const form = render().find(node => node.type === 'form' && node.props.className === 'space-y-2');
+    form.props.onSubmit({ preventDefault() {} }); await settle();
+    assert.deepEqual(calls[3], { status: 'ALL', memberCode: '', memberName: '', rewardCode: '', beforeId: null });
+    assert.equal(calls.length, 4);
   } finally { globalThis.fetch = previous; }
 });
 

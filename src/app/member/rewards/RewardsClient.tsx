@@ -59,7 +59,7 @@ export default function RewardsClient({ initialData }: { initialData: RewardsDat
     <section className="space-y-3"><h2 className="text-lg font-bold">ประวัติและรหัสรับของ</h2>{data.redemptions.map(record => <details key={record.id} className="rounded-xl border bg-white p-4">
       <summary>{record.rewardTitle} · {record.pointsSpent} แต้ม · {record.status === "PENDING" ? "รอรับของ" : record.status === "COMPLETED" ? "รับแล้ว" : record.status}</summary>
       <p className="my-2 text-sm">{new Date(record.redeemedAt).toLocaleString("th-TH")}</p>
-      {record.rewardCode ? <><p className="my-3 break-all font-mono">{record.rewardCode}</p><QRCodeSVG value={record.rewardCode} size={160} title="รหัสรับของ" /></> : <p>รายการเก่าไม่มีรหัสรับของ</p>}
+      {record.rewardCode ? <><p className="my-3 break-all font-mono">{record.rewardCode}</p><QRCodeSVG value={`BLU-RW-${record.rewardCode}`} size={160} title="รหัสรับของ BLU-RW" /></> : <p>รายการเก่าไม่มีรหัสรับของ</p>}
     </details>)}</section>
   </main>;
 }

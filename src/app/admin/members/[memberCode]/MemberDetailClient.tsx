@@ -62,7 +62,10 @@ export default function MemberDetailClient({ data, callerRole, staffFreeEntitlem
         date(o.createdAt), o.membershipStartsAt ? date(o.membershipStartsAt) : "ไม่มีข้อมูลวันเริ่มสิทธิ์",
         o.timeSlot || "—", ...(owner ? [date(o.paidAt)] : []), date(o.membershipExpiresAt),
       ])} />
-    <Table navigation={navigation("checkins")} title="ประวัติเช็คอิน" headings={["วันที่/เวลา (ไทย)", "ช่องทาง"]} rows={data.checkins.rows.map(c => [date(c.checkinTime), c.scannerType])} />
-    <Table navigation={navigation("coupons")} title="คูปอง" headings={["ชื่อ", "ประเภท", "สถานะปัจจุบัน", "ใช้แล้ว/สิทธิ์ทั้งหมด", "หมดอายุ"]} rows={data.coupons.rows.map(c => [c.title, c.type, c.status === "AVAILABLE" && c.expireDate && Date.parse(c.expireDate) <= data.asOf ? "EXPIRED" : c.status, `${c.usedCount}/${c.totalQuota}`, date(c.expireDate)])} />
+    <Table navigation={navigation("checkins")} title="ประวัติเช็คอิน" headings={["วันที่/เวลา (ไทย)", "ช่องทาง", "แพ็กเกจที่บันทึก", "ช่วงเวลาที่ใช้ (ไทย)"]}
+      rows={data.checkins.rows.map(c => [date(c.checkinTime), c.scannerType, c.packageName ?? "ไม่ทราบ", c.usedTimeSlot ?? "ไม่ทราบ"])} />
+    <Table navigation={navigation("coupons")} title="คูปอง" headings={["ชื่อ", "ประเภท", "สถานะปัจจุบัน", "ใช้แล้ว/สิทธิ์ทั้งหมด", "หมดอายุ", "เวลาใช้ล่าสุดที่บันทึก (ไทย)"]}
+      rows={data.coupons.rows.map(c => [c.title, c.type, c.status === "AVAILABLE" && c.expireDate && Date.parse(c.expireDate) <= data.asOf ? "EXPIRED" : c.status,
+        `${c.usedCount}/${c.totalQuota}`, date(c.expireDate), c.lastRecordedUsedAt ? date(c.lastRecordedUsedAt) : c.usedCount > 0 ? "ไม่ทราบ" : "—"])} />
   </div>;
 }

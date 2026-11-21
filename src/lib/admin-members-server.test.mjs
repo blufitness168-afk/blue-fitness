@@ -12,10 +12,10 @@ const rolloutSource = ts.transpileModule(readFileSync(new URL('./staff-paid-roll
   compilerOptions: { module: ts.ModuleKind.CommonJS },
 }).outputText;
 
-function setup({ allowed = true, role = 'OWNER', results = [], fail = false, state = {}, beforeRead, reads, onlineReads = false } = {}) {
+function setup({ allowed = true, role = 'OWNER', results = [], fail = false, state = {}, beforeRead, reads, onlineReads = false, historySources = {} } = {}) {
   const rollout = {};
   runInNewContext(rolloutSource, { exports: rollout, require: () => ({}), process: { env: { ENABLE_STAFF_PAID_READS: reads } } });
-  const calls = [], guards = [];
+  const calls = [], guards = [], historyProbes = [];
   const token = 'a'.repeat(64), digest = createHash('sha256').update(token).digest('hex');
   const member = { id: 99, role: allowed ? role : 'MEMBER', status: 'ACTIVE', passwordHash: 'never-serialize' };
   const session = { tokenHash: digest, revokedAt: null, expiresAt: new Date(Date.now() + 60000), mode: 'NORMAL' };
@@ -40,16 +40,17 @@ function setup({ allowed = true, role = 'OWNER', results = [], fail = false, sta
       assert.ok(guards.length, 'authorize before SQL');
       const { query, params: values } = new SqlTemplate(parts, args).toParameterizedQuery();
       const text = query.replace(/\$\d+/g, '?');
-      calls.push({ text, values });
+      const historyProbe = text.includes("to_regclass('public.r7_visits')");
+      (historyProbe ? historyProbes : calls).push({ text, query, values });
       if (fail) return Promise.reject(new Error('database unavailable'));
-      beforeRead?.({ member, session, index: calls.length - 1 });
+      beforeRead?.({ member, session, index: calls.length + historyProbes.length - 1, text });
       if (text.includes('WITH authorized')) {
         for (const predicate of ["s.token_hash =", "actor.id =", "actor.role::text =", "actor.role IN ('ADMIN', 'OWNER')", "actor.status <> 'SUSPENDED'", 's.revoked_at IS NULL', 's.expires_at > now()', "s.mode = 'NORMAL'"]) assert.ok(text.includes(predicate), predicate);
         assert.equal(values[0], digest);
         assert.ok(!values.includes(token), 'raw token is never sent to SQL');
         if (values[0] !== session.tokenHash || values[1] !== member.id || values[2] !== member.role || !['ADMIN', 'OWNER'].includes(member.role) || member.status === 'SUSPENDED' || session.revokedAt || session.expiresAt <= new Date() || session.mode !== 'NORMAL') return [];
       }
-      return results.shift() || [];
+      return historyProbe ? [historySources] : results.shift() || [];
     } },
   };
   function load(path) {
@@ -63,6 +64,7 @@ function setup({ allowed = true, role = 'OWNER', results = [], fail = false, sta
       if (name === '@/lib/real-finance-server') return load('./real-finance-server.ts');
       if (name === '@/lib/xlsx') return load('./xlsx.ts');
       if (name === './admin-permissions') return load('./admin-permissions.ts');
+      if (name === './package-catalog') return load('./package-catalog.ts');
       if (name === './admin-permissions-server') {
         const actual = load('./admin-permissions-server.ts');
         return { requireAdminPage: async path => { guards.push(path); return actual.requireAdminPage(path); } };
@@ -74,7 +76,7 @@ function setup({ allowed = true, role = 'OWNER', results = [], fail = false, sta
     return loaded.exports;
   }
   process.env.DATABASE_URL = 'mock-only';
-  return { ...load('./admin-members-server.ts'), calls, guards, load };
+  return { ...load('./admin-members-server.ts'), calls, guards, historyProbes, load };
 }
 test('all data loaders guard their existing route before DB access', async () => {
   for (const [name, args] of [['getAdminMembers', []], ['getAdminMember', ['BLU-1']], ['getAdminDashboard', []]]) {
@@ -232,13 +234,91 @@ test('status preserves suspension and expires overdue active members', () => {
 });
 test('member search binds literal metacharacters and clamps pagination', async () => {
   const s = setup({ results: [[{ total: 70 }], []] });
-  const data = await s.getAdminMembers("%_' OR true --", '900');
+  const data = await s.getAdminMembers({ q: "%_' OR true --", page: '900' });
   assert.equal(data.page, 2);
   assert.equal(data.pages, 2);
   assert.equal(s.calls[1].values.at(-1), 50);
   assert.ok(s.calls[0].values[3].startsWith('%\\%\\_'));
   assert.doesNotMatch(s.calls[0].text, /OR true/);
   assert.doesNotMatch(s.calls[1].text, /password|SELECT \*/i);
+});
+
+test('member list filters compose across count, Bangkok month summary and rows without ADMIN money reads', async () => {
+  const s = setup({ role: 'ADMIN', results: [[{ total: 51, monthly: [{ month: '2026-12', total: 51, amountSatang: 99 }] }], []] });
+  const data = await s.getAdminMembers({
+    q: '  BLU  ', name: ' สม%_\\ ', code: '01_', phone: '089%', gender: 'FEMALE',
+    from: '2026-12-15', to: '2026-12-31', month: '2026-12', packageLabel: ' 1 เดือน_ ', slot: '07:00-14:00', page: '2',
+  });
+  assert.equal(data.invalid, false);
+  assert.equal(data.page, 2);
+  assert.equal(data.filters.q, 'BLU');
+  assert.equal(data.filters.name, 'สม%_\\');
+  assert.deepEqual(data.monthly, [{ month: '2026-12', total: 51 }]);
+  assert.deepEqual(s.calls[0].values, s.calls[1].values.slice(0, -1));
+  assert.deepEqual(s.calls[0].values.slice(3), [
+    '%BLU%', '%BLU%', '%BLU%', '%สม\\%\\_\\\\%', '%01\\_%', '%089\\%%', 'FEMALE',
+    '2026-12-15', '2026-12-31', '2026-12-01', '2026-12-01', '1 เดือน\\_', '07:00-14:00',
+  ]);
+  for (const { text } of s.calls) {
+    assert.match(text, /WHERE \(full_name ILIKE \? OR member_code ILIKE \? OR phone ILIKE \?\)\s+AND full_name/);
+    assert.match(text, /created_at >= \(\?::date::timestamp AT TIME ZONE 'Asia\/Bangkok'\)/);
+    assert.match(text, /created_at < \(\(\?::date \+ 1\)::timestamp AT TIME ZONE 'Asia\/Bangkok'\)/);
+    assert.match(text, /created_at < \(\(\?::date \+ interval '1 month'\) AT TIME ZONE 'Asia\/Bangkok'\)/);
+    assert.match(text, /EXISTS \(\s*SELECT 1 FROM package_payment_orders o WHERE o.member_id = members.id AND o.status = 'PAID'\s+AND o.package_snapshot->>'label' ILIKE \?\s+AND o.package_snapshot->>'timeSlot' = \?\s*\)/);
+    assert.doesNotMatch(text, /amount|paid_at|slip|provider|price|r4_online_private/i);
+  }
+  assert.match(s.calls[0].text, /to_char\(created_at AT TIME ZONE 'Asia\/Bangkok'[\s\S]*LIMIT 12/);
+  assert.match(s.calls[1].text, /ORDER BY created_at DESC, id DESC LIMIT 50 OFFSET \?/);
+  assert.equal(s.calls[1].values.at(-1), 50);
+});
+
+test('malformed structured member filters fail closed; unfiltered list needs no order read', async () => {
+  for (const input of [{ from: '2026-02-29' }, { to: '2026-04-31' }, { month: '2026-13' },
+    { from: '2026-12-31', to: '2026-12-01' }, { gender: 'OWNER' }, { gender: ['MALE', 'FEMALE'] },
+    { slot: '14:00-07:00' }, { packageLabel: ['first', 'second'] }]) {
+    const s = setup({ results: [[{ total: 0 }], []] });
+    const data = await s.getAdminMembers(input);
+    assert.equal(data.invalid, true);
+    assert.ok(s.calls.every(({ text }) => text.includes('AND FALSE')));
+  }
+  const s = setup({ results: [[{ total: 0 }], []] });
+  const data = await s.getAdminMembers({ q: ['one', 'two'], page: ['1', '2'] });
+  assert.equal(data.invalid, false);
+  assert.equal(data.page, 1);
+  assert.equal(data.filters.q, '');
+  assert.deepEqual(data.monthly, []);
+  assert.ok(s.calls.every(({ text }) => !text.includes('package_payment_orders')));
+});
+
+test('rendered member list keeps all filters on paging links and role changes remain OWNER-only', async () => {
+  const React = require('react');
+  const { renderToStaticMarkup } = require('react-dom/server');
+  const s = setup({ role: 'ADMIN', results: [[{ total: 101, monthly: [{ month: '2026-12', total: 101 }] }], [{
+    memberCode: 'BLU-1', fullName: 'Fixture', phone: '099', status: 'ACTIVE', role: 'MEMBER',
+  }]] });
+  const data = await s.getAdminMembers({ q: 'a&b', name: 'นามสกุล', code: 'BLU', phone: '099', gender: 'OTHER',
+    from: '2026-12-01', to: '2026-12-31', month: '2026-12', packageLabel: '1 เดือน', slot: '07:00-14:00', page: '2' });
+  const filename = new URL('../app/admin/members/MembersClient.tsx', import.meta.url);
+  const loaded = new Module(filename.pathname);
+  loaded.require = name => {
+    if (name === 'next/link') return { __esModule: true, default: function Link({ href, children }) { return React.createElement('a', { href }, children); } };
+    if (name === './MemberRoleAction') return { __esModule: true, default: function RoleAction() { return React.createElement('button', null, 'ROLE_MUTATION'); } };
+    if (name === '@/lib/admin-members-server') return s;
+    return require(name);
+  };
+  loaded._compile(ts.transpileModule(readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, filename.pathname);
+  const render = data => renderToStaticMarkup(React.createElement(loaded.exports.default, { data, callerRole: 'OWNER' }));
+  const html = render(data);
+  assert.match(html, /<form[^>]*action="\/admin\/members"[^>]*method="get"/);
+  assert.doesNotMatch(html, /name="page"|ROLE_MUTATION/);
+  assert.match(html, /href="\/admin\/members">ล้างตัวกรอง/);
+  assert.match(html, /2026-12: 101/);
+  const links = [...html.matchAll(/href="(\/admin\/members\?[^"]+)"/g)];
+  assert.deepEqual(links.map(([, link]) => Object.fromEntries(new URL(link.replaceAll('&amp;', '&'), 'https://example.invalid').searchParams)),
+    [{ ...data.filters, page: '1' }, { ...data.filters, page: '3' }]);
+  for (const key of Object.keys(data.filters)) assert.ok(html.includes(`name="${key}"`), key);
+  assert.match(render({ ...data, invalid: true }), /role="alert"/);
+  assert.match(render({ ...data, callerRole: 'OWNER' }), /ROLE_MUTATION/);
 });
 test('missing detail returns null; detail binds member ID and limits history', async () => {
   const missing = setup();
@@ -252,6 +332,71 @@ test('missing detail returns null; detail binds member ID and limits history', a
     assert.match(call.text, /LIMIT 101 OFFSET/);
   }
 });
+test('detail history SQL works before and after optional sources are installed', async () => {
+  const { PGlite } = createRequire(new URL('../../.local-db/payment-sql-tests/package.json', import.meta.url))('@electric-sql/pglite');
+  const db = new PGlite();
+  const read = ({ query, values }) => db.query(query, values);
+  const plan = async historySources => {
+    const s = setup({ role: 'ADMIN', historySources, results: [[{ id: 7 }], [], [], []] });
+    await s.getAdminMember('BLU-7');
+    return { probe: s.historyProbes[0], checkins: s.calls[2], coupons: s.calls[3] };
+  };
+  try {
+    await db.exec(`
+      CREATE TABLE members(id int PRIMARY KEY, role text, status text);
+      CREATE TABLE auth_sessions(member_id int, token_hash text, revoked_at timestamptz, expires_at timestamptz, mode text);
+      CREATE TABLE checkins(id int PRIMARY KEY, member_id int, checkin_time timestamptz, scanner_type text);
+      CREATE TABLE coupons(id int PRIMARY KEY, member_id int, title text, type text, status text,
+        total_quota int, used_count int, expire_date timestamptz, created_at timestamptz, source text, activated_at timestamptz);
+      INSERT INTO members VALUES(99, 'ADMIN', 'ACTIVE');
+      INSERT INTO auth_sessions VALUES(99, '${createHash('sha256').update('a'.repeat(64)).digest('hex')}', NULL, now() + interval '1 hour', 'NORMAL');
+      INSERT INTO checkins VALUES (1,7,'2026-11-20','USB'), (2,7,'2026-11-20','USB'), (3,7,'2026-11-20','MANUAL'), (4,8,'2026-11-20','USB'), (5,7,'2026-11-20','USB');
+      INSERT INTO coupons (id,member_id,title,type,status,total_quota,used_count,created_at,source,activated_at) VALUES
+       (10,7,'logged','FRIEND_PASS','AVAILABLE',3,2,'2026-11-01',NULL,NULL),
+       (11,7,'welcome','FREE_ENTRY','USED',1,1,'2026-11-01','WELCOME_REGISTRATION',NULL),
+       (12,7,'supplement','CUSTOM','USED',1,1,'2026-11-01','TIME_SUPPLEMENT:12',NULL),
+       (13,7,'legacy','FREE_ENTRY','USED',1,1,'2026-11-01',NULL,NULL),
+       (14,7,'campaign','FRIEND_PASS','AVAILABLE',1,0,'2026-11-01',NULL,'2026-11-19'),
+       (15,8,'another member','FRIEND_PASS','USED',1,1,'2026-11-01',NULL,NULL);`);
+    const legacy = await plan({});
+    assert.deepEqual((await read(legacy.probe)).rows, [{ visits: false, consumptions: false, supplements: false }]);
+    assert.deepEqual((await read(legacy.checkins)).rows.map(r => [r.id, r.packageName, r.usedTimeSlot]), [[5, null, null], [3, null, null], [2, null, null], [1, null, null]]);
+    assert.ok((await read(legacy.coupons)).rows.every(r => r.lastRecordedUsedAt === null));
+
+    await db.exec(`CREATE TABLE benefit_consumptions(coupon_id int, member_id int, created_at timestamptz);
+      INSERT INTO benefit_consumptions VALUES (10,7,'2026-11-20T09:00:00Z'), (10,7,'2026-11-20T12:00:00Z'), (10,8,'2026-11-21T13:00:00Z');`);
+    const preR7 = await plan((await read(legacy.probe)).rows[0]);
+    const times = async query => (await read(query)).rows.map(r => [r.id, r.lastRecordedUsedAt?.toISOString() ?? null]);
+    assert.deepEqual(await times(preR7.coupons), [[14, null], [13, null], [12, null], [11, null], [10, '2026-11-20T12:00:00.000Z']]);
+    assert.doesNotMatch(preR7.checkins.text + preR7.coupons.text, /r7_visits|time_supplement_activations/);
+
+    await db.exec(`CREATE TABLE public.r7_visits(checkin_id int UNIQUE, member_id int, entered_at timestamptz, snapshot jsonb);
+      INSERT INTO r7_visits VALUES
+       (1,7,'2026-11-20T01:00:00Z','{"package":{"name":"Historical package","amount":999},"mainTimeSlot":"07:00-14:00","usedTimeSlot":"07:00-22:00"}'),
+       (2,7,'2026-11-20T02:00:00Z','{"reason":"FREE_ENTRY","welcomeCouponId":11,"usedTimeSlot":"07:00-22:00"}'),
+       (3,7,'2026-11-20T03:00:00Z','{"package":{"name":5},"mainTimeSlot":"07:00-22:00","usedTimeSlot":null}'),
+       (5,8,'2026-11-20T05:00:00Z','{"reason":"FREE_ENTRY","welcomeCouponId":11,"usedTimeSlot":"other member"}');
+      CREATE TABLE public.time_supplement_activations(coupon_id int PRIMARY KEY, member_id int, activated_at timestamptz);
+      INSERT INTO time_supplement_activations VALUES (12,7,'2026-11-20T00:00:00Z');`);
+    const installed = await plan((await read(legacy.probe)).rows[0]);
+    const visits = (await read(installed.checkins)).rows;
+    assert.deepEqual(visits.map(r => [r.id, r.packageName, r.usedTimeSlot]), [[5, null, null], [3, null, null], [2, null, '07:00-22:00'], [1, 'Historical package', '07:00-22:00']]);
+    assert.deepEqual(Object.keys(visits[3]), ['id', 'checkinTime', 'scannerType', 'packageName', 'usedTimeSlot']);
+    assert.deepEqual(await times(installed.coupons), [[14, null], [13, null], [12, '2026-11-20T00:00:00.000Z'], [11, '2026-11-20T02:00:00.000Z'], [10, '2026-11-20T12:00:00.000Z']]);
+  } finally {
+    await db.close();
+  }
+});
+
+test('installed visit source read errors do not fall back to legacy history', async () => {
+  const error = Object.assign(new Error('permission denied for r7_visits'), { code: '42501' });
+  const s = setup({ historySources: { visits: true }, results: [[{ id: 7 }], [], [], []], beforeRead: ({ text }) => {
+    if (text.includes('LEFT JOIN public.r7_visits')) throw error;
+  } });
+  await assert.rejects(s.getAdminMember('BLU-7'), error);
+  assert.equal(s.calls.filter(call => call.text.includes('FROM checkins')).length, 1);
+});
+
 test('history pagination validates untrusted query values without unsafe offsets', () => {
   const s = setup();
   for (const value of [undefined, ['2', '3'], '', '0', '-1', '1.5', '1e3', 'Infinity', '99999999999999', '2 OR true', ' 2']) {
@@ -443,6 +588,63 @@ INSERT INTO package_payment_orders VALUES('fixture',99,'{"name":"fixture"}',1234
   assert.equal(result.status, 0, result.stdout + result.stderr);
   console.log(result.stdout.trim());
 });
+test('native PostgreSQL executes member filters against Bangkok boundaries and same-order evidence', { skip: process.env.R8_NATIVE_POSTGRES !== '1' }, async () => {
+  const s = setup({ role: 'ADMIN', results: [[{ total: 1 }], []] });
+  await s.getAdminMembers({ q: 'BLU', name: 'Surname', gender: 'FEMALE', code: 'BLU-', phone: '09',
+    month: '2026-12', from: '2026-12-01', to: '2026-12-31', packageLabel: 'Monthly', slot: '07:00-14:00' });
+  const result = spawnSync('python', ['-c', String.raw`
+import json, os, socket, subprocess, sys, tempfile
+from pathlib import Path
+here=Path.cwd()/'.local-db/portable-postgres-uat'
+bin=here/'package/native/bin'
+env={k:v for k,v in os.environ.items() if not k.startswith('PG') and k!='DATABASE_URL'}
+env.update(PATH=str(here)+os.pathsep+str(bin)+os.pathsep+env.get('PATH',''), PYTHONIOENCODING='utf-8')
+calls=json.load(sys.stdin)
+with socket.socket() as sock:
+ sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]
+with tempfile.TemporaryDirectory(prefix='blu-r8-members-') as tmp:
+ data=Path(tmp)/'data'
+ def run(args, text=None):
+  r=subprocess.run([str(a) for a in args],input=text,capture_output=True,text=True,encoding='utf-8',env=env,timeout=40)
+  assert r.returncode==0, r.stdout+r.stderr
+  return r.stdout.strip()
+ run([bin/'initdb.exe','-D',data,'-U','postgres','--auth-local=reject','--auth-host=trust','--encoding=UTF8','--locale=C'])
+ (data/'postgresql.conf').write_text("listen_addresses='127.0.0.1'\nport="+str(port)+'\n',encoding='utf-8')
+ try:
+  # Do not let a detached Windows postgres process inherit captured pipes.
+  with (Path(tmp)/'pg_ctl.log').open('w') as log:
+   started=subprocess.run([str(a) for a in [bin/'pg_ctl.exe','-D',data,'-l',Path(tmp)/'server.log','-w','-t','20','start']],stdin=subprocess.DEVNULL,stdout=log,stderr=log,env=env,timeout=30)
+  assert started.returncode==0, (Path(tmp)/'pg_ctl.log').read_text(errors='replace')
+  client=[sys.executable,here/'psql.py','-h','127.0.0.1','-p',port,'-U','postgres','-d','postgres']
+  def sql(text): return run(client,text)
+  def literal(value): return "'"+str(value).replace("'","''")+"'"
+  sql('''CREATE TYPE profile_gender AS ENUM ('MALE','FEMALE','OTHER');
+CREATE TABLE members(id int, member_code text, full_name text, nickname text, phone text, gender profile_gender, role text, status text, expire_date timestamptz, created_at timestamptz, points int);
+CREATE TABLE auth_sessions(member_id int, token_hash text, revoked_at timestamptz, expires_at timestamptz, mode text);
+CREATE TABLE package_payment_orders(member_id int, package_snapshot jsonb, status text);
+INSERT INTO members VALUES (99,'STAFF','Fixture',NULL,'08','OTHER','ADMIN','ACTIVE',NULL,now(),0);
+INSERT INTO auth_sessions VALUES (99,'''+literal(calls[0]['values'][0])+''',NULL,now()+interval '1 day','NORMAL');
+INSERT INTO members SELECT id,'BLU-'||id,'Full Surname',NULL,'09'||id,'FEMALE','MEMBER','ACTIVE',NULL,created_at::timestamptz,0 FROM (VALUES
+ (1,'2026-11-30 17:00:00+00'), (2,'2026-12-31 16:59:59+00'), (3,'2026-12-31 17:00:00+00'), (4,'2026-11-30 16:59:59+00'),
+ (5,'2026-12-15 12:00:00+00'), (6,'2026-12-16 00:00:00+00'), (7,'2026-12-17 00:00:00+00')) fixture(id,created_at);
+INSERT INTO package_payment_orders SELECT id,'{"label":"Monthly","timeSlot":"07:00-14:00"}', 'PAID' FROM generate_series(1,4) AS id;
+INSERT INTO package_payment_orders VALUES (2,'{"label":"Monthly","timeSlot":"07:00-14:00"}','PAID'),
+ (5,'{"label":"Monthly","timeSlot":"07:00-22:00"}','PAID'),(5,'{"label":"Daily","timeSlot":"07:00-14:00"}','PAID'),
+ (6,'{"label":"Monthly","timeSlot":"07:00-14:00"}','PENDING');''')
+  def execute(call):
+   pieces=call['text'].split('?'); assert len(pieces)==len(call['values'])+1
+   statement=pieces[0]+''.join(literal(value)+part for value,part in zip(call['values'],pieces[1:]))
+   return json.loads(sql("SET TIME ZONE 'America/New_York'; SELECT coalesce(json_agg(r),'[]'::json) FROM ("+statement+") r;"))
+  assert execute(calls[0])==[{'total':2,'monthly':[{'month':'2026-12','total':2}]}]
+  assert [row['memberCode'] for row in execute(calls[1])]==['BLU-2','BLU-1']
+  sql("UPDATE auth_sessions SET revoked_at=now()")
+  assert all(execute(call)==[] for call in calls), 'revoked session leaked list data'
+ finally:
+  run([bin/'pg_ctl.exe','-D',data,'-m','immediate','-w','-t','20','stop'])
+`], { input: JSON.stringify(s.calls), encoding: 'utf8', timeout: 120000 });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
 test('DB failures propagate instead of replacing real data with mocks or empty success', async () => {
   const s = setup({ fail: true });
   await assert.rejects(s.getAdminMembers(), /database unavailable/);

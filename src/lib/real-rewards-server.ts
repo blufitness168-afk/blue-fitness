@@ -10,10 +10,49 @@ export type RealRedemption = { id: number; rewardId: number; rewardTitle: string
 export type RewardsData = { points: number; memberCode: string; fullName: string; rewards: RealReward[]; redemptions: RealRedemption[] };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const integer = (value: unknown, min: number, max = 1000000) => Number.isSafeInteger(value) && Number(value) >= min && Number(value) <= max;
+const memberCodePattern = /^BLU-\d{1,12}$/;
+const cardCodePattern = /^CARD-\d{1,95}$/;
+const historyPageSize = 50;
+export type AdminRewardsHistory = { rewards: RealReward[]; redemptions: RealRedemption[]; nextBeforeId: number | null; cardSearchAvailable: boolean };
+
+type HistoryFilters = {
+  status: "ALL" | "PENDING" | "COMPLETED";
+  memberCode: string | null; memberName: string | null; rewardCode: string | null; cardCode: string | null;
+  packageDays: number | "UNKNOWN" | null; beforeId: number | null;
+};
+
+function canonicalRewardCode(value: unknown) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().replace(/^BLU-RW-/i, "");
+  return uuid.test(normalized) ? normalized.toLowerCase() : null;
+}
+
+export function rewardHistoryFilters(body: Record<string, unknown>): HistoryFilters | null {
+  if (Object.keys(body).some(key => !["status", "memberCode", "memberName", "rewardCode", "scan", "packageDays", "beforeId"].includes(key))) return null;
+  const { status = "PENDING", memberCode = "", memberName = "", rewardCode = "", scan = "", packageDays = null, beforeId = null } = body;
+  if (status !== "ALL" && status !== "PENDING" && status !== "COMPLETED") return null;
+  if (beforeId !== null && (typeof beforeId !== "number" || !integer(beforeId, 1, 2147483647))) return null;
+  if (packageDays !== null && packageDays !== "UNKNOWN" && (typeof packageDays !== "number" || !integer(packageDays, 1, 3660))) return null;
+  if (typeof memberCode !== "string" || memberCode.length > 50 || typeof memberName !== "string" || memberName.length > 120 || /[\u0000-\u001f\u007f]/.test(memberName) ||
+    typeof rewardCode !== "string" || rewardCode.length > 50 || typeof scan !== "string" || scan.length > 100) return null;
+  const member = memberCode.trim().toUpperCase();
+  const reward = canonicalRewardCode(rewardCode);
+  if ((member && !memberCodePattern.test(member)) || (rewardCode.trim() && !reward)) return null;
+  const scanned = scan.trim().toUpperCase();
+  const scannedReward = canonicalRewardCode(scanned);
+  const scannedMember = memberCodePattern.test(scanned) ? scanned : null;
+  const cardCode = cardCodePattern.test(scanned) ? scanned : null;
+  if (scanned && !scannedReward && !scannedMember && !cardCode) return null;
+  if ((scannedMember && member && member !== scannedMember) || (scannedReward && reward && reward !== scannedReward)) return null;
+  return { status, memberCode: scannedMember ?? (member || null), memberName: memberName.trim() || null, rewardCode: scannedReward ?? reward, cardCode, packageDays, beforeId };
+}
 
 export function rewardPayload(action: string, body: Record<string, unknown>): Record<string, unknown> | null {
   if (action === "redeem") return integer(body.rewardId, 1, 2147483647) ? { rewardId: body.rewardId } : null;
-  if (action === "deliver") return typeof body.rewardCode === "string" && uuid.test(body.rewardCode) ? { rewardCode: body.rewardCode.toLowerCase() } : null;
+  if (action === "deliver") {
+    const rewardCode = canonicalRewardCode(body.rewardCode);
+    return rewardCode ? { rewardCode } : null;
+  }
   if (action !== "save" || typeof body.title !== "string" || !body.title.trim() || body.title.trim().length > 120 ||
     !integer(body.pointCost, 1) || !integer(body.stock, 0) || typeof body.isActive !== "boolean" ||
     (body.description !== null && (typeof body.description !== "string" || body.description.length > 2000)) ||
@@ -22,12 +61,17 @@ export function rewardPayload(action: string, body: Record<string, unknown>): Re
   return { ...(body.id === undefined ? {} : { id: body.id, expected: body.expected }), title: body.title.trim(), description: body.description, imageUrl: body.imageUrl, pointCost: body.pointCost, stock: body.stock, isActive: body.isActive };
 }
 
-async function execute(action: string, key: string | null, payload: Record<string, unknown>) {
+async function rewardConnection() {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token || !/^[a-f0-9]{64}$/.test(token)) throw new Error("Unauthorized");
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is missing");
   const sql = neon(process.env.DATABASE_URL);
   const digest = createHash("sha256").update(token).digest("hex");
+  return { sql, digest };
+}
+
+async function execute(action: string, key: string | null, payload: Record<string, unknown>) {
+  const { sql, digest } = await rewardConnection();
   for (let attempt = 0; ; attempt++) {
     try {
       const rows = await sql`SELECT real_rewards_action(${digest}, ${action}, ${key}::uuid, ${JSON.stringify(payload)}::jsonb) AS result`;
@@ -38,6 +82,53 @@ async function execute(action: string, key: string | null, payload: Record<strin
   }
 }
 
+async function readAdminHistory(filters: HistoryFilters): Promise<AdminRewardsHistory | null> {
+  const { sql, digest } = await rewardConnection();
+  // R2 card bindings are optional on the original rewards schema. No lookup of legacy/mock card values.
+  const [capabilities] = await sql`SELECT pg_catalog.to_regclass('public.member_cards') IS NOT NULL AS cards`;
+  const cards = capabilities.cards === true;
+  const cardMatch = !filters.cardCode ? sql`TRUE` : cards
+    ? sql`EXISTS (SELECT 1 FROM public.member_cards c WHERE c.card_code=${filters.cardCode} AND c.member_id=h.member_id)`
+    : sql`FALSE`;
+  // A confirmed purchase snapshot is evidence of purchase, not of entitlement at redemption.
+  // Skip the purchase lookup completely for the default, unfiltered history.
+  const packageMatch = filters.packageDays === null ? sql`TRUE` : sql`
+    EXISTS (SELECT 1 FROM public.package_payment_orders o
+      WHERE o.member_id=h.member_id AND o.status='PAID' AND o.confirmed_at<=h.redeemed_at
+      AND jsonb_typeof(o.package_snapshot->'durationDays')='number'
+      AND o.package_snapshot->>'durationDays' ~ '^[1-9][0-9]{0,3}$'
+      AND (length(o.package_snapshot->>'durationDays')<4 OR o.package_snapshot->>'durationDays'<='3660')
+      AND (${filters.packageDays === "UNKNOWN" ? null : String(filters.packageDays)}::text IS NULL
+        OR o.package_snapshot->>'durationDays'=${String(filters.packageDays)}::text)) = ${filters.packageDays !== "UNKNOWN"}::boolean`;
+  const [row] = await sql`
+    WITH staff AS MATERIALIZED (
+      SELECT m.id FROM public.auth_sessions s JOIN public.members m ON m.id=s.member_id
+      WHERE s.token_hash=${digest} AND s.mode='NORMAL' AND s.revoked_at IS NULL
+        AND s.expires_at>clock_timestamp() AND m.status<>'SUSPENDED' AND m.role IN ('ADMIN','OWNER')
+    ), page AS MATERIALIZED (
+      SELECT h.id, h.reward_id AS "rewardId", coalesce(h.reward_title,catalog.title) AS "rewardTitle",
+        h.reward_code AS "rewardCode", h.points_spent AS "pointsSpent", h.status, h.redeemed_at AS "redeemedAt",
+        h.completed_at AS "completedAt", m.member_code AS "memberCode", m.full_name AS "memberName"
+      FROM staff CROSS JOIN public.redemptions h JOIN public.members m ON m.id=h.member_id
+      JOIN public.rewards catalog ON catalog.id=h.reward_id
+      WHERE (${filters.beforeId}::integer IS NULL OR h.id<${filters.beforeId}::integer)
+        AND (${filters.status}::text='ALL' OR h.status=${filters.status})
+        AND (${filters.memberCode}::text IS NULL OR m.member_code=${filters.memberCode})
+        AND (${filters.memberName}::text IS NULL OR strpos(lower(m.full_name), lower(${filters.memberName}::text))>0)
+        AND (${filters.rewardCode}::uuid IS NULL OR h.reward_code=${filters.rewardCode}::uuid)
+        AND ${cardMatch} AND ${packageMatch}
+      ORDER BY h.id DESC LIMIT ${historyPageSize + 1}
+    )
+    SELECT coalesce((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id DESC) FROM page p),'[]'::jsonb) AS redemptions,
+      coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.id) FROM (
+        SELECT id,title,description,image_url AS "imageUrl",point_cost AS "pointCost",stock,is_active AS "isActive" FROM public.rewards
+      ) r),'[]'::jsonb) AS rewards
+    FROM staff`;
+  if (!row) return null;
+  const redemptions = (row.redemptions as RealRedemption[]).slice(0, historyPageSize);
+  return { rewards: row.rewards, redemptions, nextBeforeId: row.redemptions.length > historyPageSize ? redemptions[historyPageSize - 1].id : null, cardSearchAvailable: cards };
+}
+
 export async function readRealRewards(): Promise<RewardsData> {
   const member = await getCurrentMember();
   if (!member) throw new Error("Unauthorized");
@@ -45,15 +136,23 @@ export async function readRealRewards(): Promise<RewardsData> {
 }
 
 export async function rewardsAction(request: Request, action: string) {
-  if (!["member", "admin", "redeem", "deliver", "save"].includes(action)) return json({ error: "ไม่พบคำสั่ง" }, 404);
+  if (!["member", "admin", "admin-history", "redeem", "deliver", "save"].includes(action)) return json({ error: "ไม่พบคำสั่ง" }, 404);
   const read = action === "member" || action === "admin";
   if (request.method !== (read ? "GET" : "POST")) return json({ error: "Method not allowed" }, 405);
   try {
     const member = await getCurrentMember();
     if (!member || member.status === "SUSPENDED") return json({ error: "กรุณาเข้าสู่ระบบ" }, 401);
-    if (["admin", "deliver", "save"].includes(action) && !["ADMIN", "OWNER"].includes(member.role)) return json({ error: "ไม่มีสิทธิ์" }, 403);
+    if (["admin", "admin-history", "deliver", "save"].includes(action) && !["ADMIN", "OWNER"].includes(member.role)) return json({ error: "ไม่มีสิทธิ์" }, 403);
     if (read) return json({ data: await execute(action, null, {}) });
     const body = await readBody(request);
+    if (action === "admin-history") {
+      const filters = body && rewardHistoryFilters(body);
+      if (!filters) return json({ error: "ตัวกรองหรือรหัสไม่ถูกต้อง" }, 400);
+      const data = await readAdminHistory(filters);
+      if (!data) return json({ error: "เซสชันหมดอายุหรือไม่มีสิทธิ์" }, 403);
+      if (filters.cardCode && !data.cardSearchAvailable) return json({ error: "ฐานข้อมูลนี้ยังไม่รองรับการค้นด้วย CARD กรุณาใช้ BLU" }, 503);
+      return json({ data });
+    }
     if (!body || typeof body.requestKey !== "string" || !uuid.test(body.requestKey)) return json({ error: "ต้องระบุ requestKey UUID และ JSON จากเว็บไซต์เดียวกัน" }, 400);
     const payload = rewardPayload(action, body);
     if (!payload) return json({ error: "ข้อมูลไม่ถูกต้อง" }, 400);
