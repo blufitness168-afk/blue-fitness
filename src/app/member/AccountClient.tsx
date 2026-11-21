@@ -79,7 +79,7 @@ export default function MemberAccountPage({ identity, welcomeCoupons, staffFreeT
 
   useEffect(() => {
     const controller = new AbortController();
-    void refresh(controller.signal);
+    const timer = setTimeout(() => { void refresh(controller.signal); }, 0);
     fetch("/api/member/profile", { cache: "no-store", signal: controller.signal }).then(async response => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "โหลดข้อมูลส่วนตัวไม่สำเร็จ");
@@ -87,7 +87,7 @@ export default function MemberAccountPage({ identity, welcomeCoupons, staffFreeT
     }).catch(cause => { if (!controller.signal.aborted) setProfileError(cause instanceof Error ? cause.message : "โหลดข้อมูลส่วนตัวไม่สำเร็จ"); });
     const onFocus = () => { void refresh(controller.signal); };
     window.addEventListener("focus", onFocus);
-    return () => { controller.abort(); window.removeEventListener("focus", onFocus); };
+    return () => { clearTimeout(timer); controller.abort(); window.removeEventListener("focus", onFocus); };
   }, [identity.id, welcomeCoupons, refresh]);
 
   const logout = async () => {

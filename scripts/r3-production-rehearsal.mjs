@@ -154,7 +154,6 @@ const callable = {...helpersByName,...overrideFns, package_catalog_action:'text,
 const signature = name => `public.${name}(${callable[name]})`;
 const sqlNames = names => names.map(literal).join(',');
 const newFunctions = [...helpers,...Object.keys(overrideFns)];
-const oldCallable = Object.keys(callable).filter(n=>!newFunctions.includes(n));
 const tableBits = ['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN'];
 export function aclGate(principal) {
   return `WITH helpers AS (

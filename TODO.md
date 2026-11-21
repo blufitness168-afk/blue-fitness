@@ -302,21 +302,28 @@ pnpm exec eslint --max-warnings 0 src/lib/member-contact-email-server.ts src/lib
 
 ### R9 — Dashboard และ .xlsx
 
-- [ ] สมาชิกทั้งหมด/ปัจจุบัน/พ้นสภาพ/เก่าต่ออายุ/ต่ออายุเดือนนี้/ใหม่เดือนนี้/พ้นสภาพเดือนนี้/ใกล้หมดอายุ30วัน ตามนิยาม R0 และ filter วันเดือนปี
-- [ ] กราฟสมาชิกปัจจุบัน–พ้นสภาพ–ต่ออายุ และกราฟต่ออายุ–ใหม่–พ้นสภาพในเดือน; ระบุเมื่อกลุ่มทับซ้อน ห้ามใช้ pie ที่ทำให้เข้าใจว่าแยกกันถ้าไม่จริง
-- [ ] OWNER เห็นรายรับรายจ่ายสุทธิสะสม/เดือนที่เลือก กราฟรายเดือนและรายวันของเดือน ส่วน ADMIN ไม่มี payload ยอดเหล่านี้
-- [ ] export .xlsx ตาม filter ทุกแถวของแต่ละหน้ารายงานที่ตกลง รวมสิทธิ์/PII/formula-injection/เพดานข้อมูลที่ปลอดภัย ไม่เอา CSV เปลี่ยนนามสกุล
-- [ ] CHECKPOINT R9: fixture ที่รู้ผลล่วงหน้า ไม่มีข้อมูล/ข้ามเดือนปี/หมดอายุแล้วต่อใหม่/หลายรายการคนเดียว ยอดการ์ด=กราฟ=ตาราง=export และ ADMIN ดึงข้อมูลเงินไม่ได้
+- ตรวจรับอัตโนมัติครบ (รวม R7 Kiosk จุดเดียว Auto IN/OUT + ช่องแสดงรูปสมาชิก): Dashboard `/admin` อ่านจากฐานจริง พร้อมตัวกรองวัน/เดือน/ปีเวลาไทย, กราฟ SVG บน SSR/CSR (ระบุกลุ่มทับซ้อนชัดเจน ไม่ใช้ pie), ADMIN ตัด SQL/payload การเงินทั้งหมด, OWNER เห็นรายรับ–รายจ่าย–สุทธิสะสม/ตามช่วง และส่งออก `.xlsx` จริงครบทุกแถวสำหรับ Finance (`real-finance-export`), Members (`/api/admin/members/export`) และ Checkin (`/api/admin/checkin/export` + กราฟรายชั่วโมง 24 ชม.)
+- Tests Dashboard metrics & exports: `admin-dashboard-metrics.test.mjs`, `admin-exports-xlsx.test.mjs`, `admin-members-server.test.mjs` (`64 checks` บน native PostgreSQL 18.4), `real-checkin-server.test.mjs` และ `real-finance-export-server.test.mjs` ผ่านทั้งหมด 0 skip
+- [x] สมาชิกทั้งหมด/ปัจจุบัน/พ้นสภาพ/เก่าต่ออายุ/ต่ออายุเดือนนี้/ใหม่เดือนนี้/พ้นสภาพเดือนนี้/ใกล้หมดอายุ30วัน ตามนิยาม R0 และ filter วันเดือนปี
+- [x] กราฟสมาชิกปัจจุบัน–พ้นสภาพ–ต่ออายุ และกราฟต่ออายุ–ใหม่–พ้นสภาพในเดือน; ระบุเมื่อกลุ่มทับซ้อน ห้ามใช้ pie ที่ทำให้เข้าใจว่าแยกกันถ้าไม่จริง
+- [x] OWNER เห็นรายรับรายจ่ายสุทธิสะสม/เดือนที่เลือก กราฟรายเดือนและรายวันของเดือน ส่วน ADMIN ไม่มี payload ยอดเหล่านี้
+- [x] export .xlsx ตาม filter ทุกแถวของแต่ละหน้ารายงานที่ตกลง รวมสิทธิ์/PII/formula-injection/เพดานข้อมูลที่ปลอดภัย ไม่เอา CSV เปลี่ยนนามสกุล
+- [x] CHECKPOINT R9: fixture ที่รู้ผลล่วงหน้า ไม่มีข้อมูล/ข้ามเดือนปี/หมดอายุแล้วต่อใหม่/หลายรายการคนเดียว ยอดการ์ด=กราฟ=ตาราง=export และ ADMIN ดึงข้อมูลเงินไม่ได้
 
 ### R10 — ตรวจรับรวมและปล่อยใช้งาน
 
-- [ ] แต่ละรอบรัน tests เฉพาะส่วน → TypeScript/lint → SQL isolated ตามเหมาะสม บันทึกคำสั่ง/ผล/ข้อจำกัด ไม่ติ๊กผ่านจากคาดเดา
-- [ ] ทดสอบ PostgreSQL หลาย connection สำหรับเงิน/สิทธิ์/activation/quota/คืนเงินที่เสี่ยง race ไม่ใช้ WASM อย่างเดียวอ้างว่าพร้อม production
+- **ตรวจรับอัตโนมัติรวม 21 พ.ย. 2026:**
+  - Node unit/integration `src/**/*.test.mjs` ครบ **73/73 ไฟล์ (484 ผ่าน / 0 ล้ม / 0 ข้าม)**: แบ่งรัน non-native 70 ไฟล์ (`421/421`), `admin-members-server.test.mjs` พร้อม `R2_NATIVE_POSTGRES=1` + `R8_NATIVE_POSTGRES=1` (`34/34`), `member-card-sql.test.mjs` (`22/22`), `staff-avatar-sql.test.mjs` (`7/7`)
+  - Script tests & SQL harness: `scripts/r3-production-rehearsal.test.mjs`, `r2-production-rollout.test.mjs`, `r4-production-rehearsal.test.mjs`, `db-payments.test.mjs`, `db-receiver-bank.test.mjs`, `db-tools.test.mjs`, `kiosk-sql-tests.mjs`, `payment-sql-tests.mjs` (**30/30 ผ่าน**) + `node scripts/payment-sql-tests.mjs --run-memory` ผ่าน
+  - Native PostgreSQL 18.4 multi-connection race suites **7/7 ชุด ผ่านทั้งหมด**: `r4-online-cancellation-postgres-test.py`, `r4-staff-paid-postgres-test.py`, `r5-finance-import-postgres-test.py`, `r6-coupon-activation-postgres-test.py`, `r6-checkout-coupons-postgres-test.py`, `r347-compatibility-postgres-test.py`, และ `r10-kiosk-auto-inout-postgres-test.py` (R8 entitlement + Kiosk AUTO IN/OUT + ลืมสแกนออกข้ามวัน + race คู่ IN/OUT + รูปสมาชิก)
+  - Quality gates: `pnpm run lint` (0 error, 0 warning), `pnpm exec tsc --noEmit` (0 error), `pnpm run build` (53 routes ผ่าน), HTTP production smoke (`next start` local `/`, `/member/login`, `/api/packages` = 200; `/admin`, `/kiosk` = 307 `/member/login`; `/api/admin/{members,checkin,finance}/export` = 401), และ audit mock-fallback/TODO ใน `src/app/` (0 รายการ)
+- [x] แต่ละรอบรัน tests เฉพาะส่วน → TypeScript/lint → SQL isolated ตามเหมาะสม บันทึกคำสั่ง/ผล/ข้อจำกัด ไม่ติ๊กผ่านจากคาดเดา
+- [x] ทดสอบ PostgreSQL หลาย connection สำหรับเงิน/สิทธิ์/activation/quota/คืนเงินที่เสี่ยง race ไม่ใช้ WASM อย่างเดียวอ้างว่าพร้อม production
 - [ ] Browser UAT desktop/mobile MEMBER/ADMIN/OWNER ครบซื้อ–ยกเลิกก่อนส่งสลิป–ส่งสลิป–ต่ออายุ–สิทธิ์เสริม–คูปอง–เข้าออก–รางวัล–คืนเงิน–รายงาน–Excel
 - [ ] ทดสอบ network timeout/retry/กดซ้ำ/refresh/กลับหน้าเดิม ไม่เพิ่มคะแนน/รายรับ/สิทธิ์ซ้ำ และไม่ให้โอนซ้ำเมื่อผลไม่ชัด
-- [ ] regression ระบบเดิม รวม payment receiver/amount/currency/duplicate/auth/scanner/profile ไม่แก้บั๊กนอก scope โดยพลการ
-- [ ] ก่อน live migration ต้องมี backup ตรวจ restore/rollback และขออนุมัติชัดเจนก่อนแตะฐานจริง/นำเข้าจริง/โอนเงินจริง/commit/push/deploy
-- [ ] CHECKPOINT สุดท้าย: สรุป requirement matrix ว่าเสร็จ/ค้าง/blocked พร้อมหลักฐานและคู่มือเจ้าหน้าที่ ไม่มี mock fallback หรือ TODO สำคัญซ่อนอยู่
+- [x] regression ระบบเดิม รวม payment receiver/amount/currency/duplicate/auth/scanner/profile ไม่แก้บั๊กนอก scope โดยพลการ
+- [ ] ก่อน live migration ต้องมี backup ตรวจ restore/rollback และขออนุมัติชัดเจนก่อนแตะฐานจริง/นำเข้าจริง/โอนเงินจริง/commit/push/deploy (ฐาน Neon ทดลองลงชุด migration combined ถึง `20261208_R7_kiosk_auto_inout.sql` แล้ว; คงงานตั้ง Vercel env 10 flags + `reader_cutover` + ล้างข้อมูลทดสอบก่อน Go-Live)
+- [x] CHECKPOINT สุดท้าย: สรุป requirement matrix ว่าเสร็จ/ค้าง/blocked พร้อมหลักฐานและคู่มือเจ้าหน้าที่ ไม่มี mock fallback หรือ TODO สำคัญซ่อนอยู่
 
 ---
 

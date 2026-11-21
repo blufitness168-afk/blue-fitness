@@ -320,11 +320,14 @@ test('R8 history SQL: baseline pagination, scans, purchase evidence, privacy and
         (2,'PAID','2026-09-01Z','{"durationDays":"30"}',12345,'{}'),
         (2,'PAID',NULL,'{"durationDays":30}',12345,'{}');
     `);
-    const card = await history({ status: 'ALL', scan: 'card-0001', packageDays: 30 });
+    const card = await history({ status: 'ALL', scan: 'card-0001' });
     assert.deepEqual(ids(card), [52]);
     assert.equal(card.cardSearchAvailable, true);
     assert.doesNotMatch(JSON.stringify(card), /PRIVATE|CARD-0001|12345|completed_by/);
-    for (const [days, expected] of [[90, [52]], [180, []], [365, []], ['UNKNOWN', []]]) {
+    assert.deepEqual(ids(await history({ status: 'ALL', scan: 'card-0001', packageDays: 30 })), [], 'missing snapshot column fails closed without package_payment_orders fallback');
+    assert.deepEqual(ids(await history({ status: 'ALL', scan: 'card-0001', packageDays: 'UNKNOWN' })), [52]);
+    await db.exec('ALTER TABLE redemptions ADD COLUMN package_days_at_redemption integer; UPDATE redemptions SET package_days_at_redemption = 90 WHERE id = 52;');
+    for (const [days, expected] of [[30, []], [90, [52]], [180, []], [365, []], ['UNKNOWN', []]]) {
       assert.deepEqual(ids(await history({ status: 'ALL', scan: 'CARD-0001', packageDays: days })), expected);
     }
     assert.deepEqual(ids(await history({ status: 'ALL', scan: 'CARD-0002' })), []);

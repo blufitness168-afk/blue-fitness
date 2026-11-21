@@ -924,8 +924,8 @@ test('rendered member detail omits ADMIN money and role controls; OWNER money ha
   loaded.require = name => {
     if (name === 'next/link') return { __esModule: true, default: ({ children }) => React.createElement('a', null, children) };
     if (name === '@/lib/admin-members-server') return { currentStatus: m => m.status };
-    if (name === './OnlineCancellationControls') return () => React.createElement('button', null, 'ONLINE_CANCEL');
-    if (name === '../MemberRoleAction') return { __esModule: true, default: () => React.createElement('button', null, 'ROLE_MUTATION') };
+    if (name === './OnlineCancellationControls') return function OnlineCancellationControls() { return React.createElement('button', null, 'ONLINE_CANCEL'); };
+    if (name === '../MemberRoleAction') return { __esModule: true, default: function MemberRoleAction() { return React.createElement('button', null, 'ROLE_MUTATION'); } };
     return require(name);
   };
   loaded._compile(ts.transpileModule(readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, filename.pathname);
