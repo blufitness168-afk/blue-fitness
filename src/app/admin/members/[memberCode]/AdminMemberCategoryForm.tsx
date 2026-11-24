@@ -2,7 +2,14 @@
 
 import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { MEMBER_CATEGORY_LABELS, type MemberCategory, type MemberCategorySnapshot } from "@/lib/member-category-server";
+import type { MemberCategory, MemberCategorySnapshot } from "@/lib/member-category-server";
+
+const MEMBER_CATEGORY_LABELS: Record<MemberCategory, string> = {
+  MEMBER: "สมาชิก",
+  TRAINER: "เทรนเนอร์",
+  STAFF: "พนักงาน",
+  OTHER: "อื่น ๆ",
+};
 
 export default function AdminMemberCategoryForm({
   memberCode,
