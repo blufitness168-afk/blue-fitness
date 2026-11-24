@@ -81,6 +81,23 @@ test("resolveDashboardPeriod handles day, month, year, string input, rollovers, 
   const liveYear = resolveDashboardPeriod({ mode: "year", year: "2026" }, now);
   assert.equal(liveYear.isLiveSnapshot, true);
   assert.equal(liveYear.financeDailyMonth, "2026-11");
+
+  const dayRange = resolveDashboardPeriod({ mode: "day", dateFrom: "2026-01-15", dateTo: "2026-01-01" }, now);
+  assert.equal(dayRange.mode, "day");
+  assert.equal(dayRange.startDate, "2026-01-01");
+  assert.equal(dayRange.endDateInclusive, "2026-01-15");
+  assert.equal(dayRange.daySpan, 15);
+  assert.equal(dayRange.showDailyFinanceChart, true);
+  assert.equal(dayRange.isLiveSnapshot, false);
+  assert.equal(dayRange.asOf, "2026-01-16T00:00:00+07:00");
+
+  const monthRange = resolveDashboardPeriod({ mode: "month", monthFrom: "2026-01", monthTo: "2026-03" }, now);
+  assert.equal(monthRange.mode, "month");
+  assert.equal(monthRange.startDate, "2026-01-01");
+  assert.equal(monthRange.endDateInclusive, "2026-03-31");
+  assert.equal(monthRange.daySpan, 90);
+  assert.equal(monthRange.showDailyFinanceChart, false);
+  assert.equal(monthRange.asOf, "2026-04-01T00:00:00+07:00");
 });
 
 test("computeDashboardMembershipMetrics handles empty database across day, month and year views", () => {

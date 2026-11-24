@@ -21,6 +21,10 @@ import { readStaffFreeTerms } from "@/lib/staff-free-display-server";
 import StaffTransferSection from "./StaffTransferSection";
 import { staffPaidReadsEnabled } from "@/lib/staff-paid-rollout-server";
 import { onlineCancellationEnabled } from "@/lib/online-cancellation-rollout-server";
+import AdminMemberCategoryForm from "./AdminMemberCategoryForm";
+import { getMemberCategory } from "@/lib/member-category-server";
+import OwnerSpecialAccessForm from "./OwnerSpecialAccessForm";
+import { getOwnerSpecialAccess } from "@/lib/owner-special-access-server";
 
 export default async function Page({ params, searchParams }: { params: Promise<{ memberCode: string }>; searchParams: Promise<MemberHistoryInput> }) {
   const caller = await requireAdminPage("/admin/members");
@@ -40,14 +44,17 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const showFreeRenewal = canUseMemberActions && isStaffFreeEnabled();
   const showTransferRenewal = canUseMemberActions && staffPaidReadsEnabled() && process.env.ENABLE_STAFF_PAID_TRANSFER === "true";
   const isOwner = caller.role === "OWNER";
-  const [contact, timeOverride, staffFreeTerms, cancellationCandidates] = await Promise.all([
+  const canEditCategory = canEdit || isOwner;
+  const [contact, timeOverride, staffFreeTerms, cancellationCandidates, memberCategory, specialAccess] = await Promise.all([
     canEdit ? getMemberContactEmail(m.memberCode).catch(() => null) : null,
     canEditTimeOverride ? getMemberTimeOverride(m.memberCode).catch(() => null) : null,
     m.role === "MEMBER" ? readStaffFreeTerms(m.memberCode) : [],
     isOwner && showFreeRenewal ? readStaffFreeCancellationCandidates(m.memberCode) : [],
+    canEditCategory ? getMemberCategory(m.memberCode).catch(() => null) : null,
+    canEdit || isOwner ? getOwnerSpecialAccess(m.memberCode).catch(() => null) : null,
   ]);
   return <>
-    <Client data={data} callerRole={caller.role} onlineCancellationEnabled={isOwner && data.callerRole === "OWNER" && onlineCancellationEnabled()} staffFreeEntitlement={staffFreeTerms.length > 0
+    <Client data={data} callerRole={caller.role} onlineCancellationEnabled={isOwner && data.callerRole === "OWNER" && onlineCancellationEnabled()} memberCategory={memberCategory?.category} specialAccess={specialAccess} staffFreeEntitlement={staffFreeTerms.length > 0
       ? <StaffFreeEntitlement terms={staffFreeTerms} /> : undefined} memberActions={canUseMemberActions && (
         <nav aria-label="การจัดการสิทธิ์สมาชิก" className="space-y-2 rounded-2xl border bg-white p-4 text-sm">
           <div className="flex flex-wrap gap-3">
@@ -58,6 +65,12 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           <p>ระบบกรอกรหัสผู้รับให้ในแท็บเดิม หากไม่ขึ้นให้กรอก <code className="select-all font-semibold">{m.memberCode}</code> แล้วตรวจสอบสิทธิ์ก่อนยืนยัน</p>
         </nav>
       )} />
+    {canEditCategory && (memberCategory
+      ? <AdminMemberCategoryForm key={`category:${m.memberCode}:${memberCategory.version}`} memberCode={m.memberCode} snapshot={memberCategory} />
+      : <p role="status" className="mt-6">ประเภทบุคคลยังไม่พร้อมใช้งาน ไม่สามารถอ่านหรือแก้ไขได้</p>)}
+    {isOwner && data.callerRole === "OWNER" && (specialAccess
+      ? <OwnerSpecialAccessForm key={`special:${m.memberCode}:${specialAccess.version}`} memberCode={m.memberCode} snapshot={specialAccess} />
+      : <p role="status" className="mt-6">สิทธิ์เข้าใช้พิเศษยังไม่พร้อมใช้งาน ไม่สามารถอ่านหรือแก้ไขได้</p>)}
     {canEdit && (contact
       ? <AdminMemberContactEmailForm key={`contact:${m.memberCode}:${contact.version}`} memberCode={m.memberCode} contact={contact} />
       : <p role="status" className="mt-6">อีเมลติดต่อยังไม่พร้อมใช้งาน ไม่สามารถอ่านหรือแก้ไขได้ กรุณาติดต่อผู้ดูแล</p>)}

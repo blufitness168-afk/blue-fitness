@@ -150,14 +150,21 @@ export default function BenefitsAdminClient({ kind }: { kind: "COUPON" | "PROMO"
         const eligible = f.getAll("eligiblePackageIds").map(Number);
         if (kind === "PROMO") {
           const promoType = get("discountType") === "PERCENT" ? "PERCENT" : "FIXED";
-          const discountValue = promoType === "FIXED" ? bahtToSatang(get("discountValue")) : Number(get("discountValue"));
+          const rawDiscount = Number(get("discountValue"));
+          const discountValue = promoType === "FIXED" ? bahtToSatang(get("discountValue")) : Math.round(rawDiscount * 100) / 100;
+          const validPercent = promoType === "PERCENT"
+            && Number.isFinite(rawDiscount)
+            && Math.abs(rawDiscount * 100 - Math.round(rawDiscount * 100)) < 1e-6
+            && discountValue >= 0.01
+            && discountValue <= 100;
+          const validFixed = promoType === "FIXED" && Number.isInteger(discountValue) && discountValue >= 1 && discountValue <= 100000000;
           const minSatang = bahtToSatang(get("minBaht"));
           const maxSatang = get("maxBaht") !== "" ? bahtToSatang(get("maxBaht")) : null;
           const maxDiscountSatang = get("maxDiscountBaht") !== "" ? bahtToSatang(get("maxDiscountBaht")) : null;
-          if (!Number.isInteger(discountValue) || discountValue < 1 || discountValue > (promoType === "PERCENT" ? 100 : 100000000)
+          if ((!validPercent && !validFixed)
             || !Number.isInteger(minSatang) || minSatang < 0 || minSatang > 100000000
             || (maxDiscountSatang !== null && (!Number.isInteger(maxDiscountSatang) || maxDiscountSatang < 1 || maxDiscountSatang > 100000000))) {
-            setError("กรุณาระบุมูลค่าและยอดเงินเป็นจำนวนบาทที่ถูกต้อง (ทศนิยมไม่เกิน 2 ตำแหน่ง; % เป็นจำนวนเต็ม 1–100)");
+            setError("กรุณาระบุมูลค่าและยอดเงินที่ถูกต้อง (ทศนิยมไม่เกิน 2 ตำแหน่ง; % ระหว่าง 0.01–100)");
             return;
           }
           if ((maxSatang !== null && (!Number.isInteger(maxSatang) || maxSatang < minSatang || maxSatang > 100000000)) || eligible.length > 100) {
@@ -221,7 +228,7 @@ export default function BenefitsAdminClient({ kind }: { kind: "COUPON" | "PROMO"
         </> : <>
           <label>โค้ด<input className={field} name="code" pattern="[A-Za-z0-9_-]{3,40}" required /></label>
           <label>ประเภท<select className={field} name="discountType" value={promoDiscountType} onChange={event => setPromoDiscountType(event.target.value === "PERCENT" ? "PERCENT" : "FIXED")}><option value="FIXED">บาท</option><option value="PERCENT">เปอร์เซ็นต์ (%)</option></select></label>
-          <label>{promoDiscountType === "FIXED" ? "มูลค่าส่วนลด (บาท)" : "มูลค่าส่วนลด (%)"}<input key={promoDiscountType} className={field} name="discountValue" type="number" min={promoDiscountType === "FIXED" ? 0.01 : 1} max={promoDiscountType === "FIXED" ? 1000000 : 100} step={promoDiscountType === "FIXED" ? "0.01" : 1} required /></label>
+          <label>{promoDiscountType === "FIXED" ? "มูลค่าส่วนลด (บาท)" : "มูลค่าส่วนลด (%)"}<input key={promoDiscountType} className={field} name="discountValue" type="number" min={0.01} max={promoDiscountType === "FIXED" ? 1000000 : 100} step="0.01" required /></label>
           <label>ยอดขั้นต่ำ (บาท)<input className={field} name="minBaht" type="number" min={0} max={1000000} step="0.01" defaultValue={0} required /></label>
           <label>ยอดซื้อสูงสุดก่อนลด (บาท, เว้นว่าง = ไม่จำกัด)<input className={field} name="maxBaht" type="number" min={0} max={1000000} step="0.01" /></label>
           <fieldset className="md:col-span-2" aria-describedby="promo-package-policy">

@@ -8,7 +8,11 @@ export default async function Page({
   searchParams: Promise<{
     mode?: string | string[];
     date?: string | string[];
+    dateFrom?: string | string[];
+    dateTo?: string | string[];
     month?: string | string[];
+    monthFrom?: string | string[];
+    monthTo?: string | string[];
     year?: string | string[];
   }>;
 }) {

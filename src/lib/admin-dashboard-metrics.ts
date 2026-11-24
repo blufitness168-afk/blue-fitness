@@ -12,15 +12,25 @@ export type DashboardPeriodInput =
   | {
       mode?: string | string[];
       date?: string | string[];
+      dateFrom?: string | string[];
+      dateTo?: string | string[];
       month?: string | string[];
+      monthFrom?: string | string[];
+      monthTo?: string | string[];
       year?: string | string[];
     };
 
 export interface DashboardPeriod {
   mode: DashboardPeriodMode;
   date: string;
+  dateFrom: string;
+  dateTo: string;
   month: string;
+  monthFrom: string;
+  monthTo: string;
   year: string;
+  daySpan: number;
+  showDailyFinanceChart: boolean;
   startDate: string;
   endDateInclusive: string;
   start: string;
@@ -179,25 +189,36 @@ export function resolveDashboardPeriod(
       : "month";
 
   if (mode === "day") {
+    const rawFrom = singleParam(normalized.dateFrom);
     const rawDate = singleParam(normalized.date);
-    const targetDate = validDay(rawDate) ? rawDate : todayDay;
-    const start = `${targetDate}T00:00:00+07:00`;
-    const end = `${addDays(targetDate, 1)}T00:00:00+07:00`;
-    const isLiveSnapshot = targetDate === todayDay;
+    const rawTo = singleParam(normalized.dateTo);
+    let from = validDay(rawFrom) ? rawFrom : validDay(rawDate) ? rawDate : todayDay;
+    let to = validDay(rawTo) ? rawTo : from;
+    if (to < from) [from, to] = [to, from];
+    const start = `${from}T00:00:00+07:00`;
+    const end = `${addDays(to, 1)}T00:00:00+07:00`;
+    const daySpan = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS) + 1;
+    const isLiveSnapshot = todayDay >= from && todayDay <= to;
     return {
       mode: "day",
-      date: targetDate,
-      month: targetDate.slice(0, 7),
-      year: targetDate.slice(0, 4),
-      startDate: targetDate,
-      endDateInclusive: targetDate,
+      date: to,
+      dateFrom: from,
+      dateTo: to,
+      month: to.slice(0, 7),
+      monthFrom: from.slice(0, 7),
+      monthTo: to.slice(0, 7),
+      year: to.slice(0, 4),
+      daySpan,
+      showDailyFinanceChart: daySpan <= 60,
+      startDate: from,
+      endDateInclusive: to,
       start,
       end,
       asOf: isLiveSnapshot ? now.toISOString() : end,
       isLiveSnapshot,
-      label: targetDate,
-      financeYear: targetDate.slice(0, 4),
-      financeDailyMonth: targetDate.slice(0, 7),
+      label: from === to ? from : `${from} ถึง ${to}`,
+      financeYear: to.slice(0, 4),
+      financeDailyMonth: to.slice(0, 7),
     };
   }
 
@@ -208,13 +229,20 @@ export function resolveDashboardPeriod(
     const endDateInclusive = `${targetYear}-12-31`;
     const start = `${startDate}T00:00:00+07:00`;
     const end = `${Number(targetYear) + 1}-01-01T00:00:00+07:00`;
+    const daySpan = Math.round((Date.parse(`${endDateInclusive}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / DAY_MS) + 1;
     const isLiveSnapshot = targetYear === todayYear;
     const dailyMonth = isLiveSnapshot ? todayMonth : `${targetYear}-12`;
     return {
       mode: "year",
       date: isLiveSnapshot ? todayDay : startDate,
+      dateFrom: startDate,
+      dateTo: endDateInclusive,
       month: dailyMonth,
+      monthFrom: `${targetYear}-01`,
+      monthTo: `${targetYear}-12`,
       year: targetYear,
+      daySpan,
+      showDailyFinanceChart: true,
       startDate,
       endDateInclusive,
       start,
@@ -227,27 +255,38 @@ export function resolveDashboardPeriod(
     };
   }
 
+  const rawMonthFrom = singleParam(normalized.monthFrom);
   const rawMonth = singleParam(normalized.month);
-  const targetMonth = validMonth(rawMonth) ? rawMonth : todayMonth;
-  const startDate = `${targetMonth}-01`;
-  const endDateInclusive = lastDayOfMonth(targetMonth);
+  const rawMonthTo = singleParam(normalized.monthTo);
+  let monthFrom = validMonth(rawMonthFrom) ? rawMonthFrom : validMonth(rawMonth) ? rawMonth : todayMonth;
+  let monthTo = validMonth(rawMonthTo) ? rawMonthTo : monthFrom;
+  if (monthTo < monthFrom) [monthFrom, monthTo] = [monthTo, monthFrom];
+  const startDate = `${monthFrom}-01`;
+  const endDateInclusive = lastDayOfMonth(monthTo);
   const start = `${startDate}T00:00:00+07:00`;
-  const end = `${addMonths(targetMonth, 1)}-01T00:00:00+07:00`;
-  const isLiveSnapshot = targetMonth === todayMonth;
+  const end = `${addMonths(monthTo, 1)}-01T00:00:00+07:00`;
+  const daySpan = Math.round((Date.parse(`${endDateInclusive}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / DAY_MS) + 1;
+  const isLiveSnapshot = todayMonth >= monthFrom && todayMonth <= monthTo;
   return {
     mode: "month",
     date: isLiveSnapshot ? todayDay : startDate,
-    month: targetMonth,
-    year: targetMonth.slice(0, 4),
+    dateFrom: startDate,
+    dateTo: endDateInclusive,
+    month: monthTo,
+    monthFrom,
+    monthTo,
+    year: monthTo.slice(0, 4),
+    daySpan,
+    showDailyFinanceChart: daySpan <= 60,
     startDate,
     endDateInclusive,
     start,
     end,
     asOf: isLiveSnapshot ? now.toISOString() : end,
     isLiveSnapshot,
-    label: targetMonth,
-    financeYear: targetMonth.slice(0, 4),
-    financeDailyMonth: targetMonth,
+    label: monthFrom === monthTo ? monthTo : `${monthFrom} ถึง ${monthTo}`,
+    financeYear: monthTo.slice(0, 4),
+    financeDailyMonth: monthTo,
   };
 }
 
@@ -292,16 +331,35 @@ export function computeDashboardMembershipMetrics(
 
   // Prepare activity chart buckets.
   const bucketKeys: string[] = [];
+  const activityByDay = period.mode === "day" && period.daySpan <= 60;
   if (period.mode === "year") {
     for (let monthNum = 1; monthNum <= 12; monthNum++) {
       bucketKeys.push(`${period.year}-${String(monthNum).padStart(2, "0")}`);
     }
   } else if (period.mode === "month") {
-    for (let offset = -5; offset <= 0; offset++) {
-      bucketKeys.push(addMonths(period.month, offset));
+    if (period.monthFrom === period.monthTo) {
+      for (let offset = -5; offset <= 0; offset++) {
+        bucketKeys.push(addMonths(period.month, offset));
+      }
+    } else {
+      let cursor = period.monthFrom;
+      for (let i = 0; i < 36 && cursor <= period.monthTo; i++) {
+        bucketKeys.push(cursor);
+        cursor = addMonths(cursor, 1);
+      }
+    }
+  } else if (activityByDay) {
+    let cursor = period.startDate;
+    for (let i = 0; i < 60 && cursor <= period.endDateInclusive; i++) {
+      bucketKeys.push(cursor);
+      cursor = addDays(cursor, 1);
     }
   } else {
-    bucketKeys.push(period.date);
+    let cursor = period.monthFrom;
+    for (let i = 0; i < 36 && cursor <= period.monthTo; i++) {
+      bucketKeys.push(cursor);
+      cursor = addMonths(cursor, 1);
+    }
   }
 
   const bucketSets = new Map<
@@ -321,8 +379,7 @@ export function computeDashboardMembershipMetrics(
     kind: "new" | "renewed" | "lapsed",
     memberId: number,
   ) => {
-    const key =
-      period.mode === "day" ? toBangkokDay(eventMs) : toBangkokMonth(eventMs);
+    const key = activityByDay ? toBangkokDay(eventMs) : toBangkokMonth(eventMs);
     const sets = bucketSets.get(key);
     if (sets) {
       sets[kind].add(memberId);
@@ -498,18 +555,38 @@ export function computeDashboardFinanceSummary(
   const cumulative = sumSatangTotals(financeData.records);
   const periodTotals = sumSatangTotals(periodRecords);
 
-  const monthlyChart = financeChart(
-    financeData.records,
-    "month",
-    `${period.financeYear}-01-01`,
-    `${period.financeYear}-12-31`,
-  );
-  const dailyChart = financeChart(
-    financeData.records,
-    "day",
-    `${period.financeDailyMonth}-01`,
-    lastDayOfMonth(period.financeDailyMonth),
-  );
+  const isRangeFilter =
+    (period.mode === "day" && period.dateFrom !== period.dateTo) ||
+    (period.mode === "month" && period.monthFrom !== period.monthTo);
+
+  const monthlyChart = isRangeFilter
+    ? financeChart(
+        financeData.records,
+        "month",
+        `${period.monthFrom}-01`,
+        lastDayOfMonth(period.monthTo),
+      )
+    : financeChart(
+        financeData.records,
+        "month",
+        `${period.financeYear}-01-01`,
+        `${period.financeYear}-12-31`,
+      );
+  const dailyChart = !period.showDailyFinanceChart
+    ? []
+    : isRangeFilter
+      ? financeChart(
+          financeData.records,
+          "day",
+          period.startDate,
+          period.endDateInclusive,
+        )
+      : financeChart(
+          financeData.records,
+          "day",
+          `${period.financeDailyMonth}-01`,
+          lastDayOfMonth(period.financeDailyMonth),
+        );
 
   const recentRecords: DashboardFinanceRecentRecord[] = [...periodRecords]
     .sort(

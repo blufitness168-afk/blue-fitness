@@ -12,7 +12,11 @@ const promoSubtotal = z.number().int().min(0).max(100000000);
 const eligiblePackages = z.array(id).min(1).max(100).refine(ids => new Set(ids).size === ids.length);
 const create = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("COUPON"), title: z.string().trim().min(1).max(120), couponType: z.enum(["FRIEND_PASS", "EXTRA_DAYS"]), quota: z.number().int().min(1).max(100), bonusDays: z.number().int().min(0).max(365), activationDurationMinutes: z.number().int().min(0).max(2147483647).nullable().optional(), expiresAt: expiry }).strict().refine(p => p.couponType === "EXTRA_DAYS" ? p.quota === 1 && p.bonusDays > 0 : p.bonusDays === 0),
-  z.object({ promoDescription: z.string().trim().min(1).max(500).optional(), promoRecipientLimit: z.number().int().min(1).max(1000000).nullable().optional(), kind: z.literal("PROMO"), title: z.string().trim().min(1).max(120), code: z.string().trim().toUpperCase().regex(/^[A-Z0-9_-]{3,40}$/), discountType: z.enum(["FIXED", "PERCENT"]), discountValue: z.number().int().min(1).max(100000000), minSatang: promoSubtotal, maxSatang: promoSubtotal.nullable().optional(), eligiblePackageIds: eligiblePackages.nullable().optional(), maxDiscountSatang: z.number().int().min(1).max(100000000).nullable(), usageLimit: z.number().int().min(1).max(1000000), expiresAt: expiry }).strict().refine(p => p.discountType !== "PERCENT" || p.discountValue <= 100).refine(p => p.maxSatang == null || p.maxSatang >= p.minSatang),
+  z.object({ promoDescription: z.string().trim().min(1).max(500).optional(), promoRecipientLimit: z.number().int().min(1).max(1000000).nullable().optional(), kind: z.literal("PROMO"), title: z.string().trim().min(1).max(120), code: z.string().trim().toUpperCase().regex(/^[A-Z0-9_-]{3,40}$/), discountType: z.enum(["FIXED", "PERCENT"]), discountValue: z.number().finite().min(0.01).max(100000000), minSatang: promoSubtotal, maxSatang: promoSubtotal.nullable().optional(), eligiblePackageIds: eligiblePackages.nullable().optional(), maxDiscountSatang: z.number().int().min(1).max(100000000).nullable(), usageLimit: z.number().int().min(1).max(1000000), expiresAt: expiry }).strict()
+    .refine(p => p.discountType === "PERCENT"
+      ? p.discountValue >= 0.01 && p.discountValue <= 100 && Math.abs(Math.round(p.discountValue * 100) - p.discountValue * 100) < 1e-6
+      : Number.isInteger(p.discountValue) && p.discountValue >= 1)
+    .refine(p => p.maxSatang == null || p.maxSatang >= p.minSatang),
 ]);
 const recipientGroup = z.enum(["ALL", "1", "30", "90", "180", "365"]);
 const memberCode = z.string().trim().regex(/^BLU-[0-9]{1,12}$/);
@@ -45,7 +49,14 @@ export function benefitPayload(action: string, body: Record<string, unknown>) {
   const { requestKey: ignored, ...input } = body;
   void ignored;
   const parsed = schema.safeParse(input);
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) return null;
+  if (action === "create") {
+    const data = parsed.data as z.infer<typeof create>;
+    if (data.kind === "PROMO" && data.discountType === "PERCENT") {
+      return { ...data, discountValue: Math.round(data.discountValue * 100) / 100 };
+    }
+  }
+  return parsed.data;
 }
 
 const definitionFields = ["id", "kind", "title", "coupon_type", "quota", "bonus_days", "code", "discount_type", "discount_value", "min_satang", "max_discount_satang", "usage_limit", "expires_at", "active", "created_by", "created_at", "requires_activation", "activation_duration_minutes", "campaign_code", "campaign_kind", "campaign_description", "campaign_per_member", "campaign_total", "campaign_issued", "checkout_unit", "checkout_value", "checkout_cap"];

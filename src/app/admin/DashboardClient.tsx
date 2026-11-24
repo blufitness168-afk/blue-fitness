@@ -54,10 +54,10 @@ export default function DashboardClient({
   const { period, summary } = data;
   const periodLabel =
     period.mode === "day"
-      ? `วัน ${period.date}`
+      ? `วัน ${period.label}`
       : period.mode === "year"
         ? `ปี ${period.year}`
-        : `เดือน ${period.month}`;
+        : `เดือน ${period.label}`;
 
   const memberCards: { label: string; value: string; note?: string }[] = [
     {
@@ -123,10 +123,10 @@ export default function DashboardClient({
           </p>
         </div>
         <div className="flex flex-wrap gap-2" role="group" aria-label="เลือกมุมมองเวลา">
-          <Link href={`/admin?mode=day&date=${encodeURIComponent(period.date)}`} className={tabClass(period.mode === "day")}>
+          <Link href={`/admin?mode=day&dateFrom=${encodeURIComponent(period.dateFrom)}&dateTo=${encodeURIComponent(period.dateTo)}`} className={tabClass(period.mode === "day")}>
             รายวัน
           </Link>
-          <Link href={`/admin?mode=month&month=${encodeURIComponent(period.month)}`} className={tabClass(period.mode === "month")}>
+          <Link href={`/admin?mode=month&monthFrom=${encodeURIComponent(period.monthFrom)}&monthTo=${encodeURIComponent(period.monthTo)}`} className={tabClass(period.mode === "month")}>
             รายเดือน
           </Link>
           <Link href={`/admin?mode=year&year=${encodeURIComponent(period.year)}`} className={tabClass(period.mode === "year")}>
@@ -138,16 +138,28 @@ export default function DashboardClient({
       <form action="/admin" method="get" className="flex flex-wrap items-end gap-3 rounded-2xl border border-blu-sky/40 bg-white p-4 shadow-sm">
         <input type="hidden" name="mode" value={period.mode} />
         {period.mode === "day" && (
-          <label className="text-sm font-semibold text-blu-dark">
-            วันที่ (เวลาไทย)
-            <input type="date" name="date" defaultValue={period.date} className="ml-3 rounded-xl border bg-white p-2.5 text-sm" />
-          </label>
+          <>
+            <label className="text-sm font-semibold text-blu-dark">
+              จากวันที่ (เวลาไทย)
+              <input type="date" name="dateFrom" defaultValue={period.dateFrom} className="ml-3 rounded-xl border bg-white p-2.5 text-sm" />
+            </label>
+            <label className="text-sm font-semibold text-blu-dark">
+              ถึงวันที่ (เวลาไทย)
+              <input type="date" name="dateTo" defaultValue={period.dateTo} className="ml-3 rounded-xl border bg-white p-2.5 text-sm" />
+            </label>
+          </>
         )}
         {period.mode === "month" && (
-          <label className="text-sm font-semibold text-blu-dark">
-            เดือน (เวลาไทย)
-            <input type="month" name="month" defaultValue={period.month} className="ml-3 rounded-xl border bg-white p-2.5 text-sm" />
-          </label>
+          <>
+            <label className="text-sm font-semibold text-blu-dark">
+              จากเดือน (เวลาไทย)
+              <input type="month" name="monthFrom" defaultValue={period.monthFrom} className="ml-3 rounded-xl border bg-white p-2.5 text-sm" />
+            </label>
+            <label className="text-sm font-semibold text-blu-dark">
+              ถึงเดือน (เวลาไทย)
+              <input type="month" name="monthTo" defaultValue={period.monthTo} className="ml-3 rounded-xl border bg-white p-2.5 text-sm" />
+            </label>
+          </>
         )}
         {period.mode === "year" && (
           <label className="text-sm font-semibold text-blu-dark">
@@ -188,8 +200,12 @@ export default function DashboardClient({
               period.mode === "year"
                 ? `ความเคลื่อนไหวสมาชิกรายเดือน (ปี ${period.year})`
                 : period.mode === "month"
-                  ? `ความเคลื่อนไหวสมาชิก 6 เดือนล่าสุด (ถึง ${period.month})`
-                  : `ความเคลื่อนไหวสมาชิกประจำวัน (${period.date})`
+                  ? period.monthFrom === period.monthTo
+                    ? `ความเคลื่อนไหวสมาชิก 6 เดือนล่าสุด (ถึง ${period.month})`
+                    : `ความเคลื่อนไหวสมาชิกรายเดือน (${period.label})`
+                  : period.dateFrom === period.dateTo
+                    ? `ความเคลื่อนไหวสมาชิกประจำวัน (${period.date})`
+                    : `ความเคลื่อนไหวสมาชิก (${period.label})`
             }
             subtitle="นับคนไม่ซ้ำต่อกลุ่ม (ใหม่ / เก่าต่ออายุ / พ้นสภาพ) ในแต่ละช่วงเวลา"
             data={data.activityChart}
@@ -252,22 +268,34 @@ export default function DashboardClient({
           </div>
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <AdminDashboardChart
-              title={`รายรับ / รายจ่าย / สุทธิ รายเดือน (ปี ${period.financeYear})`}
-              subtitle="อิง ledger จริงชุดเดียวกับหน้ารายรับ-รายจ่ายและไฟล์ส่งออก .xlsx"
-              data={data.finance.monthlyChart}
-              series={financeSeries}
-              type="bar"
-              valueFormatter={compactMoney}
-            />
-            <AdminDashboardChart
-              title={`รายรับ / รายจ่าย / สุทธิ รายวัน (เดือน ${data.finance.dailyChartMonth})`}
-              subtitle="แสดงครบทุกวันในเดือน (ยอด 0 แสดงครบ)"
-              data={data.finance.dailyChart}
-              series={financeSeries}
-              type="line"
-              valueFormatter={compactMoney}
-            />
+            <div className={period.showDailyFinanceChart ? "" : "xl:col-span-2"}>
+              <AdminDashboardChart
+                title={
+                  (period.mode === "day" && period.dateFrom !== period.dateTo) || (period.mode === "month" && period.monthFrom !== period.monthTo)
+                    ? `รายรับ / รายจ่าย / สุทธิ รายเดือน (${period.monthFrom === period.monthTo ? period.monthFrom : `${period.monthFrom} ถึง ${period.monthTo}`})`
+                    : `รายรับ / รายจ่าย / สุทธิ รายเดือน (ปี ${period.financeYear})`
+                }
+                subtitle={period.showDailyFinanceChart ? "อิง ledger จริงชุดเดียวกับหน้ารายรับ-รายจ่ายและไฟล์ส่งออก .xlsx" : "เลือกช่วงเกิน 60 วัน ระบบแสดงเฉพาะกราฟรายเดือนเพื่อให้อ่านง่าย"}
+                data={data.finance.monthlyChart}
+                series={financeSeries}
+                type="bar"
+                valueFormatter={compactMoney}
+              />
+            </div>
+            {period.showDailyFinanceChart && (
+              <AdminDashboardChart
+                title={
+                  (period.mode === "day" && period.dateFrom !== period.dateTo) || (period.mode === "month" && period.monthFrom !== period.monthTo)
+                    ? `รายรับ / รายจ่าย / สุทธิ รายวัน (${period.label})`
+                    : `รายรับ / รายจ่าย / สุทธิ รายวัน (เดือน ${data.finance.dailyChartMonth})`
+                }
+                subtitle="แสดงครบทุกวันในช่วงที่เลือก (ยอด 0 แสดงครบ)"
+                data={data.finance.dailyChart}
+                series={financeSeries}
+                type="line"
+                valueFormatter={compactMoney}
+              />
+            )}
           </div>
 
           <section className="rounded-2xl border border-blu-sky/40 bg-white p-5 shadow-sm">

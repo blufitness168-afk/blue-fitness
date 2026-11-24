@@ -99,8 +99,9 @@ export function monthRange(input?: string, now = new Date()) {
   return { month, start: `${month}-01T00:00:00+07:00`, end: `${number === 12 ? year + 1 : year}-${String(number === 12 ? 1 : number + 1).padStart(2, "0")}-01T00:00:00+07:00` };
 }
 export const memberListGenders = { MALE: "ชาย", FEMALE: "หญิง", OTHER: "อื่น ๆ" } as const;
+export const memberListCategories = { MEMBER: "สมาชิก", TRAINER: "เทรนเนอร์", STAFF: "พนักงาน", OTHER: "อื่น ๆ" } as const;
 export const currentPackageDurations = { "1": "รายวัน", "30": "1 เดือน", "90": "3 เดือน", "180": "6 เดือน", "365": "12 เดือน" } as const;
-type MemberListFilters = Record<"q" | "name" | "gender" | "code" | "phone" | "from" | "to" | "month" | "reportMonth" | "packageLabel" | "slot" | "currentDuration" | "currentSlot", string>;
+type MemberListFilters = Record<"q" | "name" | "gender" | "code" | "phone" | "from" | "to" | "month" | "reportMonth" | "packageLabel" | "slot" | "currentDuration" | "currentSlot", string> & { category?: string };
 export type MemberListInput = Partial<Record<keyof MemberListFilters | "page", string | string[]>>;
 
 function validMemberListDay(day: string) {
@@ -123,9 +124,11 @@ function memberListFilters(input: MemberListInput) {
     invalid = true;
     return "";
   };
+  const category = checked("category", value => Object.hasOwn(memberListCategories, value));
   const filters: MemberListFilters = {
     q: text("q", 100), name: text("name", 100), code: text("code", 50), phone: text("phone", 20),
     gender: checked("gender", value => Object.hasOwn(memberListGenders, value)),
+    ...(category ? { category } : {}),
     from: checked("from", validMemberListDay), to: checked("to", validMemberListDay),
     month: checked("month", value => /^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(value)),
     reportMonth: checked("reportMonth", value => /^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(value)),
@@ -145,7 +148,7 @@ async function buildMemberListQueryParts(
   asOf: number,
   includeReport: boolean,
 ) {
-  const { q, name, code, phone, gender, from, to, month, reportMonth, packageLabel, slot, currentDuration, currentSlot } = filters;
+  const { q, name, code, phone, gender, category, from, to, month, reportMonth, packageLabel, slot, currentDuration, currentSlot } = filters;
   const current = !!(currentDuration || currentSlot);
   const currentReport = includeReport && !!reportMonth && reportMonth === monthRange(undefined, new Date(asOf)).month;
   const instant = new Date(asOf).toISOString();
@@ -223,6 +226,15 @@ async function buildMemberListQueryParts(
     }
   }
   const currentJoin = current ? termJoin : fragment``;
+  let categoryReady = true;
+  if (category && !invalid) {
+    const [catTable] = await sql`SELECT to_regclass('public.member_categories') IS NOT NULL AS ready`;
+    if (!catTable) throw new Error("Forbidden");
+    categoryReady = catTable.ready === true;
+  }
+  const categoryClause = category && categoryReady
+    ? fragment`AND COALESCE((SELECT mc.category FROM public.member_categories mc WHERE mc.member_id = members.id), 'MEMBER') = ${category}`
+    : category ? fragment`AND FALSE` : fragment``;
   const expiry = current && !invalid && !currentUnavailable ? fragment`current_term.ends_at`
     : !current && staffPaidReadsEnabled() ? fragment`COALESCE(r4_staff_private.paid_active_expiry(id, now()), expire_date)` : fragment`expire_date`;
   const literal = (value: string) => value.replace(/[\\%_]/g, "\\$&");
@@ -240,6 +252,7 @@ async function buildMemberListQueryParts(
     ${code ? fragment`AND member_code ILIKE ${contains(code)}` : fragment``}
     ${phone ? fragment`AND phone ILIKE ${contains(phone)}` : fragment``}
     ${gender ? fragment`AND gender = ${gender}::profile_gender` : fragment``}
+    ${categoryClause}
     ${from ? fragment`AND created_at >= (${from}::date::timestamp AT TIME ZONE 'Asia/Bangkok')` : fragment``}
     ${to ? fragment`AND created_at < ((${to}::date + 1)::timestamp AT TIME ZONE 'Asia/Bangkok')` : fragment``}
     ${month ? fragment`AND created_at >= (${monthStart}::date::timestamp AT TIME ZONE 'Asia/Bangkok')

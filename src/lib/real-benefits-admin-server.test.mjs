@@ -72,8 +72,13 @@ test('strict validation: enums, whole amounts, bonus quota, forged actor/amounts
  assert.deepEqual(api.benefitPayload('consume', { couponId: 1 }), { couponId: 1, guestReference: '' });
  const promo = { kind: 'PROMO', title: 'Real', code: 'save10', discountType: 'PERCENT', discountValue: 10, minSatang: 0, maxDiscountSatang: null, usageLimit: 2, expiresAt: coupon.expiresAt };
  assert.equal(api.benefitPayload('create', promo).code, 'SAVE10');
+ assert.equal(api.benefitPayload('create', { ...promo, discountValue: 9.1 }).discountValue, 9.1);
+ assert.equal(api.benefitPayload('create', { ...promo, discountValue: 0.01 }).discountValue, 0.01);
+ assert.equal(api.benefitPayload('create', { ...promo, discountValue: 100 }).discountValue, 100);
  assert.equal(api.benefitPayload('create', { ...promo, discountValue: 101 }), null);
- assert.equal(api.benefitPayload('create', { ...promo, discountValue: 0.5 }), null);
+ assert.equal(api.benefitPayload('create', { ...promo, discountValue: 0 }), null);
+ assert.equal(api.benefitPayload('create', { ...promo, discountValue: 9.123 }), null);
+ assert.equal(api.benefitPayload('create', { ...promo, discountType: 'FIXED', discountValue: 100.5 }), null);
 });
 test('hashed session, stable idempotency on transient retry, no fake success', async () => {
  const previous = process.env.DATABASE_URL; process.env.DATABASE_URL = 'isolated-mock-only';

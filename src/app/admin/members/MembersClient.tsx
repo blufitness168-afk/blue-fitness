@@ -1,14 +1,16 @@
 import Link from "next/link";
-import { currentPackageDurations, currentStatus, memberListGenders, type getAdminMembers } from "@/lib/admin-members-server";
+import { currentPackageDurations, currentStatus, memberListCategories, memberListGenders, type getAdminMembers } from "@/lib/admin-members-server";
 import MemberRoleAction from "./MemberRoleAction";
 import MembersExportButton from "./MembersExportButton";
 
 export default function MembersClient({
   data,
   callerRole,
+  categories = {},
 }: {
   data: Awaited<ReturnType<typeof getAdminMembers>>;
   callerRole?: string;
+  categories?: Record<string, string>;
 }) {
   const owner = data.callerRole === "OWNER";
   const { filters } = data;
@@ -31,6 +33,10 @@ export default function MembersClient({
         <label>เพศ<select name="gender" defaultValue={filters.gender} className={fieldClass}>
           <option value="">ทั้งหมด</option>
           {Object.entries(memberListGenders).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select></label>
+        <label>ประเภทบุคคล<select name="category" defaultValue={filters.category ?? ""} className={fieldClass}>
+          <option value="">ทั้งหมด</option>
+          {Object.entries(memberListCategories).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select></label>
       </div>
       <fieldset className="grid gap-3 sm:grid-cols-3">
@@ -82,15 +88,20 @@ export default function MembersClient({
         : <p className="text-xs text-blu-steel">ยอดใกล้หมดอายุใช้ได้เฉพาะเดือนปัจจุบันเมื่อฐานข้อมูลมีตัวอ่านสิทธิ์ที่รองรับ ไม่ใช้วันหมดอายุบัญชีเดาย้อนหลัง</p>}
     </section>}
     <div className="overflow-x-auto rounded-2xl border bg-white"><table className="w-full text-left text-sm">
-      <thead><tr>{["ชื่อ", "รหัสสมาชิก", "โทรศัพท์", "สถานะปัจจุบัน", "หมดอายุ", "บทบาท", ...(owner ? ["ปรับสิทธิ์"] : [])].map(label => <th key={label} className="whitespace-nowrap p-4">{label}</th>)}</tr></thead>
-      <tbody>{data.members.map(member => <tr key={member.memberCode} className="border-t">
+      <thead><tr>{["ชื่อ", "รหัสสมาชิก", "ประเภทบุคคล", "โทรศัพท์", "สถานะปัจจุบัน", "หมดอายุ", "บทบาท", ...(owner ? ["ปรับสิทธิ์"] : [])].map(label => <th key={label} className="whitespace-nowrap p-4">{label}</th>)}</tr></thead>
+      <tbody>{data.members.map(member => {
+        const categoryKey = (categories[member.memberCode] ?? "MEMBER") as keyof typeof memberListCategories;
+        return <tr key={member.memberCode} className="border-t">
         <td className="p-4"><Link className="font-bold text-blu-slate underline" href={`/admin/members/${encodeURIComponent(member.memberCode)}`}>{member.fullName}</Link></td>
-        <td className="p-4 font-mono">{member.memberCode}</td><td className="p-4">{member.phone}</td>
+        <td className="p-4 font-mono">{member.memberCode}</td>
+        <td className="p-4">{memberListCategories[categoryKey] ?? "สมาชิก"}</td>
+        <td className="p-4">{member.phone}</td>
         <td className="p-4">{currentStatus(member, data.asOf)}</td>
         <td className="p-4">{member.expireDate ? new Date(member.expireDate).toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok" }) : "—"}</td>
         <td className="p-4">{member.role}</td>
         {owner && <td className="p-4 whitespace-nowrap"><MemberRoleAction phone={member.phone} currentRole={member.role} callerRole={callerRole === "OWNER" ? data.callerRole : undefined} /></td>}
-      </tr>)}{!data.members.length && <tr><td colSpan={owner ? 7 : 6} className="p-8 text-center">ไม่พบสมาชิก</td></tr>}</tbody>
+      </tr>;
+      })}{!data.members.length && <tr><td colSpan={owner ? 8 : 7} className="p-8 text-center">ไม่พบสมาชิก</td></tr>}</tbody>
     </table></div>
     <nav aria-label="หน้ารายชื่อสมาชิก" className="flex gap-5">{data.page > 1 && <Link href={href(data.page - 1)}>← ก่อนหน้า</Link>}{data.page < data.pages && <Link href={href(data.page + 1)}>ถัดไป →</Link>}</nav>
     <p className="text-xs text-blu-steel">ข้อมูลจากฐานข้อมูลจริง · สถานะหมดอายุคำนวณจากวันหมดอายุปัจจุบัน ไม่ใช่สถิติย้อนหลัง</p>

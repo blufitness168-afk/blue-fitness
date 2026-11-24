@@ -6,11 +6,18 @@ import OnlineCancellationControls from "./OnlineCancellationControls";
 function date(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" }) : "—";
 }
+const categoryLabels: Record<string, string> = {
+  MEMBER: "สมาชิก",
+  TRAINER: "เทรนเนอร์",
+  STAFF: "พนักงาน",
+  OTHER: "อื่น ๆ",
+};
 function Table({ title, headings, rows, navigation }: { title: string; headings: string[]; rows: React.ReactNode[][]; navigation: React.ReactNode }) {
   return <section className="min-w-0 rounded-2xl border bg-white p-5"><h2 className="mb-3 font-bold">{title} (หน้าละ 100 รายการ)</h2><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr>{headings.map(h => <th key={h} className="whitespace-nowrap p-3">{h}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i} className="border-t">{row.map((cell, j) => <td key={j} className="whitespace-nowrap p-3">{cell}</td>)}</tr>)}{!rows.length && <tr><td colSpan={headings.length} className="p-6 text-center">ยังไม่มีประวัติ</td></tr>}</tbody></table></div>{navigation}</section>;
 }
-export default function MemberDetailClient({ data, callerRole, staffFreeEntitlement, onlineCancellationEnabled = false, memberActions }: {
+export default function MemberDetailClient({ data, callerRole, staffFreeEntitlement, onlineCancellationEnabled = false, memberActions, memberCategory, specialAccess }: {
   data: NonNullable<Awaited<ReturnType<typeof getAdminMember>>>; callerRole?: string; staffFreeEntitlement?: React.ReactNode; onlineCancellationEnabled?: boolean; memberActions?: React.ReactNode;
+  memberCategory?: string; specialAccess?: { active: boolean; dailySlot: string | null; expiresAt: string | null; note: string | null } | null;
 }) {
   const m = data.member;
   const owner = data.callerRole === "OWNER";
@@ -33,8 +40,11 @@ export default function MemberDetailClient({ data, callerRole, staffFreeEntitlem
     ["รหัสสมาชิก", m.memberCode], ["ชื่อ", m.fullName], ["ชื่อเล่น", m.nickname], ["โทรศัพท์", m.phone],
     ["เพศ", m.gender],
     ["บทบาท", <span key="role" className="inline-flex flex-wrap items-center gap-2"><span>{m.role}</span>{owner && <MemberRoleAction phone={m.phone} currentRole={m.role} callerRole={callerRole === "OWNER" ? data.callerRole : undefined} />}</span>],
+    ["ประเภทบุคคล", categoryLabels[memberCategory ?? "MEMBER"] ?? "สมาชิก"],
     [legacyMembership ? "สถานะสมาชิกเดิม" : "สถานะปัจจุบัน", currentStatus(m, data.asOf)],
-    ["วันสมัคร", date(m.createdAt)], [legacyMembership ? "วันหมดอายุเดิม" : "วันหมดอายุ", date(m.expireDate)], ["คะแนน", String(m.points)],
+    ["วันสมัคร", date(m.createdAt)], [legacyMembership ? "วันหมดอายุเดิม" : "วันหมดอายุ", date(m.expireDate)],
+    ["สิทธิ์เข้าใช้พิเศษ (OWNER)", specialAccess?.active ? `${specialAccess.dailySlot ?? "—"} · ${specialAccess.expiresAt ? date(specialAccess.expiresAt) : "ไม่กำหนดวันหมดอายุ"}${specialAccess.note ? ` (${specialAccess.note})` : ""}` : "—"],
+    ["คะแนน", String(m.points)],
     ["วัน/เดือนเกิด", m.birthDay && m.birthMonth ? `${m.birthDay}/${m.birthMonth}` : null],
     ["ผู้ติดต่อฉุกเฉิน", m.emergencyName], ["เบอร์ฉุกเฉิน", m.emergencyPhone], ["ความสัมพันธ์", m.emergencyRelation],
   ];
