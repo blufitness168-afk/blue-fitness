@@ -38,6 +38,7 @@ export interface CouponRow {
   lastRecordedUsedAt: string | null;
 }
 export interface MemberDetail extends MemberRow {
+  avatarUrl: string | null;
   birthDay: number | null; birthMonth: number | null;
   emergencyName: string | null; emergencyPhone: string | null; emergencyRelation: string | null;
 }
@@ -344,7 +345,7 @@ export async function getAdminMember(memberCode: string, input: MemberHistoryInp
   const r4Reads = staffPaidReadsEnabled();
   const expiry = r4Reads ? fragment`COALESCE(r4_staff_private.paid_active_expiry(id, now()), expire_date)` : fragment`expire_date`;
   const [member] = await sql`SELECT id, member_code AS "memberCode", full_name AS "fullName", nickname, phone, gender, role, status,
-    ${expiry} AS "expireDate", created_at AS "createdAt", points, birth_day AS "birthDay", birth_month AS "birthMonth",
+    ${expiry} AS "expireDate", created_at AS "createdAt", points, avatar_url AS "avatarUrl", birth_day AS "birthDay", birth_month AS "birthMonth",
     emergency_name AS "emergencyName", emergency_phone AS "emergencyPhone", emergency_relation AS "emergencyRelation"
     FROM members WHERE member_code = ${memberCode} LIMIT 1`;
   if (!member) return null;
@@ -411,7 +412,8 @@ export async function getAdminMember(memberCode: string, input: MemberHistoryInp
       ORDER BY c.created_at DESC, c.id DESC`,
   ]);
   // All payloads are allowlisted, independently of SQL projection and caller input.
-  const profile: MemberDetail = { ...memberProfile(member), birthDay: member.birthDay, birthMonth: member.birthMonth,
+  const profile: MemberDetail = { ...memberProfile(member), avatarUrl: typeof member.avatarUrl === "string" && member.avatarUrl ? member.avatarUrl : null,
+    birthDay: member.birthDay, birthMonth: member.birthMonth,
     emergencyName: member.emergencyName, emergencyPhone: member.emergencyPhone, emergencyRelation: member.emergencyRelation };
   return { member: profile, callerRole,
     orders: historyResult(orders.map(row => ({ id: row.id, packageName: row.packageName, status: row.status,

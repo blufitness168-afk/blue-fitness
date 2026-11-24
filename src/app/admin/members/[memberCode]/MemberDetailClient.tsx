@@ -40,7 +40,17 @@ export default function MemberDetailClient({ data, callerRole, staffFreeEntitlem
   ];
   return <div className="min-w-0 space-y-6">
     <Link href="/admin/members" className="text-blu-slate underline">← กลับรายชื่อสมาชิก</Link>
-    <h1 className="break-words text-2xl font-black">{m.fullName} <span className="text-base text-blu-steel">{m.memberCode}</span></h1>
+    <div className="flex flex-wrap items-center gap-4">
+      <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-blu-sky/50 bg-blu-ice">
+        {m.avatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={m.avatarUrl} alt={`รูปสมาชิก ${m.fullName}`} className="h-full w-full object-cover" />
+        ) : (
+          <span className="text-xs font-semibold text-blu-steel">ไม่มีรูป</span>
+        )}
+      </div>
+      <h1 className="break-words text-2xl font-black">{m.fullName} <span className="text-base text-blu-steel">{m.memberCode}</span></h1>
+    </div>
     <p className="rounded-xl bg-blu-ice p-4 text-sm">ตารางนี้แสดงข้อมูลจริง การแก้โปรไฟล์ใช้ฟอร์มด้านล่างเมื่อมีสิทธิ์ การต่ออายุและเปลี่ยนเบอร์/รหัสผ่านต้องใช้ขั้นตอนที่กำหนด ไม่สามารถกำหนด PAID วันหมดอายุ คะแนน หรือแจกคูปองจากฟอร์มโปรไฟล์ได้</p>
     {memberActions}
     <dl className="grid gap-4 rounded-2xl border bg-white p-5 sm:grid-cols-2 lg:grid-cols-3">{fields.map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-blu-steel">{label}</dt><dd className="mt-1 break-words font-semibold">{value || "—"}</dd></div>)}</dl>

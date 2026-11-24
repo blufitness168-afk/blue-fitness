@@ -33,8 +33,13 @@ function chartRange(data: ChartDatum[], series: ChartSeries[]) {
   const values = data.flatMap((item) => series.map((line) => item.values[line.key] ?? 0));
   const minimum = Math.min(0, ...values);
   const maximum = Math.max(1, ...values);
-  const padding = Math.max((maximum - minimum) * 0.08, 1);
-  return { minimum: minimum < 0 ? minimum - padding : 0, maximum: maximum + padding };
+  if (minimum < 0) {
+    const absMax = Math.max(Math.abs(minimum), Math.abs(maximum), 1);
+    const bound = absMax + Math.max(absMax * 0.08, 1);
+    return { minimum: -bound, maximum: bound };
+  }
+  const padding = Math.max(maximum * 0.08, 1);
+  return { minimum: 0, maximum: maximum + padding };
 }
 
 export default function AdminDashboardChart({

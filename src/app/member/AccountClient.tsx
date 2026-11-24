@@ -209,7 +209,7 @@ export default function MemberAccountPage({ identity, welcomeCoupons, staffFreeT
         <p className="text-xs">{isEn ? "Present this QR to staff for check-in. Not for coupons or merchandise." : "แสดงให้เจ้าหน้าที่สแกน ไม่ใช่ QR คูปองหรือรหัสรับสินค้า"}</p>
       </section>}
       {tab === "coupons" && <div className="space-y-5">
-        <WelcomeCoupons key={identity.id} coupons={welcomeCoupons} />
+        <WelcomeCoupons key={identity.id} coupons={welcomeCoupons} lang={lang} />
         {wallet && <section className={cardClass}>
           <h2 className="font-bold">{isEn ? "Other Coupons in Database" : "คูปองอื่นจากฐานข้อมูล (ล่าสุด 100 รายการ)"}</h2>
           <p className="text-xs">{isEn ? "Please contact staff to redeem" : "ติดต่อเจ้าหน้าที่เพื่อใช้สิทธิ์"}</p>

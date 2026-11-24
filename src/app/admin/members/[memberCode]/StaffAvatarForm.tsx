@@ -25,16 +25,16 @@ export function StaffAvatarForm({ memberCode, initial }: { memberCode: string; i
     } catch { setMessage("ยังยืนยันผลไม่ได้ รอ 90 วินาที แล้วส่งคำขอเดิมซ้ำหรือโหลดใหม่เพื่อตรวจสอบ"); }
     finally { setBusy(false); }
   }
-  return <section className="space-y-3 rounded-xl border border-white/10 p-4">
+  return <section className="space-y-3 rounded-2xl border border-blu-sky/50 bg-white p-5">
     <h3 className="font-semibold">เปลี่ยนรูปสมาชิกโดยเจ้าหน้าที่</h3>
     <p className="text-sm">JPG / PNG / WebP ไม่เกิน 5MB การกดบันทึกจะส่งรูปไป Cloudinary และอาจใช้โควตาบริการ</p>
     <p className="text-sm">เวอร์ชัน {initial.version} · แหล่งข้อมูล {initial.source === "STAFF_UPLOAD" ? "เจ้าหน้าที่อัปโหลด" : "ข้อมูลเดิม"}</p>
     <form onSubmit={submit} className="space-y-3">
       <fieldset disabled={busy || frozen} className="space-y-3">
-        <label className="block">รูปใหม่<input className="block" name="file" type="file" accept="image/jpeg,image/png,image/webp" required /></label>
-        <label className="block">เหตุผล<input className="block rounded bg-slate-800 p-2" name="reason" required maxLength={240} /></label>
+        <label className="block">รูปใหม่<input className="mt-1 block w-full text-sm text-blu-dark" name="file" type="file" accept="image/jpeg,image/png,image/webp" required /></label>
+        <label className="block">เหตุผล<input className="mt-1 block w-full max-w-md rounded-lg border border-blu-sky/60 bg-white p-2 text-sm text-blu-dark" name="reason" required maxLength={240} /></label>
       </fieldset>
-      <button type="submit" disabled={busy} className="rounded bg-blue-700 px-4 py-2 disabled:opacity-40">{busy ? "กำลังบันทึก…" : frozen ? "ส่งคำขอเดิมซ้ำ" : "อัปโหลดและบันทึก"}</button>
+      <button type="submit" disabled={busy} className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-40">{busy ? "กำลังบันทึก…" : frozen ? "ส่งคำขอเดิมซ้ำ" : "อัปโหลดและบันทึก"}</button>
       {frozen && <button type="button" disabled={busy} onClick={() => window.location.reload()} className="ml-3 underline">โหลดใหม่เพื่อตรวจสอบ</button>}
       <p role="status" aria-live="polite">{message}</p>
     </form>

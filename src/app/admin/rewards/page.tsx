@@ -161,14 +161,23 @@ export default function AdminRewardsPage() {
           <label>รายละเอียด<textarea className={input} maxLength={2000} value={draft.description} onChange={event => setDraft({ ...draft, description: event.target.value })} /></label>
           <label>เลือกรูปรางวัล (JPG, PNG, WebP ไม่เกิน 5MB)<input className={input} type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void uploadImage(file); }} /></label>
           <label>รูป HTTPS (ไม่บังคับ)<input className={input} type="url" maxLength={2000} value={draft.imageUrl} onChange={event => setDraft({ ...draft, imageUrl: event.target.value })} /></label>
-          {draft.imageUrl && <p className="text-sm">มีรูปรางวัลแล้ว · รูปจะผูกกับรางวัลเมื่อกดบันทึก</p>}
+          {draft.imageUrl && (
+            <div className="flex items-center gap-3 sm:col-span-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={draft.imageUrl} alt="ตัวอย่างรูปรางวัล" className="h-24 w-24 rounded-xl border border-blu-sky/50 bg-blu-ice object-cover" />
+              <p className="text-sm">มีรูปรางวัลแล้ว · รูปจะผูกกับรางวัลเมื่อกดบันทึก</p>
+            </div>
+          )}
           <label>แต้ม<input className={input} required type="number" min={1} max={1000000} step={1} value={draft.pointCost} onChange={event => setDraft({ ...draft, pointCost: Number(event.target.value) })} /></label>
           <label>สต็อกคงเหลือ<input className={input} required type="number" min={0} max={1000000} step={1} value={draft.stock} onChange={event => setDraft({ ...draft, stock: Number(event.target.value) })} /></label>
           <label><input type="checkbox" checked={draft.isActive} onChange={event => setDraft({ ...draft, isActive: event.target.checked })} /> เปิดให้แลก</label>
           <button className={button}>บันทึก</button><button className={button} type="button" onClick={() => setDraft(null)}>ยกเลิก</button>
         </fieldset>
       </form>}
-      {data?.rewards.map(reward => <article key={reward.id} className="flex items-center justify-between gap-3 border-t py-3"><div><strong>{reward.title}</strong><p>{reward.pointCost} แต้ม · เหลือ {reward.stock} · {reward.isActive ? "เปิด" : "ปิด"}</p></div><button className={button} disabled={disabled} onClick={() => { setExpected(reward); setDraft({ ...reward, description: reward.description ?? "", imageUrl: reward.imageUrl ?? "" }); }}>แก้ไข / เปิดปิด</button></article>)}
+      {data?.rewards.map(reward => <article key={reward.id} className="flex items-center justify-between gap-3 border-t py-3"><div className="flex items-center gap-3"><div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-blu-sky/50 bg-blu-ice">{reward.imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={reward.imageUrl} alt={reward.title} className="h-full w-full object-cover" />
+      ) : <span className="text-[10px] text-blu-steel">ไม่มีรูป</span>}</div><div><strong>{reward.title}</strong><p>{reward.pointCost} แต้ม · เหลือ {reward.stock} · {reward.isActive ? "เปิด" : "ปิด"}</p></div></div><button className={button} disabled={disabled} onClick={() => { setExpected(reward); setDraft({ ...reward, description: reward.description ?? "", imageUrl: reward.imageUrl ?? "" }); }}>แก้ไข / เปิดปิด</button></article>)}
     </section>
   </main>;
 }

@@ -100,6 +100,10 @@ export async function createOrder(request: Request) {
     if ((error as { code?: string } | null)?.code === "P6C01") return json({ error: "คูปองนี้หมดอายุ ถูกจองไว้ หรือใช้ไม่ได้แล้ว" }, 409);
     if ((error as { code?: string } | null)?.code === "P6C02") return json({ error: "ใช้คูปองกับแพ็กเกจนี้ไม่ได้ ยอดโอนหลังหักส่วนลดต้องมากกว่า 0 บาท" }, 409);
     if ((error as { message?: string }).message === "Stale catalog version") return json({ code: "PACKAGE_CATALOG_CHANGED", error: "แพ็กเกจมีการเปลี่ยนราคา/สิทธิ์แล้ว กรุณาปิดหน้าต่างและโหลดแพ็กเกจใหม่ก่อนยืนยัน" }, 409);
+    const msg = (error as { message?: string } | null)?.message ?? "";
+    if (/Promo unavailable|Promo not assigned|Minimum order|Promo quota|Promo expired/i.test(msg)) {
+      return json({ error: "ใช้โค้ดส่วนลดนี้ไม่ได้ (โค้ดอาจถูกปิด หมดอายุ ยังไม่ได้มอบหมายให้บัญชีนี้ หรือไม่ตรงเงื่อนไขยอดซื้อ/แพ็กเกจ)" }, 409);
+    }
     return json({ error: "สร้างคำสั่งซื้อไม่ได้ กรุณาโหลดรายการค้างก่อน (อาจมีรายการค้าง/โควตาเต็ม/ระบบยังไม่พร้อม)" }, 409);
   }
 }

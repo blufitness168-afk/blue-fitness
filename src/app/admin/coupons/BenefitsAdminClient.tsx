@@ -23,6 +23,7 @@ const checkoutKinds = ["DISCOUNT", "POINTS"] as const;
 const campaignKinds = ["FRIEND_PASS", "EXTRA_DAYS", "GIFT", "FREEBIE", "OTHER"] as const;
 const isCheckoutKind = (kind: string) => kind === "DISCOUNT" || kind === "POINTS";
 const baht = (satang: number) => `${(satang / 100).toLocaleString("th-TH", { maximumFractionDigits: 2 })} บาท`;
+const bahtToSatang = (raw: string) => Math.round(Number(raw) * 100);
 
 export default function BenefitsAdminClient({ kind }: { kind: "COUPON" | "PROMO" }) {
   const [data, setData] = useState<Data | null>(null);
@@ -33,6 +34,7 @@ export default function BenefitsAdminClient({ kind }: { kind: "COUPON" | "PROMO"
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const [couponKind, setCouponKind] = useState("FRIEND_PASS");
   const [discountUnit, setDiscountUnit] = useState<"SATANG" | "PERCENT">("SATANG");
+  const [promoDiscountType, setPromoDiscountType] = useState<"FIXED" | "PERCENT">("FIXED");
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<Pending | null>(null);
   const [grantPreview, setGrantPreview] = useState<GrantPreview | null>(null);
@@ -130,7 +132,7 @@ export default function BenefitsAdminClient({ kind }: { kind: "COUPON" | "PROMO"
   </section>;
   return <main className="p-6 space-y-6 max-w-6xl mx-auto">
     <h1 className="text-2xl font-bold">{kind === "COUPON" ? "จัดการคูปองจริง" : "จัดการโปรโมโค้ดจริง"}</h1>
-    <p className="text-sm">{kind === "COUPON" ? "ใช้ coupons จริง • welcome/FREE_ENTRY ใช้ผ่าน kiosk เท่านั้น • วันแถมต้องมีสมาชิก ACTIVE ที่ยังไม่หมดอายุ • friend pass บันทึกผู้เข้าใช้แยก ไม่เพิ่มสิทธิ์สมาชิกแบบชำระเงิน" : "โปรต้องมอบหมายให้สมาชิกก่อนใช้ได้หนึ่งครั้ง • FIXED ใช้หน่วยสตางค์, PERCENT ใช้ % • เชื่อมยอด order จริงและจองโควตาระหว่างรอตรวจสลิป ไม่ยืนยันการชำระจากหน้านี้"}</p>
+    <p className="text-sm">{kind === "COUPON" ? "ใช้ coupons จริง • welcome/FREE_ENTRY ใช้ผ่าน kiosk เท่านั้น • วันแถมต้องมีสมาชิก ACTIVE ที่ยังไม่หมดอายุ • friend pass บันทึกผู้เข้าใช้แยก ไม่เพิ่มสิทธิ์สมาชิกแบบชำระเงิน" : "โปรต้องมอบหมายให้สมาชิกก่อนใช้ได้หนึ่งครั้ง • FIXED ใช้หน่วยบาท (ระบบแปลงเป็นสตางค์อัตโนมัติ), PERCENT ใช้ % • เชื่อมยอด order จริงและจองโควตาระหว่างรอตรวจสลิป ไม่ยืนยันการชำระจากหน้านี้"}</p>
     {error && <p role="alert" className="text-red-500">{error}</p>}
     {notice && <p role="status">{notice}</p>}
     {pending && <div className="border rounded p-3">ยังเก็บ requestKey เดิมไว้ ป้องกันทำรายการซ้ำ <button className={button} disabled={busy} onClick={() => void send(pending)}>ลองคำขอเดิมอีกครั้ง</button></div>}
@@ -145,10 +147,24 @@ export default function BenefitsAdminClient({ kind }: { kind: "COUPON" | "PROMO"
         if (!get("expiresAt") || !Number.isFinite(expiry.getTime())) { setError("กรุณาระบุวันหมดอายุให้ถูกต้อง"); return; }
         const expiresAt = expiry.toISOString();
         const duration = get("activationDurationMinutes");
-        const maximum = get("maxSatang");
         const eligible = f.getAll("eligiblePackageIds").map(Number);
-        if (kind === "PROMO" && ((maximum !== "" && Number(maximum) < Number(get("minSatang"))) || eligible.length > 100)) {
-          setError("ยอดสูงสุดต้องไม่ต่ำกว่ายอดขั้นต่ำ และเลือกได้ไม่เกิน 100 แพ็กเกจ");
+        if (kind === "PROMO") {
+          const promoType = get("discountType") === "PERCENT" ? "PERCENT" : "FIXED";
+          const discountValue = promoType === "FIXED" ? bahtToSatang(get("discountValue")) : Number(get("discountValue"));
+          const minSatang = bahtToSatang(get("minBaht"));
+          const maxSatang = get("maxBaht") !== "" ? bahtToSatang(get("maxBaht")) : null;
+          const maxDiscountSatang = get("maxDiscountBaht") !== "" ? bahtToSatang(get("maxDiscountBaht")) : null;
+          if (!Number.isInteger(discountValue) || discountValue < 1 || discountValue > (promoType === "PERCENT" ? 100 : 100000000)
+            || !Number.isInteger(minSatang) || minSatang < 0 || minSatang > 100000000
+            || (maxDiscountSatang !== null && (!Number.isInteger(maxDiscountSatang) || maxDiscountSatang < 1 || maxDiscountSatang > 100000000))) {
+            setError("กรุณาระบุมูลค่าและยอดเงินเป็นจำนวนบาทที่ถูกต้อง (ทศนิยมไม่เกิน 2 ตำแหน่ง; % เป็นจำนวนเต็ม 1–100)");
+            return;
+          }
+          if ((maxSatang !== null && (!Number.isInteger(maxSatang) || maxSatang < minSatang || maxSatang > 100000000)) || eligible.length > 100) {
+            setError("ยอดสูงสุดต้องไม่ต่ำกว่ายอดขั้นต่ำ และเลือกได้ไม่เกิน 100 แพ็กเกจ");
+            return;
+          }
+          mutate("create", { kind, title: get("title"), code: get("code"), discountType: promoType, discountValue, minSatang, maxDiscountSatang, usageLimit: Number(get("usageLimit")), expiresAt, ...(get("promoDescription").trim() ? { promoDescription: get("promoDescription").trim() } : {}), ...(get("promoRecipientLimit") ? { promoRecipientLimit: Number(get("promoRecipientLimit")) } : {}), ...(maxSatang !== null ? { maxSatang } : {}), ...(eligible.length ? { eligiblePackageIds: eligible } : {}) });
           return;
         }
         if (kind === "COUPON" && data?.couponCampaignReady) {
@@ -172,7 +188,7 @@ export default function BenefitsAdminClient({ kind }: { kind: "COUPON" | "PROMO"
           }
           return;
         }
-        mutate("create", kind === "COUPON" ? { kind, title: get("title"), couponType: get("couponType"), quota: Number(get("quota")), bonusDays: Number(get("bonusDays")), expiresAt, activationDurationMinutes: duration === "" ? null : Number(duration) } : { kind, title: get("title"), code: get("code"), discountType: get("discountType"), discountValue: Number(get("discountValue")), minSatang: Number(get("minSatang")), maxDiscountSatang: get("maxDiscountSatang") ? Number(get("maxDiscountSatang")) : null, usageLimit: Number(get("usageLimit")), expiresAt, ...(get("promoDescription").trim() ? { promoDescription: get("promoDescription").trim() } : {}), ...(get("promoRecipientLimit") ? { promoRecipientLimit: Number(get("promoRecipientLimit")) } : {}), ...(maximum !== "" ? { maxSatang: Number(maximum) } : {}), ...(eligible.length ? { eligiblePackageIds: eligible } : {}) });
+        mutate("create", { kind, title: get("title"), couponType: get("couponType"), quota: Number(get("quota")), bonusDays: Number(get("bonusDays")), expiresAt, activationDurationMinutes: duration === "" ? null : Number(duration) });
       }}>
         <h2 className="font-bold md:col-span-2">สร้างนิยามใหม่ (แก้ย้อนหลังไม่ได้; ปิดแล้วสร้างใหม่)</h2>
         <label>ชื่อ<input className={field} name="title" required maxLength={120} /></label>
@@ -204,10 +220,10 @@ export default function BenefitsAdminClient({ kind }: { kind: "COUPON" | "PROMO"
                     {data && !data.couponActivationReady && <p role="status">ยังสร้างคูปองแบบเปิดใช้ไม่ได้: ฐานข้อมูลยังไม่รองรับ R6</p>}
         </> : <>
           <label>โค้ด<input className={field} name="code" pattern="[A-Za-z0-9_-]{3,40}" required /></label>
-          <label>ประเภท<select className={field} name="discountType"><option value="FIXED">สตางค์</option><option value="PERCENT">เปอร์เซ็นต์</option></select></label>
-          <label>มูลค่าส่วนลด<input className={field} name="discountValue" type="number" min={1} max={100000000} required /></label>
-          <label>ยอดขั้นต่ำ (สตางค์)<input className={field} name="minSatang" type="number" min={0} max={100000000} defaultValue={0} required /></label>
-          <label>ยอดซื้อสูงสุดก่อนลด (สตางค์, เว้นว่าง = ไม่จำกัด)<input className={field} name="maxSatang" type="number" min={0} max={100000000} step={1} /></label>
+          <label>ประเภท<select className={field} name="discountType" value={promoDiscountType} onChange={event => setPromoDiscountType(event.target.value === "PERCENT" ? "PERCENT" : "FIXED")}><option value="FIXED">บาท</option><option value="PERCENT">เปอร์เซ็นต์ (%)</option></select></label>
+          <label>{promoDiscountType === "FIXED" ? "มูลค่าส่วนลด (บาท)" : "มูลค่าส่วนลด (%)"}<input key={promoDiscountType} className={field} name="discountValue" type="number" min={promoDiscountType === "FIXED" ? 0.01 : 1} max={promoDiscountType === "FIXED" ? 1000000 : 100} step={promoDiscountType === "FIXED" ? "0.01" : 1} required /></label>
+          <label>ยอดขั้นต่ำ (บาท)<input className={field} name="minBaht" type="number" min={0} max={1000000} step="0.01" defaultValue={0} required /></label>
+          <label>ยอดซื้อสูงสุดก่อนลด (บาท, เว้นว่าง = ไม่จำกัด)<input className={field} name="maxBaht" type="number" min={0} max={1000000} step="0.01" /></label>
           <fieldset className="md:col-span-2" aria-describedby="promo-package-policy">
             <legend>แพ็กเกจที่ใช้โปรได้</legend>
             <p id="promo-package-policy" className="text-sm">ไม่เลือก = ใช้ได้ทุกแพ็กเกจที่เปิดขาย ยอดขั้นต่ำและสูงสุดรวมค่าขอบทั้งสองด้าน</p>
@@ -215,7 +231,7 @@ export default function BenefitsAdminClient({ kind }: { kind: "COUPON" | "PROMO"
             {packages?.length === 0 && <p>ไม่มีแพ็กเกจที่เปิดขาย</p>}
             {packages?.map(p => <label className="block" key={p.id}><input type="checkbox" name="eligiblePackageIds" value={p.id} /> #{p.id} {p.name}</label>)}
           </fieldset>
-          <label>ลดสูงสุด (สตางค์, เว้นว่างได้)<input className={field} name="maxDiscountSatang" type="number" min={1} max={100000000} /></label>
+          <label>ลดสูงสุด (บาท, เว้นว่างได้)<input className={field} name="maxDiscountBaht" type="number" min={0.01} max={1000000} step="0.01" /></label>
           <label>รายละเอียดโปรโมโค้ด<textarea className={field} name="promoDescription" maxLength={500} /></label>
                     <label>โควตาจำนวนผู้รับตลอดอายุโปร (เว้นว่าง = ไม่จำกัด, ยกเลิกแล้วยังนับ)<input className={field} name="promoRecipientLimit" type="number" min={1} max={1000000} step={1} /></label>
                     <label>โควตาการใช้รวม (รวมรายการจอง)<input className={field} name="usageLimit" type="number" min={1} max={1000000} defaultValue={1} required /></label>
@@ -224,11 +240,11 @@ export default function BenefitsAdminClient({ kind }: { kind: "COUPON" | "PROMO"
       </form>
       <section className="space-y-2"><h2 className="font-bold">นิยาม ({definitions.length})</h2>
         {definitions.map(d => <div className="border rounded p-3 flex flex-wrap gap-3 items-center" key={d.id}>
-          <span>#{d.id} {d.title} · {d.campaign_code || d.code || d.coupon_type} · {d.active ? "เปิด" : "ปิด"} · หมดอายุ {date(d.expires_at, d.kind === "COUPON" ? bangkok : undefined)} {d.requires_activation && `· ต้องเปิดใช้ · ${d.activation_duration_minutes == null ? "ไม่มีเวลาจำกัดเพิ่ม" : `${d.activation_duration_minutes || 10} นาทีหลังเปิดใช้`}`} {d.kind === "PROMO" && `· ${d.discount_type} ${d.discount_value} / โควตา ${d.usage_limit}`}</span>
+          <span>#{d.id} {d.title} · {d.campaign_code || d.code || d.coupon_type} · {d.active ? "เปิด" : "ปิด"} · หมดอายุ {date(d.expires_at, d.kind === "COUPON" ? bangkok : undefined)} {d.requires_activation && `· ต้องเปิดใช้ · ${d.activation_duration_minutes == null ? "ไม่มีเวลาจำกัดเพิ่ม" : `${d.activation_duration_minutes || 10} นาทีหลังเปิดใช้`}`} {d.kind === "PROMO" && `· ${d.discount_type === "FIXED" ? `ลด ${baht(d.discount_value)}` : `ลด ${d.discount_value}%`} / โควตา ${d.usage_limit}`}</span>
           {d.campaign_code && <span>{d.campaign_kind && couponKinds[d.campaign_kind]} · {d.quota} ครั้ง/ใบ · {d.campaign_per_member} ใบ/คน · ออกแล้ว {d.campaign_issued}/{d.campaign_total} ใบ · {d.campaign_description}</span>}
           {d.checkout_unit && d.checkout_value != null && <span>ต่อครั้ง: {d.checkout_unit === "POINTS" ? `+${d.checkout_value} แต้ม` : d.checkout_unit === "PERCENT" ? `ลด ${d.checkout_value}%` : `ลด ${baht(d.checkout_value)}`} · เพดาน {d.checkout_cap == null ? "ไม่จำกัด" : d.checkout_unit === "POINTS" ? `${d.checkout_cap} แต้ม` : baht(d.checkout_cap)}</span>}
           {d.kind === "PROMO" && <span>เพดานส่วนลด {d.max_discount_satang == null ? "ไม่จำกัด" : baht(d.max_discount_satang)} · โควตาผู้รับ {d.promo_recipient_limit ?? "ไม่จำกัด"}{d.promo_description && ` · ${d.promo_description}`}</span>}
-          {d.kind === "PROMO" && <span>ยอดก่อนลด {d.min_satang ?? 0}–{d.max_satang ?? "ไม่จำกัด"} สตางค์ · {d.eligible_package_ids?.map(id => {
+          {d.kind === "PROMO" && <span>ยอดก่อนลด {baht(d.min_satang ?? 0)}–{d.max_satang == null ? "ไม่จำกัด" : baht(d.max_satang)} · {d.eligible_package_ids?.map(id => {
             const pkg = packages?.find(p => p.id === id);
             return pkg ? `#${id} ${pkg.name}` : `#${id}`;
           }).join(", ") ?? "ทุกแพ็กเกจ"}</span>}
