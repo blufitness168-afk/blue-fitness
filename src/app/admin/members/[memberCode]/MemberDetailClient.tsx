@@ -71,7 +71,7 @@ export default function MemberDetailClient({ data, callerRole, staffFreeEntitlem
         ...(owner ? [typeof o.amountSatang === "number" && Number.isFinite(o.amountSatang) ? `${(o.amountSatang / 100).toLocaleString("th-TH", { minimumFractionDigits: 2 })} ฿` : "—"] : []),
         // Online PAID history does not carry proof of cancellation eligibility.
         o.status === "PAID" && o.cancelledAt ? `PAID · ยกเลิกแล้ว (${date(o.cancelledAt)})`
-          : o.status === "PAID" && showOnlineCancellationReview && onlineCancellationEnabled && m.role === "MEMBER" ? <>
+          : o.status === "PAID" && showOnlineCancellationReview && onlineCancellationEnabled && ["MEMBER", "OWNER"].includes(m.role) ? <>
           {o.status}<OnlineCancellationControls key={o.id} orderId={o.id} memberCode={m.memberCode} />
         </> : o.status === "PAID" && showOnlineCancellationReview ? <>
           {o.status}

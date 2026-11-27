@@ -24,10 +24,10 @@ vm.runInNewContext(outputText, { exports, URLSearchParams, require: name => {
 } });
 
 const notice = /ต้องตรวจสอบก่อนยกเลิก/;
-function render(callerRole, dataRole, orders, onlineCancellationEnabled = false, histories = {}) {
+function render(callerRole, dataRole, orders, onlineCancellationEnabled = false, histories = {}, targetRole = 'MEMBER') {
   const data = {
     callerRole: dataRole,
-    member: { memberCode: 'BLU-7', role: 'MEMBER', status: 'ACTIVE', points: 0 },
+    member: { memberCode: 'BLU-7', role: targetRole, status: 'ACTIVE', points: 0 },
     orders: { page: 1, rows: orders.map(order => {
       const status = typeof order === 'string' ? order : order.status;
       return {
@@ -74,8 +74,10 @@ test('canceled staff transfer stays in history with its original start and owner
   }
 });
 
-test('online cancellation controls require an enabled OWNER view and are hidden for already canceled orders', () => {
+test('online cancellation controls allow OWNER to manage an OWNER account or another member, only when enabled', () => {
   assert.match(render('OWNER', 'OWNER', ['PAID'], true), /ตรวจเงื่อนไขยกเลิก/);
+  assert.match(render('OWNER', 'OWNER', ['PAID'], true, {}, 'OWNER'), /ตรวจเงื่อนไขยกเลิก/);
+  assert.doesNotMatch(render('ADMIN', 'ADMIN', ['PAID'], true, {}, 'OWNER'), /ตรวจเงื่อนไขยกเลิก/);
   assert.doesNotMatch(render('ADMIN', 'ADMIN', ['PAID'], true), /ตรวจเงื่อนไขยกเลิก/);
   const canceled = render('OWNER', 'OWNER', [{ status: 'PAID', cancelledAt: '2026-11-22T09:00:00Z' }], true);
   assert.match(canceled, /PAID · ยกเลิกแล้ว/);

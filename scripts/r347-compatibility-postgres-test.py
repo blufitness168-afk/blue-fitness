@@ -69,8 +69,8 @@ def exercise(query):
     off_slot = scalar("SELECT CASE WHEN (now() AT TIME ZONE 'Asia/Bangkok')::time < time '12:00' THEN '17:00-17:01' ELSE '05:00-05:01' END;")
     for package, slot in ((1, off_slot), (2, off_slot), (6, '00:00-24:00')):
         query(f"SELECT package_catalog_action('token-2','update',gen_random_uuid(),jsonb_build_object('id',{package},'expectedVersion',1,'timeSlot','{slot}'));")
-    query("SELECT test_settle(3,6),test_settle(4),test_settle(5),test_settle(6,6),test_settle(7,6),test_settle(8,6),test_settle(9,2);"
-          "INSERT INTO member_cards VALUES(3,'CARD-003',1),(4,'CARD-004',1);")
+    query("SELECT test_settle(3,6),test_settle(4),test_settle(5),test_settle(6,6),test_settle(7,6),test_settle(8,6),test_settle(9,2);")
+    query('INSERT INTO member_cards VALUES(3,\'CARD-003\',1),(4,\'CARD-004\',1);')
     old_key = uuid4()
     old_receipt = read(f"SELECT member_card_admit('kiosk','desk','{old_key}','CARD-003',NULL);")
     assert old_receipt['ok'] and 'visitId' not in old_receipt, old_receipt
@@ -96,8 +96,9 @@ def exercise(query):
           '20261128_R6_promo_scope', '20261129_R6_staff_grant_targeting',
           '20261201_R6_coupon_campaigns', '20261203_R6_checkout_coupons',
           '20261204_R5_finance_lifecycle', '20261205_R36_current_term_targeting',
-                    '20261206_R6_promo_definition_history')
+                    '20261206_R6_promo_definition_history', '20261207_R4_owner_package_cancellation')
     assert scalar('SELECT test_combined_money();') == before
+    assert scalar("SELECT strpos(pg_get_functiondef('r4_online_private.cancel_online_order(text,uuid,uuid,integer,text,boolean)'::regprocedure), $q$m.role NOT IN ('MEMBER','OWNER')$q$)>0;") == 't'
     assert scalar('SELECT jsonb_agg(c ORDER BY id) FROM checkins c;') == old_rows
     assert scalar("""SELECT has_function_privilege('combined_legacy_acl','kiosk_checkin(text,text,uuid,text)','EXECUTE')
       AND NOT has_function_privilege('combined_untrusted','r7_kiosk_scan(text,text,uuid,text,text)','EXECUTE')
@@ -243,7 +244,19 @@ def exercise(query):
     row = next(r for r in report['records'] if r['id'] == f'package:{renewal_id}')
     assert row['category'] == 'ต่อสมาชิก', row
     deny("SELECT real_finance_action('token-1','read',NULL,'{}');", '42501')
-    print('PASS: combined R5/R6 install, renewal boundary and finance classification, targeted checkout coupon replay', flush=True)
+    query("""DO $owner_fixture$ DECLARE mid integer; BEGIN
+      INSERT INTO members(member_code,full_name,status,role,points) VALUES('BLU-18','Synthetic owner','ACTIVE','MEMBER',0) RETURNING id INTO mid;
+      INSERT INTO auth_sessions(member_id,token_hash,expires_at) VALUES(mid,'token-'||mid,now()+interval '1 day');
+      PERFORM test_settle(mid,6);
+      UPDATE members SET role='OWNER' WHERE id=mid;
+    END $owner_fixture$;""")
+    own = read("SELECT r4_online_private.preview_online_cancellation('token-2',o.id) FROM package_payment_orders o JOIN members m ON m.id=o.member_id WHERE m.member_code='BLU-18' AND o.status='PAID';")
+    if own['eligible']:
+        own_cancel = read(f"SELECT r4_online_private.cancel_online_order('token-2','{own['orderId']}','{uuid4()}',{own['amountSatang']},'Synthetic owner self cancellation',true);")
+        assert own_cancel['status'] == 'CANCELLED' and own_cancel['orderId'] == own['orderId']
+    else:
+        raise AssertionError(f'Expected eligible OWNER-owned order in isolated fixture: {own}')
+    print('PASS: OWNER account can cancel its own evidenced online package; other MEMBER flow retains original guards', flush=True)
 
 
 if __name__ == '__main__':
